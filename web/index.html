@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>台股資金攻城戰</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@900&display=swap"
+    />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <svg class="crest" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M5 29V12h3V8h3v4h3V8h4v4h3V8h3v4h3v17H19v-7a3 3 0 0 0-6 0v7Z" />
+            <path class="crest-flag" d="M16 1v7M16 1l7 2.5L16 6" />
+          </svg>
+          <div class="brand-text">
+            <h1>台股資金攻城戰</h1>
+            <p class="eyebrow">L.P.S.D · The Demon's Eye</p>
+          </div>
+          <span class="chip-mock" title="目前使用模擬行情，數字不代表實際市場">模擬行情</span>
+        </div>
+        <dl class="ticker" id="ticker"></dl>
+        <div class="controls">
+          <div class="seg" role="group" aria-label="播放速度">
+            <button type="button" id="speed-1" data-speed="1" aria-pressed="false">1×</button>
+            <button type="button" id="speed-10" data-speed="10" aria-pressed="false">10×</button>
+            <button type="button" id="speed-60" data-speed="60" aria-pressed="true">60×</button>
+          </div>
+          <button type="button" class="btn" id="btn-play">暫停</button>
+          <button type="button" class="btn" id="btn-restart">重播</button>
+          <button type="button" class="btn" id="btn-convention" title="切換漲跌配色">紅漲綠跌</button>
+        </div>
+      </header>
+
+      <nav class="sectors" id="sectors" aria-label="產業領地"></nav>
+
+      <main class="field">
+        <div class="field-head">
+          <h2 class="panel-title">市場戰場</h2>
+          <p class="field-hint">面積 = 市值　顏色 = 漲跌　白色城池 = 待爭奪的資金據點</p>
+          <button type="button" class="btn btn-small" id="btn-reset-zoom">重設視角</button>
+        </div>
+        <div class="stage" id="stage"></div>
+      </main>
+
+      <aside class="detail" id="detail" aria-live="polite"></aside>
+
+      <section class="dock" id="dock" aria-label="戰況統計"></section>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
