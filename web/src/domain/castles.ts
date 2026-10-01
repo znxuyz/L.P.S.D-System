@@ -4,7 +4,7 @@ import type { MarketMetrics } from './metrics';
 /**
  * 中立城池（方案①：相鄰產業之間的相對資金強弱）
  *
- * 城池位在幾個產業領地的交界處，由這些相鄰產業爭奪。
+ * 城池在中央戰場，由面向它的外圈產業爭奪；正中央的核心城池開放所有產業進攻。
  *
  *   攻城壓力 p = max(產業資金流, 0)
  *   守城兵力 N = 今日總成交額 × 1% × 城池規模係數
@@ -35,7 +35,10 @@ export interface ContestantState {
   industryId: IndustryId;
   name: string;
   short: string;
-  /** 在這座城池的固定陣營序號（0、1、2），決定陣營色。 */
+  /**
+   * 陣營色序號。三方以內的城池依產業順序固定為 0、1、2；
+   * 核心城池開放所有產業進攻，依攻城壓力取前三名，其餘為 -1（其他）。
+   */
   slot: number;
   flow: number;
   pressure: number;
@@ -83,6 +86,12 @@ export function evaluateCastle(site: CastleSite, metrics: MarketMetrics): Castle
       retreating: flow < 0,
     };
   });
+
+  if (contestants.length > 3) {
+    const rank = [...contestants].sort((a, b) => b.pressure - a.pressure);
+    for (const c of contestants) c.slot = -1;
+    rank.slice(0, 3).forEach((c, i) => (c.slot = c.pressure > 0 ? i : -1));
+  }
 
   const siegeFunds = contestants.reduce((sum, c) => sum + c.pressure, 0);
   const denominator = siegeFunds + defence;

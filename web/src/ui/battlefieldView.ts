@@ -4,7 +4,7 @@ import type { CastleState } from '../domain/castles';
 import type { MarketMetrics } from '../domain/metrics';
 import type { BattlefieldLayout, StockCell, Territory } from '../layout/battlefield';
 import { area, distance, lerp, pathData, type Point } from '../layout/geometry';
-import { CONTESTANT_COLORS, type Palette } from './colors';
+import { contestantColor, type Palette } from './colors';
 import { escapeHtml, pct, price, signedYi } from './format';
 
 export type SelectionRef = { kind: 'industry' | 'stock' | 'castle'; id: string } | null;
@@ -143,23 +143,28 @@ export class BattlefieldView {
     this.transform = zoomIdentity;
     select(this.stage).call(this.zoomBehavior.transform, zoomIdentity);
 
-    this.buildBase(layout.territories);
+    this.buildBase(layout);
     this.buildTop(layout);
     this.buildLinks(layout);
     if (this.metrics && this.pal) this.update(this.metrics, this.castles, this.pal);
     this.applySelection();
   }
 
-  private buildBase(territories: Territory[]): void {
+  private buildBase(layout: BattlefieldLayout): void {
+    const { territories, gutter } = layout;
     this.baseG.selectAll('*').remove();
+    const defs = this.baseG.append('defs');
+    territories.forEach((t) => {
+      defs.append('clipPath').attr('id', `clip-${t.industryId}`).append('path').attr('d', pathData(t.outer));
+    });
+    this.baseG.append('path').attr('class', 'field').attr('d', pathData(layout.field));
     const groups = this.baseG.selectAll<SVGGElement, Territory>('g.territory')
       .data(territories)
       .join('g')
       .attr('class', 'territory')
       .attr('data-id', (t) => t.industryId);
 
-    groups.append('path').attr('class', 'glow').attr('d', (t) => pathData(t.inner));
-    groups.append('path').attr('class', 'ground').attr('d', (t) => pathData(t.inner))
+    groups.append('path').attr('class', 'ground').attr('d', (t) => pathData(t.outer))
       .on('click', (_e, t) => this.onSelect({ kind: 'industry', id: t.industryId }));
     groups.append('g').attr('class', 'cells')
       .selectAll<SVGPathElement, StockCell>('path')
@@ -171,7 +176,12 @@ export class BattlefieldView {
       .on('click', (_e, c) => this.onSelect({ kind: 'stock', id: c.code }))
       .on('mousemove', (e: MouseEvent, c) => this.showTooltip(e, c.code))
       .on('mouseleave', () => (this.tooltip.hidden = true));
-    groups.append('path').attr('class', 'wall').attr('d', (t) => pathData(t.inner));
+    // 護城河：沿領地外框畫一圈戰場底色，讓領地之間留出間隔
+    groups.append('path').attr('class', 'moat').attr('d', (t) => pathData(t.outer)).attr('stroke-width', gutter * 2);
+    // 資金光暈只畫在領地內側
+    groups.append('path').attr('class', 'glow').attr('d', (t) => pathData(t.outer))
+      .attr('clip-path', (t) => `url(#clip-${t.industryId})`);
+    groups.append('path').attr('class', 'wall').attr('d', (t) => pathData(t.outer));
   }
 
   private buildTop(layout: BattlefieldLayout): void {
@@ -193,12 +203,12 @@ export class BattlefieldView {
       .data(this.labels)
       .join('text')
       .attr('data-code', (d) => d.cell.code)
-      .attr('x', (d) => d.cell.centroid[0])
-      .attr('y', (d) => d.cell.centroid[1])
+      .attr('x', (d) => d.cell.labelAt[0])
+      .attr('y', (d) => d.cell.labelAt[1])
       .attr('font-size', (d) => d.font);
-    texts.append('tspan').attr('class', 'nm').attr('x', (d) => d.cell.centroid[0]).attr('dy', '-0.1em')
+    texts.append('tspan').attr('class', 'nm').attr('x', (d) => d.cell.labelAt[0]).attr('dy', '-0.1em')
       .text((d) => this.names.get(d.cell.code) ?? d.cell.code);
-    texts.append('tspan').attr('class', 'pc').attr('x', (d) => d.cell.centroid[0]).attr('dy', '1.15em');
+    texts.append('tspan').attr('class', 'pc').attr('x', (d) => d.cell.labelAt[0]).attr('dy', '1.15em');
 
     // 攻擊路線（選取時才顯示）
     this.topG.append('g').attr('class', 'routes');
@@ -238,7 +248,7 @@ export class BattlefieldView {
     // 產業標籤
     this.topG.append('g').attr('class', 'pills')
       .selectAll<SVGGElement, Territory>('g.pill')
-      .data(layout.territories.filter((t) => t.inner.length >= 3))
+      .data(layout.territories.filter((t) => t.outer.length >= 3))
       .join('g')
       .attr('class', 'pill')
       .attr('data-id', (t) => t.industryId)
@@ -254,7 +264,7 @@ export class BattlefieldView {
       })
       .call((g) => {
         g.append('rect').attr('rx', 3);
-        g.append('text').attr('dy', '0.35em').attr('font-size', (t) => Math.max(10, Math.min(14, Math.sqrt(area(t.inner)) * 0.05)));
+        g.append('text').attr('dy', '0.35em').attr('font-size', (t) => Math.max(10, Math.min(14, Math.sqrt(area(t.outer)) * 0.05)));
       });
 
     this.updateLabelVisibility();
@@ -268,7 +278,7 @@ export class BattlefieldView {
       castle.contestants.forEach((id, i) => {
         const t = byId.get(id);
         if (!t) return;
-        const start = lerp(t.centroid, p, 0.45);
+        const start = t.gate;
         const len = distance(start, p);
         if (len < 1) return;
         const dir: Point = [(p[0] - start[0]) / len, (p[1] - start[1]) / len];
@@ -304,7 +314,7 @@ export class BattlefieldView {
     this.baseG.selectAll<SVGPathElement, Territory>('path.glow')
       .attr('stroke', (t) => ((metrics.industryById.get(t.industryId)?.flow ?? 0) >= 0 ? pal.up.bright : pal.down.bright))
       .attr('stroke-opacity', (t) => 0.12 + 0.6 * Math.abs(metrics.industryById.get(t.industryId)?.flow ?? 0) / metrics.maxAbsFlow)
-      .attr('stroke-width', (t) => 3 + 9 * Math.min(1, Math.abs(metrics.industryById.get(t.industryId)?.flow ?? 0) / 200));
+      .attr('stroke-width', (t) => 6 + 18 * Math.min(1, Math.abs(metrics.industryById.get(t.industryId)?.flow ?? 0) / 200));
 
     this.layoutPills(metrics);
 
@@ -326,7 +336,7 @@ export class BattlefieldView {
       for (const c of state.contestants) {
         if (c.occupancy <= 0.001) continue;
         const end = a + c.occupancy * Math.PI * 2;
-        segments.push({ start: a, end, color: CONTESTANT_COLORS[c.slot] });
+        segments.push({ start: a, end, color: contestantColor(c.slot) });
         a = end;
       }
       segments.push({ start: a, end: Math.PI * 2, color: PARCHMENT });
@@ -338,7 +348,7 @@ export class BattlefieldView {
         .attr('fill', (d) => d.color);
 
       const leader = state.leader;
-      const leaderColor = leader ? CONTESTANT_COLORS[leader.slot] : PARCHMENT_EDGE;
+      const leaderColor = leader ? contestantColor(leader.slot) : PARCHMENT_EDGE;
       const hold = leader ? leader.occupancy : 0;
       g.select('path.keep')
         .attr('fill', interpolateLab(PARCHMENT, leaderColor)(state.status === 'neutral' ? 0 : hold * 0.55))
@@ -372,7 +382,7 @@ export class BattlefieldView {
       placed.some((p) => r.x0 < p.x1 && r.x1 > p.x0 && r.y0 < p.y1 && r.y1 > p.y0);
     const pills = this.topG.selectAll<SVGGElement, Territory>('g.pill').nodes()
       .map((node) => ({ node, t: select<SVGGElement, Territory>(node).datum() }))
-      .sort((a, b) => area(b.t.inner) - area(a.t.inner));
+      .sort((a, b) => area(b.t.outer) - area(a.t.outer));
 
     for (const { node, t } of pills) {
       const ind = metrics.industryById.get(t.industryId);
@@ -385,7 +395,7 @@ export class BattlefieldView {
         `<tspan class="pill-flow ${ind.flow >= 0 ? 'up' : 'down'}" dx="0.4em">${ind.flow >= 0 ? '▲' : '▼'}${signedYi(ind.flow, 0).replace(' ', '')}</tspan>`;
       const compact = `<tspan class="pill-name">${escapeHtml(ind.name)}</tspan><tspan class="pill-flow ${ind.flow >= 0 ? 'up' : 'down'}" dx="0.3em">${ind.flow >= 0 ? '▲' : '▼'}</tspan>`;
 
-      const ys = t.inner.map((p) => p[1]);
+      const ys = t.outer.map((p) => p[1]);
       const yMax = Math.max(...ys);
       let best: { x: number; y: number; w: number; html: string } | undefined;
       for (const html of [full, compact]) {

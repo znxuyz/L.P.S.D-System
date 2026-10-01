@@ -3,7 +3,7 @@ import { SESSION_MINUTES } from '../data/twse';
 import { TIER_LABEL, defenceOf, statusText, type CastleState } from '../domain/castles';
 import type { IndustryMetrics, MarketMetrics, StockMetrics } from '../domain/metrics';
 import type { SelectionRef } from './battlefieldView';
-import { CONTESTANT_COLORS, type Palette } from './colors';
+import { CONTESTANT_COLORS, OTHER_CONTESTANT, contestantColor, type Palette } from './colors';
 import { clock, direction, escapeHtml as esc, hm, num, pct, price, sharePct, signed, signedYi, yi } from './format';
 
 export interface PanelContext {
@@ -78,7 +78,7 @@ function renderOverview(ctx: PanelContext): string {
   const gradient = [-3, -2, -1, 0, 1, 2, 3].map((v) => pal.heat(v)).join(',');
   return `
     <h2 class="panel-title">戰況總覽</h2>
-    <p class="d-lead">點選產業、股票或城池，查看資料與攻防狀態。滾輪或雙指可以縮放地圖。</p>
+    <p class="d-lead">各產業圍在外圈，資金流入的產業往中央的城池進攻。點選產業、股票或城池查看攻防狀態，滾輪或雙指可以縮放地圖。</p>
     <dl class="d-grid">
       ${kv('最強攻勢', `${esc(byFlow[0].name)} ${signedYi(byFlow[0].flow)}`, 'up-flow')}
       ${kv('最大撤退', `${esc(byFlow[byFlow.length - 1].name)} ${signedYi(byFlow[byFlow.length - 1].flow)}`, 'down-flow')}
@@ -93,7 +93,7 @@ function renderOverview(ctx: PanelContext): string {
       <div class="legend-scale num"><span>−3%</span><span>0</span><span>+3%</span></div>
       <div class="legend-row"><i class="swatch" style="background:${pal.up.bright}"></i>資金流入：向城池推進的兵力流</div>
       <div class="legend-row"><i class="swatch" style="background:${pal.down.bright}"></i>資金流出：撤回領地的兵力流</div>
-      <div class="legend-row">${CONTESTANT_COLORS.map((c) => `<i class="swatch" style="background:${c}"></i>`).join('')}城池陣營色（依相鄰產業排序）</div>
+      <div class="legend-row">${CONTESTANT_COLORS.map((c) => `<i class="swatch" style="background:${c}"></i>`).join('')}城池陣營色（核心城池依攻城資金前三名）</div>
       <div class="legend-row">方塊面積 = 市值　方塊顏色 = 漲跌幅</div>
     </div>
     <h3 class="d-sub">計算方式</h3>
@@ -156,21 +156,40 @@ function renderStock(s: StockMetrics, ctx: PanelContext): string {
     <div class="chips">${ind ? `<button class="chip-btn" data-industry="${ind.id}">${esc(ind.name)} · ${pct(ind.changePct)}</button>` : ''}</div>`;
 }
 
+function siegeRow(name: string, occupancy: number, color: string, foot: string, industryId?: string, retreating = false): string {
+  const occ = Math.round(occupancy * 1000) / 10;
+  const label = industryId ? `<button class="link-btn" data-industry="${industryId}">${esc(name)}</button>` : esc(name);
+  return `<div class="siege-row">
+    <div class="siege-head"><span><i class="swatch" style="background:${color}"></i>${label}${retreating ? '<em class="tag down">撤退</em>' : ''}</span>
+      <span class="num">${num(occ, 1)}%</span></div>
+    <div class="siege-bar"><i style="width:${occ}%;background:${color}"></i></div>
+    ${foot ? `<div class="siege-foot num">${foot}</div>` : ''}
+  </div>`;
+}
+
 function renderCastle(c: CastleState, ctx: PanelContext): string {
   const { metrics: m } = ctx;
   const defence = defenceOf(c.site, m.totalTurnover);
-  const bars = c.contestants
-    .map((x) => {
-      const occ = Math.round(x.occupancy * 1000) / 10;
-      return `<div class="siege-row">
-        <div class="siege-head"><span><i class="swatch" style="background:${CONTESTANT_COLORS[x.slot]}"></i>
-          <button class="link-btn" data-industry="${x.industryId}">${esc(x.name)}</button>${x.retreating ? '<em class="tag down">撤退</em>' : ''}</span>
-          <span class="num">${num(occ, 1)}%</span></div>
-        <div class="siege-bar"><i style="width:${occ}%;background:${CONTESTANT_COLORS[x.slot]}"></i></div>
-        <div class="siege-foot num ${dirCls(x.flow)}">資金流 ${signedYi(x.flow)}</div>
-      </div>`;
-    })
-    .join('');
+  const flowFoot = (flow: number) => `<span class="${dirCls(flow)}">資金流 ${signedYi(flow)}</span>`;
+  let bars: string;
+  let note: string;
+  if (c.contestants.length > 3) {
+    // 核心城池：列出前五名攻城產業，其餘合併
+    const attackers = [...c.contestants].filter((x) => x.pressure > 0).sort((a, b) => b.pressure - a.pressure);
+    const shown = attackers.slice(0, 5);
+    const rest = attackers.slice(5);
+    const retreating = c.contestants.filter((x) => x.retreating).length;
+    bars = shown.map((x) => siegeRow(x.name, x.occupancy, contestantColor(x.slot), flowFoot(x.flow), x.industryId)).join('');
+    if (rest.length) {
+      bars += siegeRow(`其他 ${rest.length} 個產業`, rest.reduce((s, x) => s + x.occupancy, 0), OTHER_CONTESTANT, '');
+    }
+    note = `市場的核心城池，所有產業都可以進攻。目前 ${attackers.length} 個產業進攻、${retreating} 個產業撤退。`;
+  } else {
+    bars = c.contestants
+      .map((x) => siegeRow(x.name, x.occupancy, contestantColor(x.slot), flowFoot(x.flow), x.industryId, x.retreating))
+      .join('');
+    note = `這座城池面向 ${c.contestants.map((x) => esc(x.name)).join('、')}。資金流入的產業從外圍往中央推進，流入越多，推進越深、占領度越高。`;
+  }
   return `
     <p class="eyebrow">${TIER_LABEL[c.site.tier]}</p>
     <h2 class="d-title">【資金城池 ${c.site.label}】</h2>
@@ -184,7 +203,7 @@ function renderCastle(c: CastleState, ctx: PanelContext): string {
       ${kv('守城兵力', yi(defence))}
       ${kv('最後更新', clock(m.time))}
     </dl>
-    <p class="muted small">這座城池位在 ${c.contestants.map((x) => esc(x.name)).join('、')} 的交界。資金流入的產業向城池推進，流入越多，推進越深、占領度越高。</p>`;
+    <p class="muted small">${note}</p>`;
 }
 
 export function renderDetail(el: HTMLElement, ctx: PanelContext): void {
@@ -287,7 +306,7 @@ function renderExtremes(m: MarketMetrics): string {
 function castleRow(c: CastleState, value: string): string {
   const segs = c.contestants
     .filter((x) => x.occupancy > 0)
-    .map((x) => `<i style="width:${x.occupancy * 100}%;background:${CONTESTANT_COLORS[x.slot]}"></i>`)
+    .map((x) => `<i style="width:${x.occupancy * 100}%;background:${contestantColor(x.slot)}"></i>`)
     .join('');
   return `<button class="castle-row" data-castle="${c.site.id}"><span class="c-id num">${c.site.label}</span>
     <span class="c-body"><span class="c-text">${value}</span><span class="c-bar">${segs}<i class="neutral" style="width:${c.neutral * 100}%"></i></span></span></button>`;

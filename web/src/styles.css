@@ -175,7 +175,9 @@ button { font: inherit; color: inherit; }
 .bf-top .castle, .bf-top .pill { pointer-events: all; cursor: pointer; }
 
 .territory { transition: opacity 0.25s; }
-.territory .glow { fill: none; stroke-linejoin: round; }
+.field { fill: rgba(232, 225, 207, 0.06); stroke: rgba(232, 225, 207, 0.22); stroke-dasharray: 4 5; }
+.territory .moat { fill: none; stroke: var(--field); stroke-linejoin: round; pointer-events: none; }
+.territory .glow { fill: none; stroke-linejoin: round; pointer-events: none; }
 .territory .ground { fill: var(--surface); }
 .territory .wall { fill: none; stroke: var(--wall); stroke-width: 1.4; pointer-events: none; }
 .cell { stroke: var(--field); stroke-width: 1.2; cursor: pointer; transition: fill 0.6s; }

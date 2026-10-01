@@ -1,17 +1,19 @@
 import { hierarchy } from 'd3';
 import { voronoiTreemap } from 'd3-voronoi-treemap';
 import { createRng } from '../data/random';
-import type { IndustryId, Universe } from '../data/types';
+import type { IndustryId, StockMeta, Universe } from '../data/types';
 import type { CastleSite, CastleTier } from '../domain/castles';
-import { area, centroid, clipHalfPlane, distance, insetConvex, lerp, type Point, type Polygon } from './geometry';
+import { area, centroid, clipHalfPlane, distance, lerp, type Point, type Polygon } from './geometry';
 
 /**
- * 戰場版面：Voronoi Treemap。
+ * 戰場版面：產業圍在四周，中央是中立戰場，城池都在中央，各產業從外圍往中間進攻。
  *
- * 1. 第一層依產業市值切出「產業領地」。
- * 2. 在三個以上領地交會的頂點挑出城池位置，把各領地在該頂點的角切掉，留出中立空地。
- *    切角用半平面裁切，領地仍維持凸多邊形。
- * 3. 領地往內縮一點當作邊界（城牆與戰線），再依個股市值切出股票區塊。
+ * 1. 中央戰場是一個和地圖等比例的橢圓（預設佔 20% 面積）。
+ * 2. 外圈依市值切成扇形，每個產業一塊，從正上方順時針排列。
+ *    扇形的內側是一條直線（橢圓上的弦），所以每塊都是凸多邊形，可以再切個股。
+ *    超過外圈一半面積的產業（台積電所在的半導體）會拆成數塊相鄰的扇形，畫成同一塊領地。
+ * 3. 城池分三層：正中央的核心城池（所有產業都能進攻）、內圈大型城池（面向約三個產業）、
+ *    外圈小型據點（面向兩個相鄰產業）。
  *
  * 面積只由市值決定（以昨收計），盤中不重新配置，版面穩定。
  */
@@ -21,15 +23,19 @@ export interface StockCell {
   polygon: Polygon;
   centroid: Point;
   area: number;
+  /** 標籤位置。凹多邊形的重心可能太靠近中央戰場，所以另外指定。 */
+  labelAt: Point;
 }
 
 export interface Territory {
   industryId: IndustryId;
-  /** Voronoi 原始領地邊界。 */
+  /** 領地外框（多塊扇形合併後）。 */
   outer: Polygon;
-  /** 挖出城池、內縮邊界後，實際放股票的範圍。 */
-  inner: Polygon;
+  /** 內縮邊界後、實際放股票的各塊範圍。 */
+  pieces: Polygon[];
   centroid: Point;
+  /** 面向中央戰場的出擊點。 */
+  gate: Point;
   labelAnchor: Point;
   cells: StockCell[];
 }
@@ -37,15 +43,29 @@ export interface Territory {
 export interface BattlefieldLayout {
   width: number;
   height: number;
+  center: Point;
+  /** 領地之間的間隔寬度。 */
+  gutter: number;
+  /** 中央中立戰場。 */
+  field: Polygon;
   territories: Territory[];
   castles: CastleSite[];
 }
 
 export interface BattlefieldOptions {
   seed?: number;
-  castleCount?: number;
   gutter?: number;
+  /** 中央戰場佔整張地圖的面積比例。 */
+  fieldShare?: number;
 }
+
+/** 產業在外圈的排列順序（從正上方順時針），讓相關產業彼此相鄰。 */
+const RING_ORDER = ['semi', 'comp', 'pc', 'oe', 'net', 'opto', 'mech', 'bio', 'trad', 'plastic', 'steel', 'ship', 'fin'];
+/** 單一扇形最多佔外圈面積的比例，超過就拆塊，確保扇形角度小於 180°。 */
+const MAX_PIECE_SHARE = 0.45;
+/** 多檔股票的扇形內側用直線（弦），角度太大會切進中央戰場，所以再拆小一點。 */
+const MAX_MULTI_PIECE_SHARE = 0.12;
+const TAU = Math.PI * 2;
 
 interface WeightedNode {
   id: string;
@@ -69,147 +89,279 @@ function runTreemap(items: WeightedNode[], clip: Polygon, rng: () => number): Ma
   return out;
 }
 
-interface Junction {
-  point: Point;
-  industries: IndustryId[];
-  /** 位在地圖外框上的交會點：往內推的方向。內部交會點為 undefined。 */
-  inward?: Point;
+/** 把產業的股票分成 k 組，讓每組市值盡量平均（大的先放）。 */
+function splitStocks(stocks: StockMeta[], k: number): StockMeta[][] {
+  const groups: StockMeta[][] = Array.from({ length: k }, () => []);
+  const sums = new Array<number>(k).fill(0);
+  for (const s of [...stocks].sort((a, b) => b.marketCap - a.marketCap)) {
+    const i = sums.indexOf(Math.min(...sums));
+    groups[i].push(s);
+    sums[i] += s.marketCap;
+  }
+  // 依市值由大到小排列，讓最大的一塊排在產業的起點
+  return groups.filter((g) => g.length).sort((a, b) => sum(b) - sum(a));
 }
 
-/**
- * 找出領地之間的交會頂點：
- * - 內部：三個以上領地交會。
- * - 外框：兩個領地在地圖邊緣交會（邊境據點）。
- */
-function findJunctions(polys: Map<IndustryId, Polygon>, width: number, height: number, eps: number): Junction[] {
-  const clusters: Array<{ sum: Point; count: number; ids: Set<IndustryId> }> = [];
-  for (const [id, poly] of polys) {
-    for (const p of poly) {
-      let hit = clusters.find((c) => distance([c.sum[0] / c.count, c.sum[1] / c.count], p) < eps);
-      if (!hit) {
-        hit = { sum: [0, 0], count: 0, ids: new Set() };
-        clusters.push(hit);
+const sum = (g: StockMeta[]) => g.reduce((s, x) => s + x.marketCap, 0);
+
+
+/** 合併兩個共用一條邊的凸多邊形（頂點方向需一致）。 */
+function mergeAdjacent(p1: Polygon, p2: Polygon, eps: number): Polygon | undefined {
+  for (let i = 0; i < p1.length; i++) {
+    const a = p1[i];
+    const b = p1[(i + 1) % p1.length];
+    for (let j = 0; j < p2.length; j++) {
+      const c = p2[j];
+      const d = p2[(j + 1) % p2.length];
+      if (distance(a, d) < eps && distance(b, c) < eps) {
+        const out: Polygon = [];
+        for (let k = 0; k < p1.length; k++) out.push(p1[(i + 1 + k) % p1.length]);
+        for (let k = 2; k < p2.length; k++) out.push(p2[(j + k) % p2.length]);
+        return out;
       }
-      hit.sum = [hit.sum[0] + p[0], hit.sum[1] + p[1]];
-      hit.count += 1;
-      hit.ids.add(id);
     }
   }
-  const margin = eps * 2;
-  const result: Junction[] = [];
-  for (const c of clusters) {
-    const point: Point = [c.sum[0] / c.count, c.sum[1] / c.count];
-    const industries = [...c.ids];
-    const edges: Point[] = [];
-    if (point[0] <= margin) edges.push([1, 0]);
-    if (point[0] >= width - margin) edges.push([-1, 0]);
-    if (point[1] <= margin) edges.push([0, 1]);
-    if (point[1] >= height - margin) edges.push([0, -1]);
-    if (edges.length === 0 && industries.length >= 3) result.push({ point, industries });
-    // 角落不放城池
-    else if (edges.length === 1 && industries.length >= 2) result.push({ point, industries, inward: edges[0] });
+  return undefined;
+}
+
+function mergePieces(pieces: Polygon[], eps: number): Polygon {
+  let merged = pieces[0] ?? [];
+  for (const p of pieces.slice(1)) merged = mergeAdjacent(merged, p, eps) ?? (area(p) > area(merged) ? p : merged);
+  return merged;
+}
+
+function pointInPolygon(poly: Polygon, p: Point): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) inside = !inside;
   }
-  return result;
+  return inside;
+}
+
+/** 角度 a 是否落在 [start, start + span) 內。 */
+function angleIn(a: number, start: number, span: number): boolean {
+  return (((a - start) % TAU) + TAU) % TAU < span;
+}
+
+function angularOverlap(start: number, span: number, lo: number, width: number): number {
+  // 在 [lo, lo + width] 內取樣，計算與扇形重疊的比例
+  let hit = 0;
+  const n = 48;
+  for (let i = 0; i < n; i++) if (angleIn(lo + ((i + 0.5) / n) * width, start, span)) hit++;
+  return hit / n;
 }
 
 export function computeBattlefield(universe: Universe, width: number, height: number, options: BattlefieldOptions = {}): BattlefieldLayout {
   const rng = createRng(options.seed ?? 42);
-  const castleCount = options.castleCount ?? 11;
   const m = Math.min(width, height);
   const gutter = options.gutter ?? Math.max(2.5, m * 0.006);
+  const fieldShare = options.fieldShare ?? 0.2;
+  const c: Point = [width / 2, height / 2];
 
-  const capByIndustry = new Map<IndustryId, number>();
-  for (const s of universe.stocks) capByIndustry.set(s.industryId, (capByIndustry.get(s.industryId) ?? 0) + s.marketCap);
-  const totalCap = [...capByIndustry.values()].reduce((a, b) => a + b, 0);
+  // 中央橢圓：與地圖等比例，面積 = fieldShare
+  const k = Math.sqrt((4 * fieldShare) / Math.PI);
+  const ea = (k * width) / 2;
+  const eb = (k * height) / 2;
+  const ellipseR = (a: number) => 1 / Math.sqrt((Math.cos(a) / ea) ** 2 + (Math.sin(a) / eb) ** 2);
+  const rectR = (a: number) => Math.min((width / 2) / Math.abs(Math.cos(a) || 1e-12), (height / 2) / Math.abs(Math.sin(a) || 1e-12));
+  const density = (a: number) => 0.5 * (rectR(a) ** 2 - ellipseR(a) ** 2);
 
-  const rect: Polygon = [[0, 0], [0, height], [width, height], [width, 0]];
-  const outerPolys = runTreemap(
-    universe.industries.map((ind) => ({ id: ind.id, weight: capByIndustry.get(ind.id) ?? 0 })),
-    rect,
-    rng,
-  );
-  const centroids = new Map<IndustryId, Point>([...outerPolys].map(([id, p]) => [id, centroid(p)]));
-
-  // --- 挑選城池位置 ---
-  const center: Point = [width / 2, height / 2];
-  const maxDist = Math.hypot(width, height) / 2;
-  const tierRadius: Record<CastleTier, number> = { core: m * 0.058, major: m * 0.045, minor: m * 0.034 };
-  const candidates = findJunctions(outerPolys, width, height, Math.max(1, m * 0.004))
-    .map((j) => {
-      // 外框上的據點往內推，讓城池完整出現在畫面上
-      const point: Point = j.inward
-        ? [j.point[0] + j.inward[0] * tierRadius.minor * 1.1, j.point[1] + j.inward[1] * tierRadius.minor * 1.1]
-        : j.point;
-      const capShare = j.industries.reduce((s, id) => s + (capByIndustry.get(id) ?? 0), 0) / totalCap;
-      const centrality = 1 - distance(point, center) / maxDist;
-      // 可挖出的空間受限於最近的相鄰領地中心
-      const room = Math.min(...j.industries.map((id) => distance(point, centroids.get(id)!)));
-      const score =
-        Math.sqrt(capShare) + centrality * 0.9 + Math.min(1, room / (m * 0.2)) * 0.5 - (j.inward ? 0.35 : 0);
-      return { ...j, point, centrality, room, score };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  const minSpacing = m * 0.13;
-  const picked: typeof candidates = [];
-  for (const j of candidates) {
-    if (picked.length >= castleCount) break;
-    if (j.room < m * 0.05) continue;
-    if (picked.every((p) => distance(p.point, j.point) >= minSpacing)) picked.push(j);
+  // --- 產業 → 扇形塊 ---
+  const known = new Set(universe.industries.map((i) => i.id));
+  const ring = [...RING_ORDER.filter((id) => known.has(id)), ...[...known].filter((id) => !RING_ORDER.includes(id))];
+  const totalCap = universe.stocks.reduce((s, x) => s + x.marketCap, 0);
+  interface Piece { industryId: IndustryId; stocks: StockMeta[]; share: number; start: number; span: number; internalLo: boolean; internalHi: boolean }
+  const pieces: Piece[] = [];
+  for (const id of ring) {
+    const stocks = universe.stocks.filter((s) => s.industryId === id);
+    const share = sum(stocks) / totalCap;
+    let groups = splitStocks(stocks, Math.max(1, Math.ceil(share / MAX_PIECE_SHARE)));
+    groups = groups.flatMap((g) =>
+      g.length > 1 && sum(g) / totalCap > MAX_MULTI_PIECE_SHARE
+        ? splitStocks(g, Math.ceil(sum(g) / totalCap / MAX_MULTI_PIECE_SHARE))
+        : [g],
+    );
+    groups.forEach((g, i) => pieces.push({
+      industryId: id, stocks: g, share: sum(g) / totalCap, start: 0, span: 0,
+      internalLo: i > 0, internalHi: i < groups.length - 1,
+    }));
   }
 
-  // 最靠近中央的內部交會點是核心城池，其次三座是大型城池，其餘是小型據點
-  const byCentrality = [...picked].sort((a, b) => Number(!!a.inward) - Number(!!b.inward) || b.centrality - a.centrality);
-  const tierOf = new Map<(typeof picked)[number], CastleTier>();
-  byCentrality.forEach((j, i) => tierOf.set(j, i === 0 ? 'core' : i <= 3 && !j.inward ? 'major' : 'minor'));
+  // --- 數值積分求扇形邊界角度，讓每塊面積符合市值比例 ---
+  const steps = 7200;
+  const dA = TAU / steps;
+  let ringArea = 0;
+  for (let i = 0; i < steps; i++) ringArea += density(i * dA) * dA;
+  const firstIndustry = pieces.filter((p) => p.industryId === pieces[0].industryId);
+  const firstShare = firstIndustry.reduce((s, p) => s + p.share, 0);
+  // 讓第一個產業的中線落在正上方
+  let start = -Math.PI / 2;
+  for (let acc = 0; acc < (firstShare / 2) * ringArea; ) {
+    start -= dA;
+    acc += density(start) * dA;
+  }
+  let angle = start;
+  for (const p of pieces) {
+    const target = p.share * ringArea;
+    let acc = 0;
+    p.start = angle;
+    while (acc < target && angle < start + TAU) {
+      acc += density(angle) * dA;
+      angle += dA;
+    }
+    p.span = angle - p.start;
+  }
+  pieces[pieces.length - 1].span = start + TAU - pieces[pieces.length - 1].start;
 
-  const industryOrder = new Map(universe.industries.map((ind, i) => [ind.id, i]));
-  const castles: CastleSite[] = picked
-    .sort((a, b) => a.point[1] - b.point[1] || a.point[0] - b.point[0])
-    .map((j, i) => {
-      const tier = tierOf.get(j)!;
-      return {
-        id: `castle-${i + 1}`,
-        label: `#${String(i + 1).padStart(2, '0')}`,
-        tier,
-        x: j.point[0],
-        y: j.point[1],
-        r: Math.min(tierRadius[tier], j.room * 0.38),
-        contestants: [...j.industries].sort((a, b) => industryOrder.get(a)! - industryOrder.get(b)!).slice(0, 3),
-      };
+  // --- 每塊扇形的多邊形 ---
+  const rect: Polygon = [[0, 0], [0, height], [width, height], [width, 0]];
+  const fieldPoint = (a: number): Point => [c[0] + Math.cos(a) * ellipseR(a), c[1] + Math.sin(a) * ellipseR(a)];
+  const insetRect = (poly: Polygon, g: number): Polygon => {
+    if (g <= 0) return poly;
+    poly = clipHalfPlane(poly, [0, 0], [1, 0], g);
+    poly = clipHalfPlane(poly, [0, 0], [0, 1], g);
+    poly = clipHalfPlane(poly, [width, height], [-1, 0], g);
+    return clipHalfPlane(poly, [width, height], [0, -1], g);
+  };
+  const clipRays = (poly: Polygon, p: Piece, g: number): Polygon => {
+    const a0 = p.start;
+    const a1 = p.start + p.span;
+    poly = clipHalfPlane(poly, c, [-Math.sin(a0), Math.cos(a0)], p.internalLo ? 0 : g);
+    return clipHalfPlane(poly, c, [Math.sin(a1), -Math.cos(a1)], p.internalHi ? 0 : g);
+  };
+  const arcPoints = (a0: number, a1: number, extra: number): Polygon => {
+    const n = Math.max(2, Math.ceil(Math.abs(a1 - a0) / 0.05));
+    return Array.from({ length: n + 1 }, (_, i) => {
+      const a = a0 + ((a1 - a0) * i) / n;
+      const r = ellipseR(a) + extra;
+      return [c[0] + Math.cos(a) * r, c[1] + Math.sin(a) * r] as Point;
     });
-  const castleSource = new Map(castles.map((c, i) => [c, picked[i]]));
+  };
+  /** 多檔股票：內側是弦，整塊是凸多邊形。 */
+  const chordPolygon = (p: Piece, g: number): Polygon => {
+    const q0 = fieldPoint(p.start);
+    const q1 = fieldPoint(p.start + p.span);
+    const ex = q1[0] - q0[0];
+    const ey = q1[1] - q0[1];
+    const len = Math.hypot(ex, ey) || 1;
+    let n: Point = [-ey / len, ex / len];
+    if ((q0[0] - c[0]) * n[0] + (q0[1] - c[1]) * n[1] < 0) n = [-n[0], -n[1]];
+    return clipHalfPlane(clipRays(insetRect(rect, g), p, g), q0, n, g);
+  };
+  /** 單一股票：內側沿著橢圓弧，不需要再切個股，所以可以是凹多邊形。 */
+  const arcPolygon = (p: Piece, g: number): Polygon => {
+    const wedge = clipRays(rect, { ...p, internalLo: true, internalHi: true }, 0);
+    const idx = wedge.reduce((best, q, i) => (distance(q, c) < distance(wedge[best], c) ? i : best), 0);
+    const prev = wedge[(idx - 1 + wedge.length) % wedge.length];
+    const prevAngle = Math.atan2(prev[1] - c[1], prev[0] - c[0]);
+    const a0 = p.start;
+    const a1 = p.start + p.span;
+    const prevIsStart = Math.abs(Math.atan2(Math.sin(prevAngle - a0), Math.cos(prevAngle - a0))) < 1e-3;
+    const arc = prevIsStart ? arcPoints(a0, a1, g) : arcPoints(a1, a0, g);
+    const poly = [...wedge.slice(0, idx), ...arc, ...wedge.slice(idx + 1)];
+    return clipRays(insetRect(poly, g), p, g);
+  };
+  const piecePolygon = (p: Piece, inset: boolean): Polygon =>
+    p.stocks.length === 1 ? arcPolygon(p, inset ? gutter : 0) : chordPolygon(p, inset ? gutter : 0);
 
-  // --- 領地：挖出城池空地、內縮邊界，再切出股票區塊 ---
+  const field: Polygon = pieces.flatMap((p) =>
+    p.stocks.length === 1 ? arcPoints(p.start, p.start + p.span, 0).slice(0, -1) : [fieldPoint(p.start)],
+  );
+
+  // --- 領地與個股 ---
+  const eps = Math.max(0.5, m * 0.001);
   const territories: Territory[] = universe.industries.map((ind) => {
-    const outer = outerPolys.get(ind.id) ?? [];
-    const c = centroids.get(ind.id) ?? [width / 2, height / 2];
-    let inner = outer;
-    for (const castle of castles) {
-      const v: Point = [castle.x, castle.y];
-      if (!castleSource.get(castle)?.industries.includes(ind.id)) continue;
-      const d = distance(c, v);
-      if (d < 1e-6) continue;
-      const normal: Point = [(c[0] - v[0]) / d, (c[1] - v[1]) / d];
-      inner = clipHalfPlane(inner, v, normal, castle.r * 1.15);
-    }
-    inner = insetConvex(inner, gutter);
-
-    const stocks = universe.stocks.filter((s) => s.industryId === ind.id);
+    const own = pieces.filter((p) => p.industryId === ind.id);
+    const outers = own.map((p) => piecePolygon(p, false));
+    const inners = own.map((p) => piecePolygon(p, true));
     const cells: StockCell[] = [];
-    if (inner.length >= 3) {
-      const polys = runTreemap(stocks.map((s) => ({ id: s.code, weight: s.marketCap })), inner, rng);
-      for (const s of stocks) {
-        const poly = polys.get(s.code);
-        if (poly) cells.push({ code: s.code, polygon: poly, centroid: centroid(poly), area: area(poly) });
+    own.forEach((p, i) => {
+      if (inners[i].length < 3) return;
+      if (p.stocks.length === 1) {
+        const poly = inners[i];
+        const a = p.start + p.span / 2;
+        const r = ellipseR(a) + 0.45 * (rectR(a) - ellipseR(a));
+        const at: Point = [c[0] + Math.cos(a) * r, c[1] + Math.sin(a) * r];
+        cells.push({ code: p.stocks[0].code, polygon: poly, centroid: centroid(poly), area: area(poly), labelAt: at });
+        return;
       }
-    }
-
-    // 產業標籤放在領地上緣附近
-    const top = inner.reduce((best, p) => (p[1] < best[1] ? p : best), inner[0] ?? c);
-    const labelAnchor = inner.length ? lerp(top, centroid(inner), 0.18) : c;
-    return { industryId: ind.id, outer, inner, centroid: inner.length ? centroid(inner) : c, labelAnchor, cells };
+      const polys = runTreemap(p.stocks.map((s) => ({ id: s.code, weight: s.marketCap })), inners[i], rng);
+      for (const s of p.stocks) {
+        const poly = polys.get(s.code);
+        if (!poly) continue;
+        const ctr = centroid(poly);
+        cells.push({ code: s.code, polygon: poly, centroid: ctr, area: area(poly), labelAt: ctr });
+      }
+    });
+    const outer = mergePieces(outers, eps);
+    const a0 = own[0]?.start ?? 0;
+    const a1 = own.length ? own[own.length - 1].start + own[own.length - 1].span : 0;
+    const mid = (a0 + a1) / 2;
+    const innerC = outer.length ? centroid(outer) : c;
+    const gate = lerp(fieldPoint(mid), innerC, 0.12);
+    // 標籤放在遠離中央的一側，把面向中央的前線留給兵力流
+    const label: Point = [
+      c[0] + Math.cos(mid) * (ellipseR(mid) + 0.86 * (rectR(mid) - ellipseR(mid))),
+      c[1] + Math.sin(mid) * (ellipseR(mid) + 0.86 * (rectR(mid) - ellipseR(mid))),
+    ];
+    const labelAnchor = inners.some((p) => p.length >= 3 && pointInPolygon(p, label)) ? label : innerC;
+    return { industryId: ind.id, outer, pieces: inners, centroid: innerC, gate, labelAnchor, cells };
   });
 
-  return { width, height, territories, castles };
+  // --- 城池 ---
+  const industryOrder = new Map(universe.industries.map((ind, i) => [ind.id, i]));
+  const spans = ring.map((id) => {
+    const own = pieces.filter((p) => p.industryId === id);
+    return { id, start: own[0].start, span: own.reduce((s, p) => s + p.span, 0) };
+  });
+  const facing = (a: number, halfWidth: number, count: number): IndustryId[] => {
+    const ranked = spans
+      .map((s) => ({ id: s.id, overlap: angularOverlap(s.start, s.span, a - halfWidth, halfWidth * 2) }))
+      .filter((s) => s.overlap > 0)
+      .sort((x, y) => y.overlap - x.overlap)
+      .map((s) => s.id);
+    const picked = ranked.slice(0, count);
+    if (picked.length < 2) {
+      // 視窗只碰到一個產業時，補上角度最近的鄰居
+      const idx = ring.indexOf(picked[0]);
+      const own = spans[idx];
+      const toStart = Math.abs(((a - own.start) % TAU + TAU) % TAU);
+      const neighbour = toStart < own.span / 2 ? ring[(idx - 1 + ring.length) % ring.length] : ring[(idx + 1) % ring.length];
+      picked.push(neighbour);
+    }
+    return picked.sort((x, y) => industryOrder.get(x)! - industryOrder.get(y)!);
+  };
+
+  const rc = Math.sqrt(ea * eb);
+  const castles: CastleSite[] = [
+    {
+      id: 'castle-1', label: '#01', tier: 'core', x: c[0], y: c[1],
+      r: Math.min(rc * 0.18, m * 0.06),
+      contestants: [...known].sort((x, y) => industryOrder.get(x)! - industryOrder.get(y)!),
+    },
+  ];
+  const ringCastles = (count: number, offset: number, depth: number, tier: CastleTier, radius: number, halfWidth: number, reach: number) => {
+    for (let i = 0; i < count; i++) {
+      const a = offset + (TAU * i) / count;
+      const n = castles.length + 1;
+      const r = ellipseR(a) * depth;
+      castles.push({
+        id: `castle-${n}`,
+        label: `#${String(n).padStart(2, '0')}`,
+        tier,
+        x: c[0] + Math.cos(a) * r,
+        y: c[1] + Math.sin(a) * r,
+        r: radius,
+        contestants: facing(a, halfWidth, reach),
+      });
+    }
+  };
+  ringCastles(4, -Math.PI / 4, 0.55, 'major', Math.min(rc * 0.14, m * 0.045), (50 * Math.PI) / 180, 3);
+  ringCastles(7, -Math.PI / 2, 0.84, 'minor', Math.min(rc * 0.105, m * 0.035), (24 * Math.PI) / 180, 2);
+
+  return { width, height, center: c, gutter, field, territories, castles };
 }
+
+

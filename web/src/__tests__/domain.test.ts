@@ -82,11 +82,19 @@ describe('戰場版面', () => {
   for (const [w, h] of [[1200, 760], [400, 520]]) {
     it(`${w}×${h} 可以放下 8–12 座城池，且每檔股票都有區塊`, () => {
       const layout = computeBattlefield(universe, w, h);
+      // 城池都在中央戰場內
+      const [cx, cy] = layout.center;
+      for (const c of layout.castles) expect(Math.hypot(c.x - cx, c.y - cy)).toBeLessThan(Math.min(w, h) / 2);
+      // 個股面積與市值成正比（容許版面誤差）
+      const cells = layout.territories.flatMap((t) => t.cells);
+      const tsmc = cells.find((c) => c.code === '2330')!;
+      const totalArea = cells.reduce((s, c) => s + c.area, 0);
+      const totalCap = universe.stocks.reduce((s, x) => s + x.marketCap, 0);
+      expect(tsmc.area / totalArea).toBeCloseTo(280000 / totalCap, 1);
       expect(layout.castles.length).toBeGreaterThanOrEqual(8);
       expect(layout.castles.length).toBeLessThanOrEqual(12);
       expect(layout.castles.filter((c) => c.tier === 'core')).toHaveLength(1);
       for (const c of layout.castles) expect(c.contestants.length).toBeGreaterThanOrEqual(2);
-      const cells = layout.territories.flatMap((t) => t.cells);
       expect(cells).toHaveLength(universe.stocks.length);
     });
   }

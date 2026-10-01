@@ -8,7 +8,7 @@ import { BattlefieldView, type SelectionRef } from './ui/battlefieldView';
 import { palette, type Convention } from './ui/colors';
 import { renderDetail, renderDock, renderSectors, renderTicker, type PanelContext } from './ui/panels';
 
-const CONVENTION_KEY = 'lpsd.convention';
+const CONVENTION_KEY = 'lplc.convention';
 
 function loadConvention(): Convention {
   try {

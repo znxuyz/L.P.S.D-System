@@ -15,6 +15,12 @@ const GREEN = { weak: '#244a36', mid: '#1b6c3f', strong: '#139448', bright: '#34
 export const NEUTRAL_CELL = '#34373e';
 
 export const CONTESTANT_COLORS = ['#3987e5', '#c98500', '#d55181'];
+/** 核心城池第四名以後的攻城產業合併成「其他」。 */
+export const OTHER_CONTESTANT = '#77736a';
+
+export function contestantColor(slot: number): string {
+  return CONTESTANT_COLORS[slot] ?? OTHER_CONTESTANT;
+}
 
 export interface Palette {
   up: typeof RED;
