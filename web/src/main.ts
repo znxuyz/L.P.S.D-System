@@ -98,6 +98,7 @@ class App {
     renderDetail($('#detail'), ctx);
     renderDock($('#dock'), ctx, (el) => this.rotation && renderRotation(el, this.rotation, this.pal, this.openMs));
     renderLog($('#log'), this.events, this.fresh);
+    renderLog($('#map-feed'), this.events.slice(0, 3), this.fresh);
     this.fresh = new Set();
     this.syncControls();
   }
@@ -121,6 +122,15 @@ class App {
     this.refresh();
   }
 
+  private toggleExpanded(force?: boolean): void {
+    const app = $('.app');
+    const on = app.classList.toggle('is-expanded', force);
+    const btn = $('#btn-expand');
+    btn.setAttribute('aria-pressed', String(on));
+    btn.textContent = on ? '⤡ 還原版面' : '⛶ 放大地圖';
+    // 地圖尺寸改變後由各視圖的 ResizeObserver 重新排版
+  }
+
   private renderHint(): void {
     const per = this.hex.yiPerHex;
     $('#field-hint').textContent =
@@ -139,7 +149,14 @@ class App {
       else if (data.industry) this.select({ kind: 'industry', id: data.industry });
       else if (data.stock) this.select({ kind: 'stock', id: data.stock });
     });
+    $('#btn-expand').addEventListener('click', () => this.toggleExpanded());
     document.addEventListener('keydown', (e) => {
+      const typing = (e.target as Element).closest?.('input, textarea, select');
+      if (!typing && (e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey) this.toggleExpanded();
+      if (e.key === 'Escape' && document.querySelector('.app.is-expanded')) {
+        this.toggleExpanded(false);
+        return;
+      }
       if (e.key === 'Escape' && this.focus) this.select(this.focus);
       const row = (e.target as Element).closest?.<HTMLElement>('tr[data-stock]');
       if (row && (e.key === 'Enter' || e.key === ' ')) this.select({ kind: 'stock', id: row.dataset.stock! });

@@ -26,8 +26,10 @@ interface Node {
 
 type Rect = HierarchyRectangularNode<Node>;
 
-/** 目標格數：越多越細緻，但 SVG 元素也越多。 */
-const TARGET_HEXES = 900;
+/** 每一格大約的面積（px²）：地圖越大格數越多，格子大小維持一致。 */
+const HEX_AREA = 520;
+const MIN_HEXES = 500;
+const MAX_HEXES = 1800;
 const SQRT3 = Math.sqrt(3);
 
 export class HexMapView {
@@ -109,7 +111,8 @@ export class HexMapView {
   }
 
   private buildGrid(): void {
-    const grid = buildHexGrid(this.width, this.height, TARGET_HEXES);
+    const target = Math.max(MIN_HEXES, Math.min(MAX_HEXES, (this.width * this.height) / HEX_AREA));
+    const grid = buildHexGrid(this.width, this.height, target);
     this.r = grid.r;
     this.hexes = grid.hexes;
     const k = 0.9; // 格子之間留一點縫，看得出格線

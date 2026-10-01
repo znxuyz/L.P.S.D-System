@@ -75,8 +75,8 @@ button { font: inherit; color: inherit; }
 .app {
   height: 100%;
   display: grid;
-  grid-template-columns: 210px minmax(0, 1fr) 330px;
-  grid-template-rows: auto minmax(0, 1fr) 238px;
+  grid-template-columns: 184px minmax(0, 1fr) 300px;
+  grid-template-rows: auto minmax(0, 1fr) 196px;
   grid-template-areas:
     'top top top'
     'sectors field side'
@@ -126,7 +126,7 @@ button { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 10px 18px;
+  padding: 8px 18px;
   flex-wrap: wrap;
   background: linear-gradient(90deg, rgba(0, 229, 255, 0.08), transparent 40%), var(--surface);
 }
@@ -224,7 +224,8 @@ button { font: inherit; color: inherit; }
 
 /* ---------------- 中央 ---------------- */
 .field { grid-area: field; display: flex; flex-direction: column; }
-.field-head { display: flex; align-items: center; gap: 14px; padding: 10px 14px 8px; flex-wrap: wrap; }
+.field-head { display: flex; align-items: center; gap: 14px; padding: 8px 12px 6px; flex-wrap: wrap; }
+.btn-expand { margin-left: auto; }
 .field-hint { margin: 0; flex: 1; font-size: 11px; color: var(--muted); }
 .tabs { display: inline-flex; gap: 4px; }
 .tabs button {
@@ -241,7 +242,38 @@ button { font: inherit; color: inherit; }
 .tabs button[aria-selected='true'] { background: var(--accent-soft); border-color: var(--accent); color: #fff; font-weight: 700; }
 .tabs button[aria-selected='true'] .hud-code { color: var(--accent); text-shadow: var(--accent-glow); }
 .tabs button:hover { color: #fff; }
-.view { position: relative; flex: 1; min-height: 0; overflow: hidden; margin: 0 10px 10px; }
+.view { position: relative; flex: 1; min-height: 0; overflow: hidden; margin: 0 8px 8px; }
+
+/* 放大地圖：只留頂部指數列與地圖 */
+.app.is-expanded {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: 'top' 'field';
+}
+.app.is-expanded .sectors,
+.app.is-expanded .side,
+.app.is-expanded .dock { display: none; }
+.map-feed { display: none; }
+.app.is-expanded .map-feed {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 4;
+  display: grid;
+  gap: 6px;
+  width: min(360px, 60%);
+  pointer-events: none;
+}
+.map-feed .log-item {
+  pointer-events: auto;
+  background: rgba(4, 10, 18, 0.9);
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--accent);
+  padding: 5px 10px;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%);
+}
+.map-feed .lv-alert { border-left-color: var(--warn); }
+.map-feed .lv-critical { border-left-color: var(--up); }
 .view > svg { position: absolute; inset: 0; display: block; }
 
 .bf-tooltip {
@@ -259,7 +291,7 @@ button { font: inherit; color: inherit; }
 .tt-row { display: flex; justify-content: space-between; gap: 12px; font-family: var(--font-num); }
 
 /* ---------------- 右側 ---------------- */
-.side { grid-area: side; display: grid; grid-template-rows: minmax(0, 1fr) 210px; gap: 8px; }
+.side { grid-area: side; display: grid; grid-template-rows: minmax(0, 1fr) 200px; gap: 8px; }
 .detail { padding: 14px 16px; overflow-y: auto; }
 .back-btn { background: none; border: 0; color: var(--accent); padding: 0; margin-bottom: 10px; cursor: pointer; font-size: 12px; }
 .d-title { margin: 4px 0 12px; font: 900 22px/1.3 var(--font-ui); letter-spacing: 0.08em; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
@@ -365,7 +397,7 @@ button.log-text:hover { color: var(--accent); text-decoration: underline; text-u
 
 /* ---------------- 響應式 ---------------- */
 @media (max-width: 1180px) {
-  .app { grid-template-columns: 180px minmax(0, 1fr) 290px; grid-template-rows: auto minmax(0, 1fr) auto; }
+  .app { grid-template-columns: 168px minmax(0, 1fr) 270px; grid-template-rows: auto minmax(0, 1fr) auto; }
   .dock { grid-template-columns: 1fr 1fr; }
   .dock .card { height: 230px; }
 }
@@ -384,7 +416,8 @@ button.log-text:hover { color: var(--accent); text-decoration: underline; text-u
   .sector-list { display: flex; gap: 6px; width: max-content; }
   .sector { grid-template-columns: auto auto; min-width: 128px; border-color: var(--line); }
   .field-hint { flex-basis: 100%; order: 3; }
-  .view { flex: none; height: clamp(420px, 78vh, 680px); }
+  .app.is-expanded .view { height: calc(100vh - 140px); }
+  .view { flex: none; height: clamp(480px, 86vh, 820px); }
   .side { grid-template-rows: auto 240px; }
   .dock { grid-template-columns: minmax(0, 1fr); }
   .dock .card { height: auto; }

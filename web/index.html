@@ -58,7 +58,7 @@
 
       <nav class="sectors hud" id="sectors" aria-label="產業"></nav>
 
-      <main class="field hud">
+      <main class="field hud" style="position:relative">
         <div class="field-head">
           <div class="tabs" role="tablist" aria-label="視圖">
             <button type="button" role="tab" id="tab-hex" data-view="hex" aria-selected="true" aria-controls="hex">
@@ -69,9 +69,11 @@
             </button>
           </div>
           <p class="field-hint" id="field-hint"></p>
+          <button type="button" class="btn btn-expand" id="btn-expand" aria-pressed="false" title="放大地圖（F）">⛶ 放大地圖</button>
         </div>
         <div class="view" id="hex" role="tabpanel" aria-labelledby="tab-hex"></div>
         <div class="view" id="gravity" role="tabpanel" aria-labelledby="tab-gravity" hidden></div>
+        <ol class="map-feed" id="map-feed" aria-label="最新作戰日誌"></ol>
       </main>
 
       <aside class="side">
