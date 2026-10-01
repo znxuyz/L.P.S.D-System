@@ -1,5 +1,6 @@
 import { area as d3area, bisector, line as d3line, pointer, scaleLinear, select } from 'd3';
 import { SESSION_MINUTES } from '../data/twse';
+import type { EventLevel, MarketEvent } from '../domain/events';
 import type { IndustryMetrics, MarketMetrics, StockMetrics } from '../domain/metrics';
 import type { Focus } from './focus';
 import type { Palette } from './colors';
@@ -14,12 +15,21 @@ export interface PanelContext {
 
 const dirCls = (v: number) => direction(v);
 
+/** 面板標題：英文 HUD 代號 + 中文名稱。 */
+function title(code: string, zh: string, extra = ''): string {
+  return `<h2 class="panel-title"><span class="hud-code">${code}</span>${zh}${extra}</h2>`;
+}
+
+let lastIndex: number | undefined;
+
 // ---------------------------------------------------------------- 頂部
 
 export function renderTicker(el: HTMLElement, ctx: PanelContext): void {
   const { metrics: m, playing } = ctx;
   const idx = m.index;
   const d = dirCls(idx.change);
+  const flash = lastIndex === undefined || idx.value === lastIndex ? '' : idx.value > lastIndex ? ' flash-up' : ' flash-down';
+  lastIndex = idx.value;
   const live =
     m.session === 'closed'
       ? '<span class="live is-closed">收盤</span>'
@@ -27,11 +37,11 @@ export function renderTicker(el: HTMLElement, ctx: PanelContext): void {
         ? '<span class="live"><i></i>LIVE</span>'
         : '<span class="live is-paused">暫停</span>';
   el.innerHTML = `
-    <div class="kv kv-index"><dt>${esc(idx.name)}</dt><dd><b class="num">${num(idx.value, 2)}</b>
+    <div class="kv kv-index"><dt>TAIEX ${esc(idx.name)}</dt><dd><b class="num${flash}">${num(idx.value, 2)}</b>
       <span class="num ${d}">${idx.change >= 0 ? '▲' : '▼'} ${num(Math.abs(idx.change), 2)} (${pct(idx.changePct)})</span></dd></div>
-    <div class="kv"><dt>成交額</dt><dd><b class="num">${yi(idx.turnover, 0)}</b></dd></div>
-    <div class="kv"><dt>上漲 / 下跌</dt><dd><b class="num"><span class="up">${m.advancers}</span> / <span class="down">${m.decliners}</span></b></dd></div>
-    <div class="kv"><dt>時間</dt><dd><b class="num">${clock(m.time)}</b></dd></div>
+    <div class="kv"><dt>VOL 成交額</dt><dd><b class="num">${yi(idx.turnover, 0)}</b></dd></div>
+    <div class="kv"><dt>ADV / DEC</dt><dd><b class="num"><span class="up">${m.advancers}</span> / <span class="down">${m.decliners}</span></b></dd></div>
+    <div class="kv"><dt>TIME</dt><dd><b class="num">${clock(m.time)}</b></dd></div>
     <div class="kv kv-live">${live}</div>`;
 }
 
@@ -41,7 +51,7 @@ export function renderSectors(el: HTMLElement, ctx: PanelContext): void {
   const { metrics: m, selection } = ctx;
   const sel = selection?.kind === 'industry' ? selection.id : undefined;
   const rows = [...m.industries].sort((a, b) => b.weight - a.weight);
-  el.innerHTML = `<h2 class="panel-title">產業</h2><ul class="sector-list">${rows
+  el.innerHTML = `${title('SECTORS', '產業')}<ul class="sector-list">${rows
     .map((ind) => {
       const w = Math.min(100, (Math.abs(ind.flow) / m.maxAbsFlow) * 100);
       return `<li><button class="sector${sel === ind.id ? ' is-active' : ''}" data-industry="${ind.id}" aria-pressed="${sel === ind.id}">
@@ -67,7 +77,7 @@ function renderOverview(ctx: PanelContext): string {
   const worst = byFlow[byFlow.length - 1];
   const gradient = [-3, -2, -1, 0, 1, 2, 3].map((v) => pal.heat(v)).join(',');
   return `
-    <h2 class="panel-title">盤勢總覽</h2>
+    ${title('OVERVIEW', '盤勢總覽')}
     <p class="d-lead">方塊面積是今日成交額。撐破虛線框的方塊正在吸金，縮在斜線空地裡的正在失血。點產業或股票看細節，Esc 取消選取。</p>
     <dl class="d-grid">
       ${kv('最大資金流入', `${esc(best.name)}`, '')}
@@ -75,7 +85,7 @@ function renderOverview(ctx: PanelContext): string {
       ${kv('最大資金流出', `${esc(worst.name)}`, '')}
       ${kv('流出金額', signedYi(worst.flow), 'down-flow')}
     </dl>
-    <h3 class="d-sub">怎麼看呼吸圖</h3>
+    <h3 class="d-sub">讀圖說明</h3>
     <div class="legend">
       <div class="legend-row"><svg class="legend-glyph" viewBox="0 0 30 20" aria-hidden="true"><rect x="1" y="1" width="28" height="18" fill="${pal.up.mid}"></rect><rect x="7" y="5" width="16" height="10" class="lg-ghost"></rect></svg>實心撐滿、虛線框在裡面：成交比平常多，資金湧入</div>
       <div class="legend-row"><svg class="legend-glyph" viewBox="0 0 30 20" aria-hidden="true"><rect x="1" y="1" width="28" height="18" class="lg-slot"></rect><rect x="8" y="5.5" width="14" height="9" fill="${pal.down.mid}"></rect><rect x="1" y="1" width="28" height="18" class="lg-ghost"></rect></svg>實心縮小、外圍斜線：成交比平常少，資金撤出</div>
@@ -96,7 +106,7 @@ function renderIndustry(ind: IndustryMetrics, ctx: PanelContext): string {
   const top = ind.stocks.slice(0, 10);
   const strength = ind.flow > 0 ? `${Math.round((ind.flow / m.maxAbsFlow) * 100)} / 100` : '資金撤出';
   return `
-    <p class="eyebrow">產業</p>
+    <p class="hud-code">SECTOR // ${ind.id.toUpperCase()}</p>
     <h2 class="d-title">${esc(ind.name)} <span class="num ${dirCls(ind.changePct)}">${pct(ind.changePct)}</span></h2>
     <dl class="d-grid">
       ${kv(ind.flow >= 0 ? '資金流入' : '資金流出', signedYi(ind.flow), ind.flow >= 0 ? 'up-flow' : 'down-flow')}
@@ -123,7 +133,7 @@ function renderIndustry(ind: IndustryMetrics, ctx: PanelContext): string {
 function renderStock(s: StockMetrics, ctx: PanelContext): string {
   const ind = ctx.metrics.industryById.get(s.industryId);
   return `
-    <p class="eyebrow">個股 · ${s.code}</p>
+    <p class="hud-code">TARGET // ${s.code}</p>
     <h2 class="d-title">${esc(s.name)}</h2>
     <div class="d-price"><b class="num">${price(s.price)}</b>
       <span class="num ${dirCls(s.change)}">${s.change >= 0 ? '▲' : '▼'} ${price(Math.abs(s.change))} (${pct(s.changePct)})</span></div>
@@ -153,7 +163,7 @@ export function renderDetail(el: HTMLElement, ctx: PanelContext): void {
     if (s) html = renderStock(s, ctx);
   }
   if (!html) html = renderOverview(ctx);
-  if (sel) html = `<button class="back-btn" data-clear>← 盤勢總覽</button>${html}`;
+  if (sel) html = `<button class="back-btn" data-clear>◂ 返回總覽</button>${html}`;
   el.innerHTML = html;
 }
 
@@ -231,22 +241,42 @@ function renderMovers(m: MarketMetrics): string {
       <span class="mv-name">${esc(st.name)}</span>
       <span class="mv-pct num ${dirCls(st.changePct)}">${pct(st.changePct)}</span>
       <span class="mv-flow num ${dirCls(st.flow)}">${signed(st.flow, 1)}</span></button>`;
-  return `<div class="movers-col"><h3>吸金</h3>${stocks.slice(0, 5).map(row).join('')}</div>
-    <div class="movers-col"><h3>失血</h3>${stocks.slice(-5).reverse().map(row).join('')}</div>`;
+  return `<div class="movers-col"><h3>▲ 吸金</h3>${stocks.slice(0, 5).map(row).join('')}</div>
+    <div class="movers-col"><h3>▼ 失血</h3>${stocks.slice(-5).reverse().map(row).join('')}</div>`;
 }
 
 export function renderDock(el: HTMLElement, ctx: PanelContext, renderRotationInto: (el: HTMLElement) => void): void {
   const { metrics: m } = ctx;
   if (!el.dataset.ready) {
     el.innerHTML = `
-      <section class="card card-index"><h2 class="panel-title">大盤走勢</h2><div class="chart" id="index-chart"></div></section>
-      <section class="card card-rotation"><h2 class="panel-title">資金輪動條碼 <small>每格 5 分鐘・成交佔比偏離常態的程度</small></h2><div class="rotation" id="rotation"></div></section>
-      <section class="card card-flow"><h2 class="panel-title">產業資金流 <small>億元</small></h2><div class="flow-rank" id="flow-rank"></div></section>
-      <section class="card card-movers"><h2 class="panel-title">個股資金流 <small>億元</small></h2><div class="movers" id="movers"></div></section>`;
+      <section class="card hud card-index">${title('INDEX', '大盤走勢')}<div class="chart" id="index-chart"></div></section>
+      <section class="card hud card-rotation">${title('ROTATION', '資金輪動', ' <small>每格 5 分鐘・成交佔比偏離常態</small>')}<div class="rotation" id="rotation"></div></section>
+      <section class="card hud card-flow">${title('SECTOR FLOW', '產業資金流', ' <small>億元</small>')}<div class="flow-rank" id="flow-rank"></div></section>
+      <section class="card hud card-movers">${title('TARGETS', '個股資金流', ' <small>億元</small>')}<div class="movers" id="movers"></div></section>`;
     el.dataset.ready = '1';
   }
   renderIndexChart(el.querySelector('#index-chart')!, m);
   renderRotationInto(el.querySelector('#rotation')!);
   el.querySelector('#flow-rank')!.innerHTML = renderFlowRank(m);
   el.querySelector('#movers')!.innerHTML = renderMovers(m);
+}
+
+// ---------------------------------------------------------------- 作戰日誌
+
+const LEVEL_MARK: Record<EventLevel, string> = { info: '◆', alert: '▲', critical: '⚠' };
+
+export function renderLog(el: HTMLElement, events: MarketEvent[], freshIds: Set<number>): void {
+  if (!events.length) {
+    el.innerHTML = '<li class="log-empty">等待盤中事件⋯</li>';
+    return;
+  }
+  el.innerHTML = events
+    .map((e) => {
+      const ref = e.code ? `data-stock="${e.code}"` : e.industryId ? `data-industry="${e.industryId}"` : '';
+      const tag = ref ? 'button' : 'span';
+      return `<li class="log-item lv-${e.level}${freshIds.has(e.id) ? ' is-new' : ''}">
+        <span class="log-t num">${clock(e.t)}</span><span class="log-mark" aria-hidden="true">${LEVEL_MARK[e.level]}</span>
+        <${tag} class="log-text" ${ref}>${esc(e.text)}</${tag}></li>`;
+    })
+    .join('');
 }

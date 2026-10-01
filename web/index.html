@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>L.P.L.C. 資金熱力圖</title>
+    <title>L.P.L.C. 資金指揮台</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@900&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Noto+Sans+TC:wght@400;500;700;900&display=swap"
     />
   </head>
   <body>
@@ -17,22 +17,34 @@
         <pattern id="br-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <line x1="0" y1="0" x2="0" y2="6" class="br-hatch-line"></line>
         </pattern>
+        <linearGradient id="scan-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#00e5ff" stop-opacity="0"></stop>
+          <stop offset="0.85" stop-color="#00e5ff" stop-opacity="0.10"></stop>
+          <stop offset="1" stop-color="#00e5ff" stop-opacity="0.45"></stop>
+        </linearGradient>
+        <radialGradient id="sweep-grad" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#00e5ff" stop-opacity="0.35"></stop>
+          <stop offset="1" stop-color="#00e5ff" stop-opacity="0"></stop>
+        </radialGradient>
+        <filter id="neon" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="2.4" result="b"></feGaussianBlur>
+          <feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge>
+        </filter>
       </defs>
     </svg>
     <div class="app">
-      <header class="topbar">
+      <header class="topbar hud">
         <div class="brand">
           <svg class="crest" viewBox="0 0 32 32" aria-hidden="true">
-            <rect x="3" y="3" width="15" height="15" rx="1.5"></rect>
-            <rect x="20" y="3" width="9" height="9" rx="1.5" class="crest-dim"></rect>
-            <rect x="20" y="14" width="9" height="15" rx="1.5" class="crest-dim"></rect>
-            <rect x="3" y="20" width="15" height="9" rx="1.5" class="crest-ghost"></rect>
+            <path d="M16 2 29 9.5v13L16 30 3 22.5v-13Z" class="crest-hex"></path>
+            <circle cx="16" cy="16" r="5.5" class="crest-core"></circle>
+            <path d="M16 6v4M16 22v4M6 16h4M22 16h4" class="crest-tick"></path>
           </svg>
           <div class="brand-text">
-            <h1>資金熱力圖</h1>
-            <p class="eyebrow">L.P.L.C. · Laplace Predictive Leading Core</p>
+            <p class="hud-code">L.P.L.C. // TACTICAL COMMAND</p>
+            <h1>資金指揮台</h1>
           </div>
-          <span class="chip-mock" title="目前使用模擬行情，數字不代表實際市場">模擬行情</span>
+          <span class="chip-mock" title="目前使用模擬行情，數字不代表實際市場">SIM 模擬行情</span>
         </div>
         <dl class="ticker" id="ticker"></dl>
         <div class="controls">
@@ -47,13 +59,17 @@
         </div>
       </header>
 
-      <nav class="sectors" id="sectors" aria-label="產業"></nav>
+      <nav class="sectors hud" id="sectors" aria-label="產業"></nav>
 
-      <main class="field">
+      <main class="field hud">
         <div class="field-head">
           <div class="tabs" role="tablist" aria-label="視圖">
-            <button type="button" role="tab" id="tab-breath" data-view="breath" aria-selected="true" aria-controls="breath">資金呼吸圖</button>
-            <button type="button" role="tab" id="tab-gravity" data-view="gravity" aria-selected="false" aria-controls="gravity">資金引力場</button>
+            <button type="button" role="tab" id="tab-breath" data-view="breath" aria-selected="true" aria-controls="breath">
+              <span class="hud-code">FLUX</span>資金呼吸圖
+            </button>
+            <button type="button" role="tab" id="tab-gravity" data-view="gravity" aria-selected="false" aria-controls="gravity">
+              <span class="hud-code">RADAR</span>資金雷達
+            </button>
           </div>
           <p class="field-hint" id="field-hint"></p>
         </div>
@@ -61,7 +77,13 @@
         <div class="view" id="gravity" role="tabpanel" aria-labelledby="tab-gravity" hidden></div>
       </main>
 
-      <aside class="detail" id="detail" aria-live="polite"></aside>
+      <aside class="side">
+        <div class="detail hud" id="detail" aria-live="polite"></div>
+        <section class="log hud" aria-labelledby="log-title">
+          <h2 class="panel-title" id="log-title"><span class="hud-code">MISSION LOG</span>作戰日誌</h2>
+          <ol class="log-list" id="log"></ol>
+        </section>
+      </aside>
 
       <section class="dock" id="dock" aria-label="盤中統計"></section>
     </div>

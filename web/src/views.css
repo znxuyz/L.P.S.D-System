@@ -1,41 +1,76 @@
-/* 主畫面的兩個視圖：① 資金呼吸圖、③ 資金引力場。 */
+/* 主畫面的兩個視圖：資金呼吸圖（能量艙）與資金雷達。 */
 
-/* ① 呼吸圖 */
+/* ---------- 資金呼吸圖 ---------- */
 .br-ind { transition: opacity 0.25s; }
-.br-ind-frame { fill: none; stroke-width: 1.5; pointer-events: none; }
-.br-ind-head { fill: transparent; cursor: pointer; }
-.br-ind-head:hover { fill: rgba(232, 225, 207, 0.06); }
-.br-ind-label { font-size: 11px; font-weight: 700; fill: var(--ink); pointer-events: none; }
-.br-ind-label .up { fill: var(--up); font-family: var(--font-num); font-weight: 500; }
-.br-ind-label .down { fill: var(--down); font-family: var(--font-num); font-weight: 500; }
+.br-ind-frame { fill: rgba(0, 229, 255, 0.02); stroke-width: 1.2; pointer-events: none; }
+.br-ind-head { fill: rgba(0, 229, 255, 0.05); cursor: pointer; }
+.br-ind-head:hover { fill: rgba(0, 229, 255, 0.16); }
+.br-ind-label { font-size: 11px; font-weight: 700; fill: var(--ink); pointer-events: none; letter-spacing: 0.04em; }
+.br-ind-label .up { fill: var(--up); font-family: var(--font-num); font-weight: 400; }
+.br-ind-label .down { fill: var(--down); font-family: var(--font-num); font-weight: 400; }
 .br-slot { fill: url(#br-hatch); }
-.br-hatch-line { stroke: rgba(232, 225, 207, 0.16); stroke-width: 2; }
+.br-hatch-line { stroke: rgba(0, 229, 255, 0.16); stroke-width: 1.5; }
 .br-stock { cursor: pointer; transition: opacity 0.25s; }
-.br-fill { stroke: var(--bg); stroke-width: 0.5; }
-.br-ghost { fill: none; stroke: rgba(232, 225, 207, 0.55); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
-.br-ghost.is-inflow { stroke: rgba(255, 255, 255, 0.85); }
-.br-stock:hover .br-fill { stroke: var(--parchment); stroke-width: 1.5; }
-.br-stock.is-selected .br-fill { stroke: #ffffff; stroke-width: 3; }
-.br-label { fill: #ffffff; text-anchor: middle; font-weight: 500; pointer-events: none; paint-order: stroke; stroke: rgba(0, 0, 0, 0.35); stroke-width: 2px; }
-.br-label .pc { font-family: var(--font-num); font-size: 0.82em; }
-.br-label .sh { font-size: 0.5em; fill: rgba(255, 255, 255, 0.78); }
-.has-focus .br-stock:not(.is-focus) { opacity: 0.28; }
-.has-focus .br-ind:not(.is-focus) .br-ind-label { opacity: 0.4; }
-.br-ind.is-focus .br-ind-frame { stroke: var(--brass); stroke-opacity: 1; stroke-width: 2.5; }
+.br-fill { stroke: rgba(0, 229, 255, 0.22); stroke-width: 0.6; }
+.br-ghost { fill: none; stroke: rgba(189, 246, 255, 0.5); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.br-ghost.is-inflow { stroke: var(--ghost); stroke-opacity: 0.95; }
+.br-stock:hover .br-fill { stroke: var(--accent); stroke-width: 1.6; }
+.br-stock.is-selected .br-fill { stroke: #ffffff; stroke-width: 2; }
+/* 吸金最強的能量艙：脈衝發光 */
+.br-stock.is-surge .br-fill { stroke: var(--up); stroke-width: 1.6; animation: surge 1.8s ease-in-out infinite; }
+.br-stock.is-surge .br-ghost { stroke: #fff; animation: ghost-dash 1.2s linear infinite; }
+@keyframes surge {
+  0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+  50% { filter: drop-shadow(0 0 7px var(--up)); }
+}
+@keyframes ghost-dash { to { stroke-dashoffset: -12; } }
+.br-label { fill: #ffffff; text-anchor: middle; font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgba(0, 0, 0, 0.45); stroke-width: 2px; letter-spacing: 0.04em; }
+.br-label .pc { font-family: var(--font-num); font-weight: 400; font-size: 0.86em; }
+.br-label .sh { font-size: 0.5em; font-weight: 400; fill: rgba(220, 248, 255, 0.8); }
+.has-focus .br-stock:not(.is-focus) { opacity: 0.22; }
+.has-focus .br-ind:not(.is-focus) .br-ind-label { opacity: 0.35; }
+.br-ind.is-focus .br-ind-frame { stroke: var(--accent); stroke-opacity: 1; stroke-width: 2; filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.7)); }
 
-/* ③ 引力場 */
-.gv-glow { fill: rgba(201, 162, 74, 0.08); }
-.gv-ring { fill: none; stroke: rgba(232, 225, 207, 0.16); stroke-dasharray: 3 5; }
-.gv-ring.core { stroke: var(--brass); stroke-dasharray: none; stroke-opacity: 0.6; }
-.gv-ring-label { fill: var(--muted); font-size: 10px; text-anchor: middle; letter-spacing: 0.1em; }
+/* 鎖定準星 */
+.br-reticle { pointer-events: none; }
+.ret-frame { fill: none; stroke: var(--accent); stroke-width: 2.5; filter: drop-shadow(0 0 5px var(--accent)); animation: lock 1.6s ease-in-out infinite; }
+.ret-label { fill: var(--accent); font: 600 10px var(--font-hud); letter-spacing: 0.14em; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+@keyframes lock { 50% { stroke-opacity: 0.45; } }
+
+/* 掃描光帶：由上往下定時掃過 */
+.br-scan { pointer-events: none; mix-blend-mode: screen; animation: scan 6s linear infinite; }
+@keyframes scan {
+  0% { transform: translateY(-60px); }
+  100% { transform: translateY(var(--scan-h, 600px)); }
+}
+
+/* ---------- 資金雷達 ---------- */
+.gv-disc { fill: rgba(0, 229, 255, 0.025); }
+.gv-ring { fill: none; stroke: rgba(0, 229, 255, 0.22); }
+.gv-ring.minor { stroke: rgba(0, 229, 255, 0.08); stroke-dasharray: 2 6; }
+.gv-ring.core { stroke: var(--accent); stroke-width: 1.5; filter: drop-shadow(0 0 5px var(--accent)); }
+.gv-ring.norm { stroke-dasharray: 4 4; }
+.gv-ring.out { stroke: rgba(0, 229, 255, 0.4); }
+.gv-cross { stroke: rgba(0, 229, 255, 0.1); }
+.gv-ticks { stroke: rgba(0, 229, 255, 0.45); }
+.gv-sweep { animation: sweep 5s linear infinite; }
+.gv-sweep-fan { fill: rgba(0, 229, 255, 0.07); }
+.gv-sweep-edge { stroke: var(--accent); stroke-width: 1.5; stroke-opacity: 0.8; filter: drop-shadow(0 0 4px var(--accent)); }
+@keyframes sweep { to { transform: rotate(360deg); } }
+.gv-ring-label { fill: var(--accent); font: 600 9px var(--font-hud); text-anchor: middle; letter-spacing: 0.16em; opacity: 0.7; }
 .gv-node { cursor: pointer; transition: opacity 0.25s; }
-.gv-node circle { stroke: var(--bg); stroke-width: 1; }
-.gv-node:hover circle { stroke: var(--parchment); stroke-width: 1.5; }
-.gv-node.is-selected circle { stroke: #ffffff; stroke-width: 3; }
-.gv-node text { fill: #ffffff; text-anchor: middle; font-weight: 500; pointer-events: none; paint-order: stroke; stroke: rgba(0, 0, 0, 0.35); stroke-width: 2px; }
-.gv-node .pc { font-family: var(--font-num); font-size: 0.85em; }
+.gv-node circle { fill-opacity: 0.88; stroke: rgba(0, 229, 255, 0.35); stroke-width: 1; }
+.gv-node:hover circle { stroke: var(--accent); stroke-width: 2; }
+.gv-node.is-selected circle { stroke: #ffffff; stroke-width: 3; filter: drop-shadow(0 0 8px var(--accent)); }
+.gv-node text { fill: #ffffff; text-anchor: middle; font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgba(0, 0, 0, 0.45); stroke-width: 2px; }
+.gv-node .pc { font-family: var(--font-num); font-weight: 400; font-size: 0.9em; }
 .gv-ind-label { fill: var(--ink-2); font-size: 11px; font-weight: 700; cursor: pointer; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
-.gv-ind-label:hover, .gv-ind-label.is-focus { fill: var(--brass); }
-.gv-ind-label .up { fill: var(--up); font-family: var(--font-num); font-weight: 500; }
-.gv-ind-label .down { fill: var(--down); font-family: var(--font-num); font-weight: 500; }
-.has-focus .gv-node:not(.is-focus) { opacity: 0.25; }
+.gv-ind-label:hover, .gv-ind-label.is-focus { fill: var(--accent); }
+.gv-ind-label .up { fill: var(--up); font-family: var(--font-num); font-weight: 400; }
+.gv-ind-label .down { fill: var(--down); font-family: var(--font-num); font-weight: 400; }
+.has-focus .gv-node:not(.is-focus) { opacity: 0.2; }
+
+@media (prefers-reduced-motion: reduce) {
+  .br-stock.is-surge .br-fill, .br-stock.is-surge .br-ghost, .ret-frame, .br-scan, .gv-sweep { animation: none; }
+  .br-scan { display: none; }
+}

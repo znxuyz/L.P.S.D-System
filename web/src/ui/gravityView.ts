@@ -107,19 +107,41 @@ export class GravityView {
     return Math.max(60, Math.min(this.width / 2 - side, this.height / 2 - 22));
   }
 
+  /** 雷達底圖：同心圓、刻度、十字線與旋轉掃描線。 */
   private drawRings(): void {
     const cx = this.width / 2;
     const cy = this.height / 2;
     const R = this.radius;
     const rings = [
-      { r: R * 0.16, label: '資金核心', cls: 'core' },
-      { r: R * 0.58, label: '常態', cls: 'norm' },
-      { r: R * 0.98, label: '撤出', cls: 'out' },
+      { r: R * 0.16, label: 'CORE 資金核心', cls: 'core' },
+      { r: R * 0.58, label: 'NORMAL 常態', cls: 'norm' },
+      { r: R * 0.98, label: 'OUTFLOW 撤出', cls: 'out' },
     ];
     this.ringsG.selectAll('*').remove();
-    this.ringsG.append('circle').attr('class', 'gv-glow').attr('cx', cx).attr('cy', cy).attr('r', R * 0.3);
+    this.ringsG.append('circle').attr('class', 'gv-disc').attr('cx', cx).attr('cy', cy).attr('r', R);
+    for (const r of [0.37, 0.78]) {
+      this.ringsG.append('circle').attr('class', 'gv-ring minor').attr('cx', cx).attr('cy', cy).attr('r', R * r);
+    }
     for (const ring of rings) {
       this.ringsG.append('circle').attr('class', `gv-ring ${ring.cls}`).attr('cx', cx).attr('cy', cy).attr('r', ring.r);
+    }
+    // 十字線與刻度
+    this.ringsG.append('path').attr('class', 'gv-cross')
+      .attr('d', `M${cx - R},${cy}H${cx + R}M${cx},${cy - R}V${cy + R}`);
+    const ticks: string[] = [];
+    for (let deg = 0; deg < 360; deg += 5) {
+      const a = (deg * Math.PI) / 180;
+      const len = deg % 30 === 0 ? 9 : 4;
+      ticks.push(`M${cx + Math.cos(a) * R},${cy + Math.sin(a) * R}L${cx + Math.cos(a) * (R - len)},${cy + Math.sin(a) * (R - len)}`);
+    }
+    this.ringsG.append('path').attr('class', 'gv-ticks').attr('d', ticks.join(''));
+    // 掃描線：60° 扇形 + 前緣亮線
+    const sweep = this.ringsG.append('g').attr('transform', `translate(${cx},${cy})`).append('g').attr('class', 'gv-sweep');
+    const a0 = -Math.PI / 3;
+    sweep.append('path').attr('class', 'gv-sweep-fan')
+      .attr('d', `M0,0L${Math.cos(a0) * R},${Math.sin(a0) * R}A${R},${R} 0 0 1 ${R},0Z`);
+    sweep.append('line').attr('class', 'gv-sweep-edge').attr('x1', 0).attr('y1', 0).attr('x2', R).attr('y2', 0);
+    for (const ring of rings) {
       this.ringsG.append('text').attr('class', 'gv-ring-label').attr('x', cx).attr('y', cy - ring.r + 13).text(ring.label);
     }
   }

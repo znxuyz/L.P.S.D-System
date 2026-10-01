@@ -10,9 +10,10 @@ import { interpolateLab, scaleLinear } from 'd3';
 
 export type Convention = 'tw' | 'intl';
 
-const RED = { weak: '#6b2c2f', mid: '#a1302f', strong: '#dc3b33', bright: '#ff5d52' };
-const GREEN = { weak: '#244a36', mid: '#1b6c3f', strong: '#139448', bright: '#34c774' };
-export const NEUTRAL_CELL = '#34373e';
+// 指揮台配色：深色能量艙底，漲跌用高彩度霓虹色
+const RED = { weak: '#4b1828', mid: '#8e1d39', strong: '#d8264b', bright: '#ff4566' };
+const GREEN = { weak: '#0d3a2f', mid: '#0c6b4a', strong: '#0fa968', bright: '#1df09a' };
+export const NEUTRAL_CELL = '#172233';
 
 export const CONTESTANT_COLORS = ['#3987e5', '#c98500', '#d55181'];
 /** 核心城池第四名以後的攻城產業合併成「其他」。 */

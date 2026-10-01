@@ -3,13 +3,14 @@ import './views.css';
 import { MockMarketProvider } from './data/mockProvider';
 import { sessionOpenMs } from './data/twse';
 import type { MarketSnapshot, Universe } from './data/types';
+import { EventDetector, type MarketEvent } from './domain/events';
 import { computeMetrics, type MarketMetrics } from './domain/metrics';
 import { computeRotation, type Rotation } from './domain/rotation';
 import { BreathingView } from './ui/breathingView';
 import { palette, type Convention } from './ui/colors';
 import { sameFocus, type Focus } from './ui/focus';
 import { GravityView } from './ui/gravityView';
-import { renderDetail, renderDock, renderSectors, renderTicker, type PanelContext } from './ui/panels';
+import { renderDetail, renderDock, renderLog, renderSectors, renderTicker, type PanelContext } from './ui/panels';
 import { renderRotation } from './ui/rotationView';
 
 type ViewName = 'breath' | 'gravity';
@@ -17,8 +18,8 @@ type ViewName = 'breath' | 'gravity';
 const CONVENTION_KEY = 'lplc.convention';
 const VIEW_KEY = 'lplc.view';
 const HINTS: Record<ViewName, string> = {
-  breath: '面積 = 今日成交額　虛線框 = 20 日常態　顏色 = 漲跌',
-  gravity: '泡泡 = 今日成交額　越靠中心 = 資金流入越多　顏色 = 漲跌',
+  breath: '面積 = 今日成交額　虛線框 = 20 日常態　顏色 = 漲跌　發光 = 吸金最強',
+  gravity: '光點 = 今日成交額　越靠中心 = 資金流入越多　顏色 = 漲跌',
 };
 
 function load<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
@@ -45,6 +46,9 @@ class App {
   private readonly gravity: GravityView;
   private metrics?: MarketMetrics;
   private rotation?: Rotation;
+  private readonly detector = new EventDetector();
+  private events: MarketEvent[] = [];
+  private fresh = new Set<number>();
   private focus: Focus = null;
   private convention = load<Convention>(CONVENTION_KEY, ['tw', 'intl'], 'tw');
   private view = load<ViewName>(VIEW_KEY, ['breath', 'gravity'], 'breath');
@@ -64,7 +68,15 @@ class App {
   }
 
   private onSnapshot(snap: MarketSnapshot): void {
+    // 重播時時間倒退，日誌重新開始
+    if (this.metrics && snap.time < this.metrics.time) {
+      this.detector.reset();
+      this.events = [];
+    }
     this.metrics = computeMetrics(this.universe, snap);
+    const found = this.detector.detect(this.metrics);
+    this.fresh = new Set(found.map((e) => e.id));
+    this.events = [...found.reverse(), ...this.events].slice(0, 40);
     this.rotation = computeRotation(this.universe, snap.turnoverHistory);
     this.refresh();
   }
@@ -87,6 +99,8 @@ class App {
     renderSectors($('#sectors'), ctx);
     renderDetail($('#detail'), ctx);
     renderDock($('#dock'), ctx, (el) => this.rotation && renderRotation(el, this.rotation, this.pal, this.openMs));
+    renderLog($('#log'), this.events, this.fresh);
+    this.fresh = new Set();
     this.syncControls();
   }
 

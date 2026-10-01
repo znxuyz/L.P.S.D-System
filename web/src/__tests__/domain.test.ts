@@ -72,3 +72,25 @@ describe('模擬行情', () => {
     expect(roundToTick(9.876)).toBe(9.88);
   });
 });
+
+describe('作戰日誌', () => {
+  it('第一次只報告系統上線，之後才偵測變化', async () => {
+    const { EventDetector } = await import('../domain/events');
+    const universe = buildMockUniverse();
+    const detector = new EventDetector();
+    const first = detector.detect(computeMetrics(universe, snapshotAt(30)));
+    expect(first).toHaveLength(1);
+    expect(first[0].text).toContain('系統上線');
+    // 同一個盤勢再看一次，不會重複報事件
+    expect(detector.detect(computeMetrics(universe, snapshotAt(30)))).toHaveLength(0);
+  });
+
+  it('盤中推進會產生事件，而且每個事件都有時間', async () => {
+    const { EventDetector } = await import('../domain/events');
+    const universe = buildMockUniverse();
+    const detector = new EventDetector();
+    const events = [30, 90, 150, 210, 270].flatMap((min) => detector.detect(computeMetrics(universe, snapshotAt(min))));
+    expect(events.length).toBeGreaterThan(3);
+    for (const e of events) expect(e.t).toBeGreaterThan(0);
+  });
+});

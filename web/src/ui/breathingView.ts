@@ -29,6 +29,8 @@ const HEADER = 18;
 export class BreathingView {
   private readonly svg;
   private readonly g;
+  private readonly reticle;
+  private readonly scan;
   private root?: HierarchyNode<Node>;
   private width = 0;
   private height = 0;
@@ -47,6 +49,10 @@ export class BreathingView {
     this.industryOf = new Map(universe.stocks.map((s) => [s.code, s.industryId]));
     this.svg = select(el).append('svg').attr('class', 'br-svg').attr('role', 'img').attr('aria-label', '資金呼吸圖');
     this.g = this.svg.append('g');
+    this.reticle = this.svg.append('g').attr('class', 'br-reticle').attr('display', 'none');
+    this.reticle.append('path').attr('class', 'ret-frame');
+    this.reticle.append('text').attr('class', 'ret-label');
+    this.scan = this.svg.append('rect').attr('class', 'br-scan').attr('x', 0).attr('height', 60).attr('fill', 'url(#scan-grad)');
     this.tooltip = document.createElement('div');
     this.tooltip.className = 'bf-tooltip';
     this.tooltip.hidden = true;
@@ -64,6 +70,7 @@ export class BreathingView {
     this.width = w;
     this.height = h;
     this.svg.attr('viewBox', `0 0 ${w} ${h}`).attr('width', w).attr('height', h);
+    this.scan.attr('width', w).style('--scan-h', `${h}px`);
     this.root = undefined;
     this.g.selectAll('*').remove();
     if (this.metrics && this.pal) this.update(this.metrics, this.pal);
@@ -82,6 +89,33 @@ export class BreathingView {
     this.g.selectAll<SVGGElement, Rect>('g.br-stock')
       .classed('is-selected', (d) => f?.kind === 'stock' && d.data.id === f.id)
       .classed('is-focus', (d) => this.industryOf.get(d.data.id) === industry);
+    this.drawReticle();
+  }
+
+  /** 選取股票時畫出鎖定準星。 */
+  private drawReticle(): void {
+    const f = this.focus;
+    const leaf = f?.kind === 'stock' ? this.root?.leaves().find((d) => d.data.id === f.id) as Rect | undefined : undefined;
+    if (!leaf) {
+      this.reticle.attr('display', 'none');
+      return;
+    }
+    const pad = 4;
+    const x0 = leaf.x0 - pad;
+    const y0 = leaf.y0 - pad;
+    const x1 = leaf.x1 + pad;
+    const y1 = leaf.y1 + pad;
+    const k = Math.max(6, Math.min(16, (x1 - x0) / 4, (y1 - y0) / 4));
+    this.reticle.attr('display', null);
+    this.reticle.select('path.ret-frame').attr('d',
+      `M${x0},${y0 + k}V${y0}H${x0 + k}M${x1 - k},${y0}H${x1}V${y0 + k}` +
+      `M${x1},${y1 - k}V${y1}H${x1 - k}M${x0 + k},${y1}H${x0}V${y1 - k}`);
+    // 標籤放在準星下緣；太靠近底部時改放在格位內側下方
+    const below = y1 + 13 < this.height;
+    this.reticle.select('text.ret-label')
+      .attr('x', Math.max(2, x0 + 2))
+      .attr('y', below ? y1 + 13 : y1 - 6)
+      .text(`LOCK ▸ ${leaf.data.id} ${leaf.data.name}`);
   }
 
   private slotValue(code: string): number {
@@ -183,6 +217,10 @@ export class BreathingView {
       return breathRatios(s.share, s.baseShare);
     };
 
+    // 資金湧入最強的前 6 檔股票發出脈衝光
+    const surging = new Set([...metrics.stockByCode.values()].filter((s) => s.flow > 0).sort((a, b) => b.flow - a.flow).slice(0, 6).map((s) => s.code));
+    if (dur) setTimeout(() => this.drawReticle(), dur);
+    stocks.classed('is-surge', (d) => surging.has(d.data.id));
     stocks.select<SVGRectElement>('rect.br-slot').transition().duration(dur)
       .attr('x', (d) => d.x0).attr('y', (d) => d.y0)
       .attr('width', (d) => Math.max(0, d.x1 - d.x0)).attr('height', (d) => Math.max(0, d.y1 - d.y0));
