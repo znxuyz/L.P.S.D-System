@@ -1,4 +1,4 @@
-/* 主畫面的兩個視圖：資金呼吸圖（能量艙）與資金雷達。 */
+/* 主畫面的兩個視圖：資金領地（六角格）與資金雷達。 */
 
 /* ---------- 資金領地（六角格） ---------- */
 .hx { cursor: pointer; stroke: none; transition: fill 0.6s, fill-opacity 0.6s, opacity 0.25s; }
