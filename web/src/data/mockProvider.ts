@@ -2,7 +2,7 @@ import type { MarketDataProvider, PlaybackControl } from './provider';
 import { buildMockUniverse } from './mockUniverse';
 import { createRng, gaussian } from './random';
 import { SESSION_MINUTES, roundToTick, sessionOpenMs } from './twse';
-import type { IndexPoint, MarketSnapshot, Quote, Universe } from './types';
+import type { IndexPoint, MarketSnapshot, Quote, TurnoverBar, Universe } from './types';
 
 /**
  * 模擬盤中行情。
@@ -77,6 +77,7 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
   private minute = 0;
   private states = new Map<string, StockState>();
   private series: IndexPoint[] = [];
+  private turnoverHistory: TurnoverBar[] = [];
   private listeners = new Set<(s: MarketSnapshot) => void>();
   private timer: ReturnType<typeof setInterval> | undefined;
 
@@ -143,6 +144,7 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
     this.rng = createRng(this.seed);
     this.minute = 0;
     this.series = [];
+    this.turnoverHistory = [];
     this.states.clear();
     for (const s of this.universe.stocks) {
       this.states.set(s.code, {
@@ -211,6 +213,9 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
 
   private pushIndexPoint(): void {
     this.series.push(this.indexPoint());
+    const byStock: Record<string, number> = {};
+    for (const [code, st] of this.states) byStock[code] = st.turnover;
+    this.turnoverHistory.push({ t: this.openMs + Math.floor(this.minute) * 60_000, byStock });
   }
 
   private snapshot(): MarketSnapshot {
@@ -230,6 +235,7 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
         series: this.series.slice(),
       },
       quotes,
+      turnoverHistory: this.turnoverHistory.slice(),
     };
   }
 

@@ -99,3 +99,16 @@ describe('戰場版面', () => {
     });
   }
 });
+
+describe('資金輪動', () => {
+  it('每個時段各產業的偏離加總為 0', async () => {
+    const { computeRotation } = await import('../domain/rotation');
+    const universe = buildMockUniverse();
+    const snap = firstSnapshot();
+    const rotation = computeRotation(universe, snap.turnoverHistory);
+    expect(rotation.buckets.length).toBeGreaterThan(5);
+    for (const b of rotation.buckets) {
+      expect(Math.abs(b.values.reduce((s, v) => s + v, 0))).toBeLessThan(1e-6);
+    }
+  });
+});
