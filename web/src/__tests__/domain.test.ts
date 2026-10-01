@@ -3,7 +3,6 @@ import { MockMarketProvider } from '../data/mockProvider';
 import { buildMockUniverse } from '../data/mockUniverse';
 import { roundToTick } from '../data/twse';
 import type { MarketSnapshot } from '../data/types';
-import { breathRatios } from '../domain/breath';
 import { computeMetrics } from '../domain/metrics';
 import { computeRotation } from '../domain/rotation';
 
@@ -32,20 +31,6 @@ describe('資金流（成交額佔比變化）', () => {
     for (const ind of m.industries) {
       expect(ind.stocks.reduce((s, x) => s + x.flow, 0)).toBeCloseTo(ind.flow, 6);
     }
-  });
-});
-
-describe('呼吸圖格位', () => {
-  it('資金湧入：實心撐滿，虛線框在內', () => {
-    expect(breathRatios(0.04, 0.02)).toEqual({ slot: 0.04, fill: 1, ghost: 0.5 });
-  });
-
-  it('資金撤出：實心縮小，虛線框為格位', () => {
-    expect(breathRatios(0.01, 0.04)).toEqual({ slot: 0.04, fill: 0.25, ghost: 1 });
-  });
-
-  it('沒有成交資料時不畫', () => {
-    expect(breathRatios(0, 0)).toEqual({ slot: 0, fill: 0, ghost: 0 });
   });
 });
 
@@ -92,5 +77,24 @@ describe('作戰日誌', () => {
     const events = [30, 90, 150, 210, 270].flatMap((min) => detector.detect(computeMetrics(universe, snapshotAt(min))));
     expect(events.length).toBeGreaterThan(3);
     for (const e of events) expect(e.t).toBeGreaterThan(0);
+  });
+});
+
+describe('六角格領地', () => {
+  it('格數接近目標，而且每一格都有主人', async () => {
+    const { assignHexes, buildHexGrid } = await import('../layout/hexgrid');
+    const { hexes } = buildHexGrid(900, 560, 900);
+    expect(hexes.length).toBeGreaterThan(800);
+    expect(hexes.length).toBeLessThan(1000);
+    const owned = assignHexes(hexes, [
+      { id: 'A', group: 'g1', x0: 0, y0: 0, x1: 600, y1: 560 },
+      { id: 'B', group: 'g2', x0: 600, y0: 0, x1: 899, y1: 560 },
+      { id: 'C', group: 'g2', x0: 899, y0: 0, x1: 900, y1: 560 },
+    ]);
+    expect(hexes.every((h) => h.owner)).toBe(true);
+    // 格數與面積成正比（A 佔 2/3）
+    expect(owned.get('A')!.length / hexes.length).toBeCloseTo(2 / 3, 1);
+    // 小於一格的範圍也至少分到一格
+    expect(owned.get('C')!.length).toBe(1);
   });
 });

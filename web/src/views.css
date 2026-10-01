@@ -1,35 +1,29 @@
 /* 主畫面的兩個視圖：資金呼吸圖（能量艙）與資金雷達。 */
 
-/* ---------- 資金呼吸圖 ---------- */
-.br-ind { transition: opacity 0.25s; }
-.br-ind-frame { fill: rgba(0, 229, 255, 0.02); stroke-width: 1.2; pointer-events: none; }
-.br-ind-head { fill: rgba(0, 229, 255, 0.05); cursor: pointer; }
-.br-ind-head:hover { fill: rgba(0, 229, 255, 0.16); }
-.br-ind-label { font-size: 11px; font-weight: 700; fill: var(--ink); pointer-events: none; letter-spacing: 0.04em; }
-.br-ind-label .up { fill: var(--up); font-family: var(--font-num); font-weight: 400; }
-.br-ind-label .down { fill: var(--down); font-family: var(--font-num); font-weight: 400; }
-.br-slot { fill: url(#br-hatch); }
-.br-hatch-line { stroke: rgba(0, 229, 255, 0.16); stroke-width: 1.5; }
-.br-stock { cursor: pointer; transition: opacity 0.25s; }
-.br-fill { stroke: rgba(0, 229, 255, 0.22); stroke-width: 0.6; }
-.br-ghost { fill: none; stroke: rgba(189, 246, 255, 0.5); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
-.br-ghost.is-inflow { stroke: var(--ghost); stroke-opacity: 0.95; }
-.br-stock:hover .br-fill { stroke: var(--accent); stroke-width: 1.6; }
-.br-stock.is-selected .br-fill { stroke: #ffffff; stroke-width: 2; }
-/* 吸金最強的能量艙：脈衝發光 */
-.br-stock.is-surge .br-fill { stroke: var(--up); stroke-width: 1.6; animation: surge 1.8s ease-in-out infinite; }
-.br-stock.is-surge .br-ghost { stroke: #fff; animation: ghost-dash 1.2s linear infinite; }
-@keyframes surge {
-  0%, 100% { filter: drop-shadow(0 0 0 transparent); }
-  50% { filter: drop-shadow(0 0 7px var(--up)); }
-}
-@keyframes ghost-dash { to { stroke-dashoffset: -12; } }
-.br-label { fill: #ffffff; text-anchor: middle; font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgba(0, 0, 0, 0.45); stroke-width: 2px; letter-spacing: 0.04em; }
-.br-label .pc { font-family: var(--font-num); font-weight: 400; font-size: 0.86em; }
-.br-label .sh { font-size: 0.5em; font-weight: 400; fill: rgba(220, 248, 255, 0.8); }
-.has-focus .br-stock:not(.is-focus) { opacity: 0.22; }
-.has-focus .br-ind:not(.is-focus) .br-ind-label { opacity: 0.35; }
-.br-ind.is-focus .br-ind-frame { stroke: var(--accent); stroke-opacity: 1; stroke-width: 2; filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.7)); }
+/* ---------- 資金領地（六角格） ---------- */
+.hx { cursor: pointer; stroke: none; transition: fill 0.6s, fill-opacity 0.6s, opacity 0.25s; }
+.hx:hover { stroke: var(--accent); stroke-width: 1.5; }
+/* 失血：變暗 */
+.hx.is-drain { fill-opacity: 0.38; }
+/* 吸金最強：脈衝 */
+.hx.is-surge { animation: hx-surge 1.8s ease-in-out infinite; }
+@keyframes hx-surge { 50% { fill-opacity: 0.7; } }
+/* 易主：白色閃光 */
+.hx.is-captured { stroke: #ffffff; stroke-width: 2; animation: hx-capture 1.2s ease-out; }
+@keyframes hx-capture { 0% { fill: #ffffff; } }
+.hx-stock-edges { fill: none; stroke: var(--bg); stroke-width: 2.4; stroke-linecap: round; pointer-events: none; }
+.hx-borders path { fill: none; stroke-width: 2; stroke-linecap: round; pointer-events: none; filter: drop-shadow(0 0 3px currentColor); }
+.hx-borders path.is-focus { stroke: var(--accent) !important; stroke-opacity: 1 !important; stroke-width: 3; filter: drop-shadow(0 0 6px var(--accent)); }
+.hx-stock { fill: #ffffff; text-anchor: middle; font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgba(0, 0, 0, 0.6); stroke-width: 2.5px; letter-spacing: 0.04em; transition: opacity 0.25s; }
+.hx-stock .pc { font-family: var(--font-num); font-weight: 400; font-size: 0.82em; }
+.hx-stock.is-dim { opacity: 0.25; }
+.hx-tag { cursor: pointer; }
+.hx-tag rect { fill: rgba(4, 10, 18, 0.88); stroke: var(--line-strong); }
+.hx-tag:hover rect { stroke: var(--accent); }
+.hx-tag text { font-size: 10px; font-weight: 700; fill: var(--ink); }
+.hx-tag .up { fill: var(--up); font-family: var(--font-num); font-weight: 400; }
+.hx-tag .down { fill: var(--down); font-family: var(--font-num); font-weight: 400; }
+.has-focus .hx:not(.is-focus) { opacity: 0.2; }
 
 /* 鎖定準星 */
 .br-reticle { pointer-events: none; }
@@ -71,6 +65,6 @@
 .has-focus .gv-node:not(.is-focus) { opacity: 0.2; }
 
 @media (prefers-reduced-motion: reduce) {
-  .br-stock.is-surge .br-fill, .br-stock.is-surge .br-ghost, .ret-frame, .br-scan, .gv-sweep { animation: none; }
+  .hx.is-surge, .hx.is-captured, .ret-frame, .br-scan, .gv-sweep { animation: none; }
   .br-scan { display: none; }
 }

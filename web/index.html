@@ -14,9 +14,6 @@
   <body>
     <svg width="0" height="0" style="position:absolute" aria-hidden="true">
       <defs>
-        <pattern id="br-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="6" class="br-hatch-line"></line>
-        </pattern>
         <linearGradient id="scan-grad" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stop-color="#00e5ff" stop-opacity="0"></stop>
           <stop offset="0.85" stop-color="#00e5ff" stop-opacity="0.10"></stop>
@@ -64,8 +61,8 @@
       <main class="field hud">
         <div class="field-head">
           <div class="tabs" role="tablist" aria-label="視圖">
-            <button type="button" role="tab" id="tab-breath" data-view="breath" aria-selected="true" aria-controls="breath">
-              <span class="hud-code">FLUX</span>資金呼吸圖
+            <button type="button" role="tab" id="tab-hex" data-view="hex" aria-selected="true" aria-controls="hex">
+              <span class="hud-code">HEX</span>資金領地
             </button>
             <button type="button" role="tab" id="tab-gravity" data-view="gravity" aria-selected="false" aria-controls="gravity">
               <span class="hud-code">RADAR</span>資金雷達
@@ -73,7 +70,7 @@
           </div>
           <p class="field-hint" id="field-hint"></p>
         </div>
-        <div class="view" id="breath" role="tabpanel" aria-labelledby="tab-breath"></div>
+        <div class="view" id="hex" role="tabpanel" aria-labelledby="tab-hex"></div>
         <div class="view" id="gravity" role="tabpanel" aria-labelledby="tab-gravity" hidden></div>
       </main>
 

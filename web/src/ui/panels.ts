@@ -78,7 +78,7 @@ function renderOverview(ctx: PanelContext): string {
   const gradient = [-3, -2, -1, 0, 1, 2, 3].map((v) => pal.heat(v)).join(',');
   return `
     ${title('OVERVIEW', '盤勢總覽')}
-    <p class="d-lead">方塊面積是今日成交額。撐破虛線框的方塊正在吸金，縮在斜線空地裡的正在失血。點產業或股票看細節，Esc 取消選取。</p>
+    <p class="d-lead">每個六角格代表相同的成交額，成交越大的股票佔越多格，同產業連成一片領地。點產業或股票看細節，Esc 取消選取。</p>
     <dl class="d-grid">
       ${kv('最大資金流入', `${esc(best.name)}`, '')}
       ${kv('流入金額', signedYi(best.flow), 'up-flow')}
@@ -87,8 +87,9 @@ function renderOverview(ctx: PanelContext): string {
     </dl>
     <h3 class="d-sub">讀圖說明</h3>
     <div class="legend">
-      <div class="legend-row"><svg class="legend-glyph" viewBox="0 0 30 20" aria-hidden="true"><rect x="1" y="1" width="28" height="18" fill="${pal.up.mid}"></rect><rect x="7" y="5" width="16" height="10" class="lg-ghost"></rect></svg>實心撐滿、虛線框在裡面：成交比平常多，資金湧入</div>
-      <div class="legend-row"><svg class="legend-glyph" viewBox="0 0 30 20" aria-hidden="true"><rect x="1" y="1" width="28" height="18" class="lg-slot"></rect><rect x="8" y="5.5" width="14" height="9" fill="${pal.down.mid}"></rect><rect x="1" y="1" width="28" height="18" class="lg-ghost"></rect></svg>實心縮小、外圍斜線：成交比平常少，資金撤出</div>
+      <div class="legend-row"><svg class="legend-glyph" viewBox="-10 -10 20 20" aria-hidden="true"><path d="M0,-9L7.8,-4.5L7.8,4.5L0,9L-7.8,4.5L-7.8,-4.5Z" fill="${pal.up.strong}"></path></svg>全亮：成交比常態多，正在吸金</div>
+      <div class="legend-row"><svg class="legend-glyph" viewBox="-10 -10 20 20" aria-hidden="true"><path d="M0,-9L7.8,-4.5L7.8,4.5L0,9L-7.8,4.5L-7.8,-4.5Z" fill="${pal.up.strong}" fill-opacity="0.38"></path></svg>變暗：成交比常態少，正在失血</div>
+      <div class="legend-row"><svg class="legend-glyph" viewBox="-10 -10 20 20" aria-hidden="true"><path d="M0,-9L7.8,-4.5L7.8,4.5L0,9L-7.8,4.5L-7.8,-4.5Z" fill="none" stroke="#ffffff" stroke-width="2"></path></svg>閃光：這一格剛被別的股票奪下</div>
       <div class="legend-row"><span class="legend-heat" style="background:linear-gradient(90deg,${gradient})"></span></div>
       <div class="legend-scale num"><span>−3%</span><span>漲跌幅</span><span>+3%</span></div>
     </div>

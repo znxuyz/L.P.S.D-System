@@ -6,21 +6,18 @@ import type { MarketSnapshot, Universe } from './data/types';
 import { EventDetector, type MarketEvent } from './domain/events';
 import { computeMetrics, type MarketMetrics } from './domain/metrics';
 import { computeRotation, type Rotation } from './domain/rotation';
-import { BreathingView } from './ui/breathingView';
 import { palette, type Convention } from './ui/colors';
 import { sameFocus, type Focus } from './ui/focus';
 import { GravityView } from './ui/gravityView';
+import { HexMapView } from './ui/hexMapView';
 import { renderDetail, renderDock, renderLog, renderSectors, renderTicker, type PanelContext } from './ui/panels';
 import { renderRotation } from './ui/rotationView';
 
-type ViewName = 'breath' | 'gravity';
+type ViewName = 'hex' | 'gravity';
 
 const CONVENTION_KEY = 'lplc.convention';
 const VIEW_KEY = 'lplc.view';
-const HINTS: Record<ViewName, string> = {
-  breath: '面積 = 今日成交額　虛線框 = 20 日常態　顏色 = 漲跌　發光 = 吸金最強',
-  gravity: '光點 = 今日成交額　越靠中心 = 資金流入越多　顏色 = 漲跌',
-};
+const GRAVITY_HINT = '光點 = 今日成交額　越靠中心 = 資金流入越多　顏色 = 漲跌';
 
 function load<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
@@ -42,7 +39,7 @@ function save(key: string, value: string): void {
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
 class App {
-  private readonly breath: BreathingView;
+  private readonly hex: HexMapView;
   private readonly gravity: GravityView;
   private metrics?: MarketMetrics;
   private rotation?: Rotation;
@@ -51,7 +48,7 @@ class App {
   private fresh = new Set<number>();
   private focus: Focus = null;
   private convention = load<Convention>(CONVENTION_KEY, ['tw', 'intl'], 'tw');
-  private view = load<ViewName>(VIEW_KEY, ['breath', 'gravity'], 'breath');
+  private view = load<ViewName>(VIEW_KEY, ['hex', 'gravity'], 'hex');
   private pal = palette(this.convention);
   private readonly openMs = sessionOpenMs(new Date());
 
@@ -60,7 +57,7 @@ class App {
     private readonly provider: MockMarketProvider,
   ) {
     const onSelect = (f: Focus) => this.select(f);
-    this.breath = new BreathingView($('#breath'), universe, onSelect);
+    this.hex = new HexMapView($('#hex'), universe, onSelect);
     this.gravity = new GravityView($('#gravity'), universe, onSelect);
     this.bindControls();
     this.showView(this.view);
@@ -83,8 +80,9 @@ class App {
 
   private refresh(): void {
     if (!this.metrics) return;
-    if (this.view === 'breath') this.breath.update(this.metrics, this.pal);
+    if (this.view === 'hex') this.hex.update(this.metrics, this.pal);
     else this.gravity.update(this.metrics, this.pal);
+    this.renderHint();
     this.renderPanels();
   }
 
@@ -106,7 +104,7 @@ class App {
 
   private select(f: Focus): void {
     this.focus = sameFocus(f, this.focus) ? null : f;
-    this.breath.setFocus(this.focus);
+    this.hex.setFocus(this.focus);
     this.gravity.setFocus(this.focus);
     this.renderPanels();
   }
@@ -114,13 +112,21 @@ class App {
   private showView(view: ViewName): void {
     this.view = view;
     save(VIEW_KEY, view);
-    for (const name of ['breath', 'gravity'] as const) {
+    for (const name of ['hex', 'gravity'] as const) {
       $(`#${name}`).hidden = name !== view;
       $(`#tab-${name}`).setAttribute('aria-selected', String(name === view));
     }
-    $('#field-hint').textContent = HINTS[view];
+    this.renderHint();
     this.gravity.setActive(view === 'gravity');
     this.refresh();
+  }
+
+  private renderHint(): void {
+    const per = this.hex.yiPerHex;
+    $('#field-hint').textContent =
+      this.view === 'hex'
+        ? `每格 ≈ ${per >= 1 ? per.toFixed(1) : per.toFixed(2)} 億成交額　亮 = 吸金　暗 = 失血　閃光 = 領地易主　顏色 = 漲跌`
+        : GRAVITY_HINT;
   }
 
   private bindControls(): void {
