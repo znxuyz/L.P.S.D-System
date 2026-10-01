@@ -6,7 +6,8 @@ import type { IndustryMeta, StockMeta, Universe } from './types';
  * 不代表任何實際行情。
  */
 
-type Row = [code: string, name: string, marketCap: number, price: number];
+/** 第五個欄位可以覆寫個股的週轉率（日均成交額 ÷ 市值）。 */
+type Row = [code: string, name: string, marketCap: number, price: number, turnoverRate?: number];
 
 interface IndustrySeed extends IndustryMeta {
   /** 日均成交額 ÷ 市值，決定這個產業平常的成交活躍度。 */
@@ -18,7 +19,7 @@ const SEEDS: IndustrySeed[] = [
   {
     id: 'semi', name: '半導體', short: '半導', turnoverRate: 0.0035,
     rows: [
-      ['2330', '台積電', 280000, 1080], ['2454', '聯發科', 21000, 1320], ['3711', '日月光投控', 7200, 166],
+      ['2330', '台積電', 280000, 1080, 0.0011], ['2454', '聯發科', 21000, 1320], ['3711', '日月光投控', 7200, 166],
       ['2303', '聯電', 5800, 46.5], ['2379', '瑞昱', 2900, 565], ['3034', '聯詠', 2600, 428],
       ['3661', '世芯-KY', 2500, 3150], ['5274', '信驊', 2400, 6450], ['6488', '環球晶', 1800, 380],
       ['5347', '世界', 1800, 108], ['3529', '力旺', 1700, 2280], ['2408', '南亞科', 1600, 52],
@@ -129,14 +130,14 @@ export function buildMockUniverse(seed = 20260930): Universe {
   const industries: IndustryMeta[] = SEEDS.map(({ id, name, short }) => ({ id, name, short }));
 
   const raw = SEEDS.flatMap((ind) =>
-    ind.rows.map(([code, name, marketCap, price]) => ({
+    ind.rows.map(([code, name, marketCap, price, rate]) => ({
       code,
       name,
       industryId: ind.id,
       marketCap,
       prevClose: price,
       // 個股的活躍度在產業平均上下浮動，小型股通常週轉較快。
-      rawTurnover: marketCap * ind.turnoverRate * (0.6 + rng() * 0.8) * (marketCap < 1000 ? 1.6 : 1),
+      rawTurnover: marketCap * (rate ?? ind.turnoverRate) * (0.6 + rng() * 0.8) * (marketCap < 1000 ? 1.6 : 1),
     })),
   );
   const scale = TARGET_AVG_TURNOVER / raw.reduce((sum, s) => sum + s.rawTurnover, 0);

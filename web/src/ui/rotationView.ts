@@ -11,9 +11,11 @@ import { SESSION_MINUTES } from '../data/twse';
 export function renderRotation(el: HTMLElement, rotation: Rotation, pal: Palette, sessionStart: number): void {
   const labelW = 64;
   const w = Math.max(240, el.clientWidth);
-  const rowH = 13;
-  const top = 4;
-  const h = top + rotation.industries.length * rowH + 18;
+  const top = 2;
+  const axis = 16;
+  const n = rotation.industries.length;
+  const rowH = Math.max(9, Math.min(16, Math.floor((el.clientHeight - top - axis) / n) || 13));
+  const h = top + n * rowH + axis;
   const slots = SESSION_MINUTES / 5;
   const cellW = (w - labelW - 4) / slots;
   const scale = scaleLinear<string>()
@@ -29,10 +31,10 @@ export function renderRotation(el: HTMLElement, rotation: Rotation, pal: Palette
         .map((b) => {
           const slot = Math.round((b.start - sessionStart) / 300_000);
           const v = b.values[i];
-          return `<rect x="${(labelW + slot * cellW).toFixed(1)}" y="${y}" width="${Math.max(1, cellW - 1).toFixed(1)}" height="${rowH - 2}" fill="${scale(v)}"><title>${hm(b.start)}–${hm(b.end)} ${escapeHtml(ind.name)} ${v >= 0 ? '+' : '−'}${num(Math.abs(v), 2)} 個百分點</title></rect>`;
+          return `<rect data-industry="${ind.id}" x="${(labelW + slot * cellW).toFixed(1)}" y="${y}" width="${Math.max(1, cellW - 1).toFixed(1)}" height="${rowH - 2}" fill="${scale(v)}"><title>${hm(b.start)}–${hm(b.end)} ${escapeHtml(ind.name)} ${v >= 0 ? '+' : '−'}${num(Math.abs(v), 2)} 個百分點</title></rect>`;
         })
         .join('');
-      return `<text class="rt-label" x="${labelW - 6}" y="${y + rowH - 4}">${escapeHtml(ind.name)}</text>${cells}`;
+      return `<text class="rt-label" data-industry="${ind.id}" x="${labelW - 6}" y="${y + rowH - 3}" font-size="${Math.min(11, rowH - 2)}">${escapeHtml(ind.name)}</text>${cells}`;
     })
     .join('');
   const ticks = [0, 90, 180, 270]

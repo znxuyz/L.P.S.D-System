@@ -1,7 +1,9 @@
 import { hierarchy, select, treemap, treemapResquarify, type HierarchyNode, type HierarchyRectangularNode } from 'd3';
 import type { Universe } from '../data/types';
+import { breathRatios } from '../domain/breath';
 import type { MarketMetrics } from '../domain/metrics';
 import type { Palette } from './colors';
+import type { Focus } from './focus';
 import { escapeHtml, pct, price, sharePct, signedYi } from './format';
 
 /**
@@ -32,20 +34,18 @@ export class BreathingView {
   private height = 0;
   private metrics?: MarketMetrics;
   private pal?: Palette;
-  private selected: string | null = null;
+  private focus: Focus = null;
+  private readonly industryOf: Map<string, string>;
   private readonly tooltip: HTMLDivElement;
   private readonly layout = treemap<Node>().tile(treemapResquarify).paddingInner(2).paddingTop((d) => (d.depth === 1 ? HEADER : 2)).paddingRight(2).paddingBottom(2).paddingLeft(2).round(false);
 
   constructor(
     private readonly el: HTMLElement,
     private readonly universe: Universe,
-    private readonly onSelect: (code: string | null) => void,
+    private readonly onSelect: (focus: Focus) => void,
   ) {
+    this.industryOf = new Map(universe.stocks.map((s) => [s.code, s.industryId]));
     this.svg = select(el).append('svg').attr('class', 'br-svg').attr('role', 'img').attr('aria-label', '資金呼吸圖');
-    const defs = this.svg.append('defs');
-    defs.append('pattern').attr('id', 'br-hatch').attr('width', 6).attr('height', 6)
-      .attr('patternUnits', 'userSpaceOnUse').attr('patternTransform', 'rotate(45)')
-      .append('line').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 6).attr('class', 'br-hatch-line');
     this.g = this.svg.append('g');
     this.tooltip = document.createElement('div');
     this.tooltip.className = 'bf-tooltip';
@@ -69,15 +69,24 @@ export class BreathingView {
     if (this.metrics && this.pal) this.update(this.metrics, this.pal);
   }
 
-  setSelected(code: string | null): void {
-    this.selected = code;
-    this.g.selectAll<SVGGElement, Rect>('g.br-stock').classed('is-selected', (d) => d.data.id === code);
+  setFocus(focus: Focus): void {
+    this.focus = focus;
+    this.applyFocus();
+  }
+
+  private applyFocus(): void {
+    const f = this.focus;
+    const industry = f?.kind === 'industry' ? f.id : f?.kind === 'stock' ? this.industryOf.get(f.id) : undefined;
+    this.svg.classed('has-focus', f?.kind === 'industry');
+    this.g.selectAll<SVGGElement, Rect>('g.br-ind').classed('is-focus', (d) => d.data.id === industry);
+    this.g.selectAll<SVGGElement, Rect>('g.br-stock')
+      .classed('is-selected', (d) => f?.kind === 'stock' && d.data.id === f.id)
+      .classed('is-focus', (d) => this.industryOf.get(d.data.id) === industry);
   }
 
   private slotValue(code: string): number {
     const s = this.metrics?.stockByCode.get(code);
-    if (!s) return 0;
-    return Math.max(s.share, s.baseShare);
+    return s ? breathRatios(s.share, s.baseShare).slot : 0;
   }
 
   update(metrics: MarketMetrics, pal: Palette): void {
@@ -109,13 +118,20 @@ export class BreathingView {
       .join((enter) => {
         const g = enter.append('g').attr('class', 'br-ind');
         g.append('rect').attr('class', 'br-ind-frame');
+        g.append('rect').attr('class', 'br-ind-head').attr('height', HEADER)
+          .on('click', (e: MouseEvent, d) => {
+            e.stopPropagation();
+            this.onSelect({ kind: 'industry', id: d.data.id });
+          });
         g.append('text').attr('class', 'br-ind-label').attr('dy', '1em');
         return g;
       });
-    inds.select<SVGRectElement>('rect').transition().duration(dur)
+    inds.select<SVGRectElement>('rect.br-ind-head')
+      .attr('x', (d) => d.x0).attr('y', (d) => d.y0).attr('width', (d) => Math.max(0, d.x1 - d.x0));
+    inds.select<SVGRectElement>('rect.br-ind-frame').transition().duration(dur)
       .attr('x', (d) => d.x0).attr('y', (d) => d.y0)
       .attr('width', (d) => Math.max(0, d.x1 - d.x0)).attr('height', (d) => Math.max(0, d.y1 - d.y0));
-    inds.select<SVGRectElement>('rect')
+    inds.select<SVGRectElement>('rect.br-ind-frame')
       .attr('stroke', (d) => ((metrics.industryById.get(d.data.id)?.flow ?? 0) >= 0 ? pal.up.bright : pal.down.bright))
       .attr('stroke-opacity', (d) => 0.25 + 0.6 * Math.abs(metrics.industryById.get(d.data.id)?.flow ?? 0) / metrics.maxAbsFlow);
     inds.select<SVGTextElement>('text')
@@ -148,13 +164,13 @@ export class BreathingView {
         g.append('text').attr('class', 'br-label');
         g.on('click', (e: MouseEvent, d) => {
           e.stopPropagation();
-          this.onSelect(this.selected === d.data.id ? null : d.data.id);
+          this.onSelect({ kind: 'stock', id: d.data.id });
         })
           .on('mousemove', (e: MouseEvent, d) => this.showTooltip(e, d.data.id))
           .on('mouseleave', () => (this.tooltip.hidden = true));
         return g;
       });
-    stocks.classed('is-selected', (d) => d.data.id === this.selected);
+    this.applyFocus();
 
     const box = (d: Rect, ratio: number) => {
       const w = d.x1 - d.x0;
@@ -164,8 +180,7 @@ export class BreathingView {
     };
     const ratios = (d: Rect) => {
       const s = metrics.stockByCode.get(d.data.id)!;
-      const slot = Math.max(s.share, s.baseShare) || 1;
-      return { fill: s.share / slot, ghost: s.baseShare / slot };
+      return breathRatios(s.share, s.baseShare);
     };
 
     stocks.select<SVGRectElement>('rect.br-slot').transition().duration(dur)

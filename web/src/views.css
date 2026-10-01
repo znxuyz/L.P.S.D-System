@@ -1,0 +1,41 @@
+/* 主畫面的兩個視圖：① 資金呼吸圖、③ 資金引力場。 */
+
+/* ① 呼吸圖 */
+.br-ind { transition: opacity 0.25s; }
+.br-ind-frame { fill: none; stroke-width: 1.5; pointer-events: none; }
+.br-ind-head { fill: transparent; cursor: pointer; }
+.br-ind-head:hover { fill: rgba(232, 225, 207, 0.06); }
+.br-ind-label { font-size: 11px; font-weight: 700; fill: var(--ink); pointer-events: none; }
+.br-ind-label .up { fill: var(--up); font-family: var(--font-num); font-weight: 500; }
+.br-ind-label .down { fill: var(--down); font-family: var(--font-num); font-weight: 500; }
+.br-slot { fill: url(#br-hatch); }
+.br-hatch-line { stroke: rgba(232, 225, 207, 0.16); stroke-width: 2; }
+.br-stock { cursor: pointer; transition: opacity 0.25s; }
+.br-fill { stroke: var(--bg); stroke-width: 0.5; }
+.br-ghost { fill: none; stroke: rgba(232, 225, 207, 0.55); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.br-ghost.is-inflow { stroke: rgba(255, 255, 255, 0.85); }
+.br-stock:hover .br-fill { stroke: var(--parchment); stroke-width: 1.5; }
+.br-stock.is-selected .br-fill { stroke: #ffffff; stroke-width: 3; }
+.br-label { fill: #ffffff; text-anchor: middle; font-weight: 500; pointer-events: none; paint-order: stroke; stroke: rgba(0, 0, 0, 0.35); stroke-width: 2px; }
+.br-label .pc { font-family: var(--font-num); font-size: 0.82em; }
+.br-label .sh { font-size: 0.5em; fill: rgba(255, 255, 255, 0.78); }
+.has-focus .br-stock:not(.is-focus) { opacity: 0.28; }
+.has-focus .br-ind:not(.is-focus) .br-ind-label { opacity: 0.4; }
+.br-ind.is-focus .br-ind-frame { stroke: var(--brass); stroke-opacity: 1; stroke-width: 2.5; }
+
+/* ③ 引力場 */
+.gv-glow { fill: rgba(201, 162, 74, 0.08); }
+.gv-ring { fill: none; stroke: rgba(232, 225, 207, 0.16); stroke-dasharray: 3 5; }
+.gv-ring.core { stroke: var(--brass); stroke-dasharray: none; stroke-opacity: 0.6; }
+.gv-ring-label { fill: var(--muted); font-size: 10px; text-anchor: middle; letter-spacing: 0.1em; }
+.gv-node { cursor: pointer; transition: opacity 0.25s; }
+.gv-node circle { stroke: var(--bg); stroke-width: 1; }
+.gv-node:hover circle { stroke: var(--parchment); stroke-width: 1.5; }
+.gv-node.is-selected circle { stroke: #ffffff; stroke-width: 3; }
+.gv-node text { fill: #ffffff; text-anchor: middle; font-weight: 500; pointer-events: none; paint-order: stroke; stroke: rgba(0, 0, 0, 0.35); stroke-width: 2px; }
+.gv-node .pc { font-family: var(--font-num); font-size: 0.85em; }
+.gv-ind-label { fill: var(--ink-2); font-size: 11px; font-weight: 700; cursor: pointer; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+.gv-ind-label:hover, .gv-ind-label.is-focus { fill: var(--brass); }
+.gv-ind-label .up { fill: var(--up); font-family: var(--font-num); font-weight: 500; }
+.gv-ind-label .down { fill: var(--down); font-family: var(--font-num); font-weight: 500; }
+.has-focus .gv-node:not(.is-focus) { opacity: 0.25; }

@@ -1,26 +1,38 @@
 import './styles.css';
+import './views.css';
 import { MockMarketProvider } from './data/mockProvider';
+import { sessionOpenMs } from './data/twse';
 import type { MarketSnapshot, Universe } from './data/types';
-import { evaluateCastle, type CastleState } from './domain/castles';
 import { computeMetrics, type MarketMetrics } from './domain/metrics';
-import { computeBattlefield, type BattlefieldLayout } from './layout/battlefield';
-import { BattlefieldView, type SelectionRef } from './ui/battlefieldView';
+import { computeRotation, type Rotation } from './domain/rotation';
+import { BreathingView } from './ui/breathingView';
 import { palette, type Convention } from './ui/colors';
+import { sameFocus, type Focus } from './ui/focus';
+import { GravityView } from './ui/gravityView';
 import { renderDetail, renderDock, renderSectors, renderTicker, type PanelContext } from './ui/panels';
+import { renderRotation } from './ui/rotationView';
+
+type ViewName = 'breath' | 'gravity';
 
 const CONVENTION_KEY = 'lplc.convention';
+const VIEW_KEY = 'lplc.view';
+const HINTS: Record<ViewName, string> = {
+  breath: '面積 = 今日成交額　虛線框 = 20 日常態　顏色 = 漲跌',
+  gravity: '泡泡 = 今日成交額　越靠中心 = 資金流入越多　顏色 = 漲跌',
+};
 
-function loadConvention(): Convention {
+function load<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
-    return localStorage.getItem(CONVENTION_KEY) === 'intl' ? 'intl' : 'tw';
+    const v = localStorage.getItem(key) as T | null;
+    return v && allowed.includes(v) ? v : fallback;
   } catch {
-    return 'tw';
+    return fallback;
   }
 }
 
-function saveConvention(c: Convention): void {
+function save(key: string, value: string): void {
   try {
-    localStorage.setItem(CONVENTION_KEY, c);
+    localStorage.setItem(key, value);
   } catch {
     /* 無法儲存時沿用預設 */
   }
@@ -29,64 +41,43 @@ function saveConvention(c: Convention): void {
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
 class App {
-  private readonly view: BattlefieldView;
-  private layout?: BattlefieldLayout;
+  private readonly breath: BreathingView;
+  private readonly gravity: GravityView;
   private metrics?: MarketMetrics;
-  private castles: CastleState[] = [];
-  private selection: SelectionRef = null;
-  private convention = loadConvention();
+  private rotation?: Rotation;
+  private focus: Focus = null;
+  private convention = load<Convention>(CONVENTION_KEY, ['tw', 'intl'], 'tw');
+  private view = load<ViewName>(VIEW_KEY, ['breath', 'gravity'], 'breath');
   private pal = palette(this.convention);
+  private readonly openMs = sessionOpenMs(new Date());
 
   constructor(
     private readonly universe: Universe,
     private readonly provider: MockMarketProvider,
   ) {
-    this.view = new BattlefieldView($<HTMLDivElement>('#stage'), universe, (sel) => this.select(sel));
+    const onSelect = (f: Focus) => this.select(f);
+    this.breath = new BreathingView($('#breath'), universe, onSelect);
+    this.gravity = new GravityView($('#gravity'), universe, onSelect);
     this.bindControls();
-    this.observeStage();
+    this.showView(this.view);
     provider.subscribe((snap) => this.onSnapshot(snap));
-  }
-
-  private observeStage(): void {
-    const stage = $<HTMLDivElement>('#stage');
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let last = '';
-    const relayout = () => {
-      const w = Math.floor(stage.clientWidth);
-      const h = Math.floor(stage.clientHeight);
-      const key = `${w}x${h}`;
-      if (w < 50 || h < 50 || key === last) return;
-      last = key;
-      this.layout = computeBattlefield(this.universe, w, h);
-      this.view.setLayout(this.layout);
-      this.refresh();
-    };
-    new ResizeObserver(() => {
-      clearTimeout(timer);
-      timer = setTimeout(relayout, last ? 180 : 0);
-    }).observe(stage);
   }
 
   private onSnapshot(snap: MarketSnapshot): void {
     this.metrics = computeMetrics(this.universe, snap);
+    this.rotation = computeRotation(this.universe, snap.turnoverHistory);
     this.refresh();
   }
 
   private refresh(): void {
-    if (!this.metrics || !this.layout) return;
-    this.castles = this.layout.castles.map((site) => evaluateCastle(site, this.metrics!));
-    this.view.update(this.metrics, this.castles, this.pal);
+    if (!this.metrics) return;
+    if (this.view === 'breath') this.breath.update(this.metrics, this.pal);
+    else this.gravity.update(this.metrics, this.pal);
     this.renderPanels();
   }
 
   private context(): PanelContext {
-    return {
-      metrics: this.metrics!,
-      castles: this.castles,
-      selection: this.selection,
-      pal: this.pal,
-      playing: !this.provider.paused,
-    };
+    return { metrics: this.metrics!, selection: this.focus, pal: this.pal, playing: !this.provider.paused };
   }
 
   private renderPanels(): void {
@@ -95,51 +86,61 @@ class App {
     renderTicker($('#ticker'), ctx);
     renderSectors($('#sectors'), ctx);
     renderDetail($('#detail'), ctx);
-    renderDock($('#dock'), ctx);
+    renderDock($('#dock'), ctx, (el) => this.rotation && renderRotation(el, this.rotation, this.pal, this.openMs));
     this.syncControls();
   }
 
-  private select(sel: SelectionRef): void {
-    const same = sel && this.selection && sel.kind === this.selection.kind && sel.id === this.selection.id;
-    this.selection = same ? null : sel;
-    this.view.setSelection(this.selection);
+  private select(f: Focus): void {
+    this.focus = sameFocus(f, this.focus) ? null : f;
+    this.breath.setFocus(this.focus);
+    this.gravity.setFocus(this.focus);
     this.renderPanels();
   }
 
+  private showView(view: ViewName): void {
+    this.view = view;
+    save(VIEW_KEY, view);
+    for (const name of ['breath', 'gravity'] as const) {
+      $(`#${name}`).hidden = name !== view;
+      $(`#tab-${name}`).setAttribute('aria-selected', String(name === view));
+    }
+    $('#field-hint').textContent = HINTS[view];
+    this.gravity.setActive(view === 'gravity');
+    this.refresh();
+  }
+
   private bindControls(): void {
-    // 所有面板裡的產業、股票、城池按鈕都走同一個選取流程
+    // 面板裡的產業、股票按鈕都走同一個選取流程
     document.addEventListener('click', (e) => {
-      const el = (e.target as Element).closest<HTMLElement>('[data-industry],[data-stock],[data-castle],[data-clear]');
-      if (!el || el.closest('#stage')) return;
-      if (el.dataset.clear !== undefined) this.select(null);
-      else if (el.dataset.industry) this.select({ kind: 'industry', id: el.dataset.industry });
-      else if (el.dataset.stock) this.select({ kind: 'stock', id: el.dataset.stock });
-      else if (el.dataset.castle) this.select({ kind: 'castle', id: el.dataset.castle });
+      const el = (e.target as Element).closest<HTMLElement | SVGElement>('[data-industry],[data-stock],[data-clear]');
+      if (!el || el.closest('.view')) return;
+      const data = (el as HTMLElement).dataset;
+      if (data.clear !== undefined) this.select(null);
+      else if (data.industry) this.select({ kind: 'industry', id: data.industry });
+      else if (data.stock) this.select({ kind: 'stock', id: data.stock });
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.select(null);
+      if (e.key === 'Escape' && this.focus) this.select(this.focus);
       const row = (e.target as Element).closest?.<HTMLElement>('tr[data-stock]');
       if (row && (e.key === 'Enter' || e.key === ' ')) this.select({ kind: 'stock', id: row.dataset.stock! });
     });
-
+    for (const tab of document.querySelectorAll<HTMLButtonElement>('[data-view]')) {
+      tab.addEventListener('click', () => this.showView(tab.dataset.view as ViewName));
+    }
     for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-speed]')) {
       btn.addEventListener('click', () => {
         this.provider.setSpeed(Number(btn.dataset.speed));
         this.syncControls();
       });
     }
-    $('#btn-play').addEventListener('click', () => {
-      if (this.provider.paused) this.provider.resume();
-      else this.provider.pause();
-    });
+    $('#btn-play').addEventListener('click', () => (this.provider.paused ? this.provider.resume() : this.provider.pause()));
     $('#btn-restart').addEventListener('click', () => this.provider.restart());
     $('#btn-convention').addEventListener('click', () => {
       this.convention = this.convention === 'tw' ? 'intl' : 'tw';
-      saveConvention(this.convention);
+      save(CONVENTION_KEY, this.convention);
       this.pal = palette(this.convention);
       this.refresh();
     });
-    $('#btn-reset-zoom').addEventListener('click', () => this.view.resetZoom());
   }
 
   private syncControls(): void {

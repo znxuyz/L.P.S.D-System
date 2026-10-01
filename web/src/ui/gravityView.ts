@@ -2,6 +2,7 @@ import { forceCollide, forceSimulation, forceX, forceY, select, type Simulation,
 import type { IndustryId, Universe } from '../data/types';
 import type { MarketMetrics } from '../domain/metrics';
 import type { Palette } from './colors';
+import type { Focus } from './focus';
 import { escapeHtml, pct, price, sharePct, signedYi } from './format';
 
 /**
@@ -35,13 +36,14 @@ export class GravityView {
   private height = 0;
   private metrics?: MarketMetrics;
   private pal?: Palette;
-  private selected: string | null = null;
+  private focus: Focus = null;
+  private active = true;
   private readonly angleOf = new Map<IndustryId, number>();
 
   constructor(
     private readonly el: HTMLElement,
     universe: Universe,
-    private readonly onSelect: (code: string | null) => void,
+    private readonly onSelect: (focus: Focus) => void,
   ) {
     this.svg = select(el).append('svg').attr('class', 'gv-svg').attr('role', 'img').attr('aria-label', '資金引力場');
     this.ringsG = this.svg.append('g').attr('class', 'gv-rings');
@@ -118,13 +120,30 @@ export class GravityView {
     this.ringsG.append('circle').attr('class', 'gv-glow').attr('cx', cx).attr('cy', cy).attr('r', R * 0.3);
     for (const ring of rings) {
       this.ringsG.append('circle').attr('class', `gv-ring ${ring.cls}`).attr('cx', cx).attr('cy', cy).attr('r', ring.r);
-      this.ringsG.append('text').attr('class', 'gv-ring-label').attr('x', cx).attr('y', cy - ring.r - 4).text(ring.label);
+      this.ringsG.append('text').attr('class', 'gv-ring-label').attr('x', cx).attr('y', cy - ring.r + 13).text(ring.label);
     }
   }
 
-  setSelected(code: string | null): void {
-    this.selected = code;
-    this.nodesG.selectAll<SVGGElement, Bubble>('g.gv-node').classed('is-selected', (d) => d.code === code);
+  setFocus(focus: Focus): void {
+    this.focus = focus;
+    this.applyFocus();
+  }
+
+  /** 切到其他分頁時停止物理模擬，省電。 */
+  setActive(active: boolean): void {
+    this.active = active;
+    if (!active) this.sim.stop();
+    else if (this.metrics && this.pal) this.update(this.metrics, this.pal);
+  }
+
+  private applyFocus(): void {
+    const f = this.focus;
+    const industry = f?.kind === 'industry' ? f.id : f?.kind === 'stock' ? this.bubbles.find((b) => b.code === f.id)?.industryId : undefined;
+    this.svg.classed('has-focus', f?.kind === 'industry');
+    this.nodesG.selectAll<SVGGElement, Bubble>('g.gv-node')
+      .classed('is-selected', (d) => f?.kind === 'stock' && d.code === f.id)
+      .classed('is-focus', (d) => d.industryId === industry);
+    this.labelsG.selectAll<SVGTextElement, { id: string }>('text').classed('is-focus', (d) => d.id === industry);
   }
 
   update(metrics: MarketMetrics, pal: Palette): void {
@@ -163,13 +182,12 @@ export class GravityView {
         g.append('text');
         g.on('click', (e: MouseEvent, d) => {
           e.stopPropagation();
-          this.onSelect(this.selected === d.code ? null : d.code);
+          this.onSelect({ kind: 'stock', id: d.code });
         })
           .on('mousemove', (e: MouseEvent, d) => this.showTooltip(e, d.code))
           .on('mouseleave', () => (this.tooltip.hidden = true));
         return g;
       });
-    nodes.classed('is-selected', (d) => d.code === this.selected);
     nodes.select('circle')
       .attr('fill', (d) => pal.heat(metrics.stockByCode.get(d.code)?.changePct ?? 0))
       .transition().duration(700)
@@ -199,7 +217,16 @@ export class GravityView {
         const c = Math.cos(this.angleOf.get(d.id) ?? 0);
         return c > 0.3 ? 'start' : c < -0.3 ? 'end' : 'middle';
       })
-      .html((d) => `${escapeHtml(d.name)}<tspan dx="4" class="${d.flow >= 0 ? 'up' : 'down'}">${d.flow >= 0 ? '▲' : '▼'}${Math.abs(d.flow).toFixed(0)}</tspan>`);
+      .html((d) => `${escapeHtml(d.name)}<tspan dx="4" class="${d.flow >= 0 ? 'up' : 'down'}">${d.flow >= 0 ? '▲' : '▼'}${Math.abs(d.flow).toFixed(0)}</tspan>`)
+      .on('click', (e: MouseEvent, d) => {
+        e.stopPropagation();
+        this.onSelect({ kind: 'industry', id: d.id });
+      });
+    this.applyFocus();
+    if (!this.active) {
+      this.tick();
+      return;
+    }
 
     if (this.reducedMotion.matches) {
       this.sim.alpha(1);
