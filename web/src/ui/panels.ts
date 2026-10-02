@@ -79,7 +79,7 @@ function renderOverview(ctx: PanelContext): string {
   const gradient = [-3, -2, -1, 0, 1, 2, 3].map((v) => pal.heat(v)).join(',');
   return `
     ${title('冒險情報')}
-    <p class="d-lead">每個產業是一個王國，每檔股票是一塊領地。每一格代表相同的成交額，成交越大的股票領地越大。點王國或領地看細節，按 F 放大地圖，Esc 取消選取。</p>
+    <p class="d-lead">每個產業是一個王國，每檔股票是一塊領地。每一格代表相同的成交額，成交越大的股票領地越大。在世界地圖上點王國或領地看細節，Esc 取消選取。</p>
     <dl class="d-grid">
       ${kv('最大資金流入', `${esc(best.name)}`, '')}
       ${kv('流入金額', signedYi(best.flow), 'up-flow')}
@@ -167,7 +167,7 @@ export function renderDetail(el: HTMLElement, ctx: PanelContext): void {
     if (s) html = renderStock(s, ctx);
   }
   if (!html) html = renderOverview(ctx);
-  if (sel) html = `<button class="back-btn" data-clear>◀ 返回情報</button>${html}`;
+  if (sel) html = `<button class="back-btn" data-clear>✕ 取消選取</button>${html}`;
   el.innerHTML = html;
 }
 

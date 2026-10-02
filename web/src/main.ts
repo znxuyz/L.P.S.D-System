@@ -55,6 +55,7 @@ class App {
     this.dialogue = new DialogueBox($('#dialogue'), onSelect);
     $<HTMLImageElement>('#crest').src = spriteUrl('fin');
     this.bindControls();
+    this.showPage(location.hash === '#intel' ? 'intel' : 'map');
     provider.subscribe((snap) => this.onSnapshot(snap));
   }
 
@@ -86,6 +87,10 @@ class App {
     renderTicker($('#ticker'), ctx);
     renderSectors($('#sectors'), ctx);
     renderDetail($('#detail'), ctx);
+    // 地圖頁：選取時在地圖右上角浮出狀態視窗
+    const floating = $('#map-detail');
+    floating.hidden = !this.focus || this.page !== 'map';
+    if (!floating.hidden) renderDetail(floating, ctx);
     renderDock($('#dock'), ctx, (el) => this.rotation && renderRotation(el, this.rotation, this.pal, this.openMs));
     renderLog($('#log'), this.events, this.fresh);
     this.fresh = new Set();
@@ -101,11 +106,18 @@ class App {
     this.renderPanels();
   }
 
-  private toggleExpanded(force?: boolean): void {
-    const on = $('.app').classList.toggle('is-expanded', force);
-    const btn = $('#btn-expand');
-    btn.setAttribute('aria-pressed', String(on));
-    btn.textContent = on ? '還原版面' : '放大地圖';
+  private showPage(page: 'map' | 'intel'): void {
+    const app = $('.app');
+    app.classList.toggle('page-map', page === 'map');
+    app.classList.toggle('page-intel', page === 'intel');
+    $('#tab-map').setAttribute('aria-selected', String(page === 'map'));
+    $('#tab-intel').setAttribute('aria-selected', String(page === 'intel'));
+    if (location.hash !== `#${page}`) history.replaceState(null, '', `#${page}`);
+    this.renderPanels();
+  }
+
+  private get page(): 'map' | 'intel' {
+    return $('.app').classList.contains('page-intel') ? 'intel' : 'map';
   }
 
   private bindControls(): void {
@@ -119,16 +131,14 @@ class App {
       else if (data.stock) this.select({ kind: 'stock', id: data.stock });
     });
     document.addEventListener('keydown', (e) => {
-      const typing = (e.target as Element).closest?.('input, textarea, select');
-      if (!typing && (e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey) this.toggleExpanded();
-      if (e.key === 'Escape') {
-        if (document.querySelector('.app.is-expanded')) this.toggleExpanded(false);
-        else if (this.focus) this.select(this.focus);
-      }
+      if (e.key === 'Escape' && this.focus) this.select(this.focus);
       const row = (e.target as Element).closest?.<HTMLElement>('tr[data-stock]');
       if (row && (e.key === 'Enter' || e.key === ' ')) this.select({ kind: 'stock', id: row.dataset.stock! });
     });
-    $('#btn-expand').addEventListener('click', () => this.toggleExpanded());
+    for (const tab of document.querySelectorAll<HTMLButtonElement>('[data-page]')) {
+      tab.addEventListener('click', () => this.showPage(tab.dataset.page as 'map' | 'intel'));
+    }
+    window.addEventListener('hashchange', () => this.showPage(location.hash === '#intel' ? 'intel' : 'map'));
     for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-speed]')) {
       btn.addEventListener('click', () => {
         this.provider.setSpeed(Number(btn.dataset.speed));

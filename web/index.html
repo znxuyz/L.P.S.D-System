@@ -18,32 +18,43 @@
           <img class="crest" id="crest" alt="" width="32" height="32" />
           <div class="brand-text">
             <h1>台股大冒險</h1>
-            <p class="eyebrow">L.P.L.C. Laplace Predictive Leading Core</p>
           </div>
           <span class="chip-mock" title="目前使用模擬行情，數字不代表實際市場">模擬行情</span>
         </div>
+        <div class="pages" role="tablist" aria-label="頁面">
+          <button type="button" role="tab" id="tab-map" data-page="map" aria-selected="true" aria-controls="page-map">世界地圖</button>
+          <button type="button" role="tab" id="tab-intel" data-page="intel" aria-selected="false">冒險情報</button>
+        </div>
         <dl class="ticker" id="ticker"></dl>
-        <div class="controls">
+        <details class="menu">
+          <summary class="btn">選單</summary>
+          <div class="menu-body win">
+          <p class="menu-label">播放速度</p>
           <div class="seg" role="group" aria-label="播放速度">
             <button type="button" id="speed-1" data-speed="1" aria-pressed="false">1×</button>
             <button type="button" id="speed-10" data-speed="10" aria-pressed="false">10×</button>
             <button type="button" id="speed-60" data-speed="60" aria-pressed="true">60×</button>
           </div>
-          <button type="button" class="btn" id="btn-play">暫停</button>
-          <button type="button" class="btn" id="btn-restart">重播</button>
+          <p class="menu-label">行情</p>
+          <div class="menu-row">
+            <button type="button" class="btn" id="btn-play">暫停</button>
+            <button type="button" class="btn" id="btn-restart">重播</button>
+          </div>
+          <p class="menu-label">漲跌配色</p>
           <button type="button" class="btn" id="btn-convention" title="切換漲跌配色">紅漲綠跌</button>
-        </div>
+          </div>
+        </details>
       </header>
 
       <nav class="sectors win" id="sectors" aria-label="王國一覽"></nav>
 
-      <main class="field win">
+      <main class="field win" id="page-map" role="tabpanel" aria-labelledby="tab-map">
         <div class="field-head">
           <h2 class="panel-title">世界地圖</h2>
           <p class="field-hint" id="field-hint"></p>
-          <button type="button" class="btn btn-expand" id="btn-expand" aria-pressed="false" title="放大地圖（F）">放大地圖</button>
         </div>
         <div class="view" id="map"></div>
+        <aside class="map-detail win" id="map-detail" aria-live="polite" hidden></aside>
         <div class="dialogue" id="dialogue" role="status" aria-live="polite"></div>
       </main>
 
