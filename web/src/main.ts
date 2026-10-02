@@ -1,5 +1,4 @@
 import './styles.css';
-import './views.css';
 import { MockMarketProvider } from './data/mockProvider';
 import { sessionOpenMs } from './data/twse';
 import type { MarketSnapshot, Universe } from './data/types';
@@ -7,30 +6,26 @@ import { EventDetector, type MarketEvent } from './domain/events';
 import { computeMetrics, type MarketMetrics } from './domain/metrics';
 import { computeRotation, type Rotation } from './domain/rotation';
 import { palette, type Convention } from './ui/colors';
+import { DialogueBox } from './ui/dialogue';
 import { sameFocus, type Focus } from './ui/focus';
-import { GravityView } from './ui/gravityView';
-import { HexMapView } from './ui/hexMapView';
 import { renderDetail, renderDock, renderLog, renderSectors, renderTicker, type PanelContext } from './ui/panels';
 import { renderRotation } from './ui/rotationView';
-
-type ViewName = 'hex' | 'gravity';
+import { spriteUrl } from './ui/sprites';
+import { WorldMapView } from './ui/worldMapView';
 
 const CONVENTION_KEY = 'lplc.convention';
-const VIEW_KEY = 'lplc.view';
-const GRAVITY_HINT = '光點 = 今日成交額　越靠中心 = 資金流入越多　顏色 = 漲跌';
 
-function load<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+function loadConvention(): Convention {
   try {
-    const v = localStorage.getItem(key) as T | null;
-    return v && allowed.includes(v) ? v : fallback;
+    return localStorage.getItem(CONVENTION_KEY) === 'intl' ? 'intl' : 'tw';
   } catch {
-    return fallback;
+    return 'tw';
   }
 }
 
-function save(key: string, value: string): void {
+function saveConvention(value: Convention): void {
   try {
-    localStorage.setItem(key, value);
+    localStorage.setItem(CONVENTION_KEY, value);
   } catch {
     /* 無法儲存時沿用預設 */
   }
@@ -39,16 +34,15 @@ function save(key: string, value: string): void {
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
 class App {
-  private readonly hex: HexMapView;
-  private readonly gravity: GravityView;
+  private readonly map: WorldMapView;
+  private readonly dialogue: DialogueBox;
+  private readonly detector = new EventDetector();
   private metrics?: MarketMetrics;
   private rotation?: Rotation;
-  private readonly detector = new EventDetector();
   private events: MarketEvent[] = [];
   private fresh = new Set<number>();
   private focus: Focus = null;
-  private convention = load<Convention>(CONVENTION_KEY, ['tw', 'intl'], 'tw');
-  private view = load<ViewName>(VIEW_KEY, ['hex', 'gravity'], 'hex');
+  private convention = loadConvention();
   private pal = palette(this.convention);
   private readonly openMs = sessionOpenMs(new Date());
 
@@ -57,10 +51,10 @@ class App {
     private readonly provider: MockMarketProvider,
   ) {
     const onSelect = (f: Focus) => this.select(f);
-    this.hex = new HexMapView($('#hex'), universe, onSelect);
-    this.gravity = new GravityView($('#gravity'), universe, onSelect);
+    this.map = new WorldMapView($('#map'), universe, onSelect);
+    this.dialogue = new DialogueBox($('#dialogue'), onSelect);
+    $<HTMLImageElement>('#crest').src = spriteUrl('fin');
     this.bindControls();
-    this.showView(this.view);
     provider.subscribe((snap) => this.onSnapshot(snap));
   }
 
@@ -69,101 +63,72 @@ class App {
     if (this.metrics && snap.time < this.metrics.time) {
       this.detector.reset();
       this.events = [];
+      this.dialogue.reset();
     }
     this.metrics = computeMetrics(this.universe, snap);
+    this.rotation = computeRotation(this.universe, snap.turnoverHistory);
     const found = this.detector.detect(this.metrics);
     this.fresh = new Set(found.map((e) => e.id));
-    this.events = [...found.reverse(), ...this.events].slice(0, 40);
-    this.rotation = computeRotation(this.universe, snap.turnoverHistory);
+    this.events = [...[...found].reverse(), ...this.events].slice(0, 40);
+    this.dialogue.push(found);
     this.refresh();
   }
 
   private refresh(): void {
     if (!this.metrics) return;
-    if (this.view === 'hex') this.hex.update(this.metrics, this.pal);
-    else this.gravity.update(this.metrics, this.pal);
-    this.renderHint();
+    this.map.update(this.metrics, this.pal);
     this.renderPanels();
-  }
-
-  private context(): PanelContext {
-    return { metrics: this.metrics!, selection: this.focus, pal: this.pal, playing: !this.provider.paused };
   }
 
   private renderPanels(): void {
     if (!this.metrics) return;
-    const ctx = this.context();
+    const ctx: PanelContext = { metrics: this.metrics, selection: this.focus, pal: this.pal, playing: !this.provider.paused };
     renderTicker($('#ticker'), ctx);
     renderSectors($('#sectors'), ctx);
     renderDetail($('#detail'), ctx);
     renderDock($('#dock'), ctx, (el) => this.rotation && renderRotation(el, this.rotation, this.pal, this.openMs));
     renderLog($('#log'), this.events, this.fresh);
-    renderLog($('#map-feed'), this.events.slice(0, 3), this.fresh);
     this.fresh = new Set();
+    const per = this.map.yiPerTile;
+    $('#field-hint').textContent =
+      `每格 ≈ ${per >= 1 ? per.toFixed(1) : per.toFixed(2)} 億成交額　地面顏色 = 漲跌　暗色網點 = 資金撤出　金幣 = 吸金最強　閃光 = 領地易主`;
     this.syncControls();
   }
 
   private select(f: Focus): void {
     this.focus = sameFocus(f, this.focus) ? null : f;
-    this.hex.setFocus(this.focus);
-    this.gravity.setFocus(this.focus);
+    this.map.setFocus(this.focus);
     this.renderPanels();
   }
 
-  private showView(view: ViewName): void {
-    this.view = view;
-    save(VIEW_KEY, view);
-    for (const name of ['hex', 'gravity'] as const) {
-      $(`#${name}`).hidden = name !== view;
-      $(`#tab-${name}`).setAttribute('aria-selected', String(name === view));
-    }
-    this.renderHint();
-    this.gravity.setActive(view === 'gravity');
-    this.refresh();
-  }
-
   private toggleExpanded(force?: boolean): void {
-    const app = $('.app');
-    const on = app.classList.toggle('is-expanded', force);
+    const on = $('.app').classList.toggle('is-expanded', force);
     const btn = $('#btn-expand');
     btn.setAttribute('aria-pressed', String(on));
-    btn.textContent = on ? '⤡ 還原版面' : '⛶ 放大地圖';
-    // 地圖尺寸改變後由各視圖的 ResizeObserver 重新排版
-  }
-
-  private renderHint(): void {
-    const per = this.hex.yiPerHex;
-    $('#field-hint').textContent =
-      this.view === 'hex'
-        ? `每格 ≈ ${per >= 1 ? per.toFixed(1) : per.toFixed(2)} 億成交額　亮 = 吸金　暗 = 失血　閃光 = 領地易主　顏色 = 漲跌`
-        : GRAVITY_HINT;
+    btn.textContent = on ? '還原版面' : '放大地圖';
   }
 
   private bindControls(): void {
-    // 面板裡的產業、股票按鈕都走同一個選取流程
+    // 面板裡的王國、領地按鈕都走同一個選取流程
     document.addEventListener('click', (e) => {
-      const el = (e.target as Element).closest<HTMLElement | SVGElement>('[data-industry],[data-stock],[data-clear]');
-      if (!el || el.closest('.view')) return;
-      const data = (el as HTMLElement).dataset;
+      const el = (e.target as Element).closest<HTMLElement>('[data-industry],[data-stock],[data-clear]');
+      if (!el) return;
+      const data = el.dataset;
       if (data.clear !== undefined) this.select(null);
       else if (data.industry) this.select({ kind: 'industry', id: data.industry });
       else if (data.stock) this.select({ kind: 'stock', id: data.stock });
     });
-    $('#btn-expand').addEventListener('click', () => this.toggleExpanded());
     document.addEventListener('keydown', (e) => {
       const typing = (e.target as Element).closest?.('input, textarea, select');
       if (!typing && (e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey) this.toggleExpanded();
-      if (e.key === 'Escape' && document.querySelector('.app.is-expanded')) {
-        this.toggleExpanded(false);
-        return;
+      if (e.key === 'Escape') {
+        if (document.querySelector('.app.is-expanded')) this.toggleExpanded(false);
+        else if (this.focus) this.select(this.focus);
       }
-      if (e.key === 'Escape' && this.focus) this.select(this.focus);
       const row = (e.target as Element).closest?.<HTMLElement>('tr[data-stock]');
       if (row && (e.key === 'Enter' || e.key === ' ')) this.select({ kind: 'stock', id: row.dataset.stock! });
     });
-    for (const tab of document.querySelectorAll<HTMLButtonElement>('[data-view]')) {
-      tab.addEventListener('click', () => this.showView(tab.dataset.view as ViewName));
-    }
+    $('#btn-expand').addEventListener('click', () => this.toggleExpanded());
     for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-speed]')) {
       btn.addEventListener('click', () => {
         this.provider.setSpeed(Number(btn.dataset.speed));
@@ -174,7 +139,7 @@ class App {
     $('#btn-restart').addEventListener('click', () => this.provider.restart());
     $('#btn-convention').addEventListener('click', () => {
       this.convention = this.convention === 'tw' ? 'intl' : 'tw';
-      save(CONVENTION_KEY, this.convention);
+      saveConvention(this.convention);
       this.pal = palette(this.convention);
       this.refresh();
     });

@@ -80,20 +80,23 @@ describe('作戰日誌', () => {
   });
 });
 
-describe('六角格領地', () => {
-  it('格數接近目標，而且每一格都有主人', async () => {
-    const { assignHexes, buildHexGrid } = await import('../layout/hexgrid');
-    const { hexes } = buildHexGrid(900, 560, 900);
-    expect(hexes.length).toBeGreaterThan(800);
-    expect(hexes.length).toBeLessThan(1000);
-    const owned = assignHexes(hexes, [
-      { id: 'A', group: 'g1', x0: 0, y0: 0, x1: 600, y1: 560 },
-      { id: 'B', group: 'g2', x0: 600, y0: 0, x1: 899, y1: 560 },
-      { id: 'C', group: 'g2', x0: 899, y0: 0, x1: 900, y1: 560 },
+describe('世界地圖方格', () => {
+  it('每格是 8 的倍數、格數接近目標，而且每一格都有主人', async () => {
+    const { assignTiles, buildTileGrid } = await import('../layout/tilegrid');
+    const grid = buildTileGrid(900, 560, 900);
+    expect(grid.size % 8).toBe(0);
+    expect(grid.size).toBe(grid.pixel * 8);
+    expect(grid.tiles.length).toBeGreaterThan(600);
+    expect(grid.tiles.length).toBeLessThan(1200);
+    const w = grid.ox * 2 + grid.cols * grid.size;
+    const owned = assignTiles(grid.tiles, [
+      { id: 'A', group: 'g1', x0: 0, y0: 0, x1: (w * 2) / 3, y1: 560 },
+      { id: 'B', group: 'g2', x0: (w * 2) / 3, y0: 0, x1: w - 1, y1: 560 },
+      { id: 'C', group: 'g2', x0: w - 1, y0: 0, x1: w, y1: 560 },
     ]);
-    expect(hexes.every((h) => h.owner)).toBe(true);
+    expect(grid.tiles.every((t) => t.owner)).toBe(true);
     // 格數與面積成正比（A 佔 2/3）
-    expect(owned.get('A')!.length / hexes.length).toBeCloseTo(2 / 3, 1);
+    expect(owned.get('A')!.length / grid.tiles.length).toBeCloseTo(2 / 3, 1);
     // 小於一格的範圍也至少分到一格
     expect(owned.get('C')!.length).toBe(1);
   });
