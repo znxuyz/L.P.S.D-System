@@ -8,10 +8,10 @@ import { interpolateLab, scaleLinear } from 'd3';
 
 export type Convention = 'tw' | 'intl';
 
-// 像素冒險地圖：大地色調的漲跌，中性是灰紫色的荒地
-const RED = { weak: '#7c4a52', mid: '#b8424a', strong: '#e8414a', bright: '#ff6b6b' };
-const GREEN = { weak: '#4e6b52', mid: '#3f8f4f', strong: '#3cb95a', bright: '#69db7c' };
-export const NEUTRAL_CELL = '#5f6178';
+// 玻璃數據艙：玫瑰紅與薄荷綠，中性是深靛藍，和玻璃面板的底色融在一起
+const RED = { weak: '#4d2645', mid: '#a3325a', strong: '#ff4d6d', bright: '#ff8aa0' };
+const GREEN = { weak: '#1c4247', mid: '#15876b', strong: '#14c08a', bright: '#5ee7b0' };
+export const NEUTRAL_CELL = '#262d4d';
 
 export interface Palette {
   up: typeof RED;

@@ -6,12 +6,11 @@ import { EventDetector, type MarketEvent } from './domain/events';
 import { computeMetrics, type MarketMetrics } from './domain/metrics';
 import { computeRotation, type Rotation } from './domain/rotation';
 import { palette, type Convention } from './ui/colors';
-import { DialogueBox } from './ui/dialogue';
 import { sameFocus, type Focus } from './ui/focus';
 import { renderDetail, renderDock, renderLog, renderSectors, renderTicker, type PanelContext } from './ui/panels';
 import { renderRotation } from './ui/rotationView';
-import { spriteUrl } from './ui/sprites';
-import { WorldMapView } from './ui/worldMapView';
+import { GlassMapView } from './ui/glassMapView';
+import { Toasts } from './ui/toasts';
 
 const CONVENTION_KEY = 'lplc.convention';
 
@@ -34,8 +33,10 @@ function saveConvention(value: Convention): void {
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
 class App {
-  private readonly map: WorldMapView;
-  private readonly dialogue: DialogueBox;
+  private readonly map: GlassMapView;
+  private readonly toasts: Toasts;
+  /** 各股票盤中股價紀錄（每分鐘一筆）。 */
+  private readonly history = new Map<string, number[]>();
   private readonly detector = new EventDetector();
   private metrics?: MarketMetrics;
   private rotation?: Rotation;
@@ -51,9 +52,8 @@ class App {
     private readonly provider: MockMarketProvider,
   ) {
     const onSelect = (f: Focus) => this.select(f);
-    this.map = new WorldMapView($('#map'), universe, onSelect);
-    this.dialogue = new DialogueBox($('#dialogue'), onSelect);
-    $<HTMLImageElement>('#crest').src = spriteUrl('fin');
+    this.map = new GlassMapView($('#map'), universe, onSelect);
+    this.toasts = new Toasts($('#toasts'), onSelect);
     this.bindControls();
     this.showPage(location.hash === '#intel' ? 'intel' : 'map');
     provider.subscribe((snap) => this.onSnapshot(snap));
@@ -64,26 +64,53 @@ class App {
     if (this.metrics && snap.time < this.metrics.time) {
       this.detector.reset();
       this.events = [];
-      this.dialogue.reset();
+      this.toasts.clear();
     }
     this.metrics = computeMetrics(this.universe, snap);
     this.rotation = computeRotation(this.universe, snap.turnoverHistory);
     const found = this.detector.detect(this.metrics);
     this.fresh = new Set(found.map((e) => e.id));
     this.events = [...[...found].reverse(), ...this.events].slice(0, 40);
-    this.dialogue.push(found);
+    this.toasts.push(found.filter((e) => e.level !== 'info'));
+    this.recordPrices(snap);
     this.refresh();
+  }
+
+  /** 由每分鐘紀錄整理出各股票的盤中股價，最後一點用即時價。 */
+  private recordPrices(snap: MarketSnapshot): void {
+    this.history.clear();
+    for (const bar of snap.turnoverHistory ?? []) {
+      if (!bar.prices) continue;
+      for (const [code, p] of Object.entries(bar.prices)) {
+        let arr = this.history.get(code);
+        if (!arr) {
+          arr = [];
+          this.history.set(code, arr);
+        }
+        arr.push(p);
+      }
+    }
+    for (const [code, q] of Object.entries(snap.quotes)) {
+      const arr = this.history.get(code);
+      if (arr?.length) arr[arr.length - 1] = q.price;
+    }
   }
 
   private refresh(): void {
     if (!this.metrics) return;
-    this.map.update(this.metrics, this.pal);
+    this.map.update(this.metrics, this.pal, this.history);
     this.renderPanels();
   }
 
   private renderPanels(): void {
     if (!this.metrics) return;
-    const ctx: PanelContext = { metrics: this.metrics, selection: this.focus, pal: this.pal, playing: !this.provider.paused };
+    const ctx: PanelContext = {
+      metrics: this.metrics,
+      selection: this.focus,
+      pal: this.pal,
+      playing: !this.provider.paused,
+      history: this.history,
+    };
     renderTicker($('#ticker'), ctx);
     renderSectors($('#sectors'), ctx);
     renderDetail($('#detail'), ctx);
@@ -94,9 +121,6 @@ class App {
     renderDock($('#dock'), ctx, (el) => this.rotation && renderRotation(el, this.rotation, this.pal, this.openMs));
     renderLog($('#log'), this.events, this.fresh);
     this.fresh = new Set();
-    const per = this.map.yiPerTile;
-    $('#field-hint').textContent =
-      `每格 ≈ ${per >= 1 ? per.toFixed(1) : per.toFixed(2)} 億成交額　地面顏色 = 漲跌　暗色網點 = 資金撤出　金幣 = 吸金最強　閃光 = 領地易主`;
     this.syncControls();
   }
 

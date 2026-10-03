@@ -214,8 +214,12 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
   private pushIndexPoint(): void {
     this.series.push(this.indexPoint());
     const byStock: Record<string, number> = {};
-    for (const [code, st] of this.states) byStock[code] = st.turnover;
-    this.turnoverHistory.push({ t: this.openMs + Math.floor(this.minute) * 60_000, byStock });
+    const prices: Record<string, number> = {};
+    for (const [code, st] of this.states) {
+      byStock[code] = st.turnover;
+      prices[code] = st.price;
+    }
+    this.turnoverHistory.push({ t: this.openMs + Math.floor(this.minute) * 60_000, byStock, prices });
   }
 
   private snapshot(): MarketSnapshot {

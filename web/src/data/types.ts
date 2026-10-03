@@ -51,11 +51,13 @@ export interface IndexPoint {
 
 export type SessionState = 'pre' | 'open' | 'closed';
 
-/** 某一分鐘結束時，各股票的累計成交額（億元）。 */
+/** 某一分鐘結束時，各股票的累計成交額（億元）與股價。 */
 export interface TurnoverBar {
   /** epoch ms */
   t: number;
   byStock: Record<string, number>;
+  /** 當時的股價；資料來源不支援時可省略。 */
+  prices?: Record<string, number>;
 }
 
 export interface MarketSnapshot {
