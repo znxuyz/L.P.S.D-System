@@ -1,6 +1,8 @@
 import { area as d3area, bisector, curveMonotoneX, line as d3line, pointer, scaleLinear, select } from 'd3';
 import { SESSION_MINUTES } from '../data/twse';
+import type { Fundamentals } from '../data/types';
 import type { EventLevel, MarketEvent } from '../domain/events';
+import { stockView } from '../domain/screens';
 import type { IndustryMetrics, MarketMetrics, StockMetrics } from '../domain/metrics';
 import type { Focus } from './focus';
 import type { Palette } from './colors';
@@ -14,6 +16,8 @@ export interface PanelContext {
   playing: boolean;
   /** 各股票盤中股價紀錄，畫走勢線用。 */
   history: Map<string, number[]>;
+  /** 各股票的選股資料。 */
+  fundamentals: Map<string, Fundamentals>;
 }
 
 const dirCls = (v: number) => direction(v);
@@ -138,6 +142,23 @@ function spark(series: number[] | undefined, d: string): string {
     <path class="c-spark-area" d="${sparkArea(series, 280, 56)}"></path><path class="c-spark-line" d="${sparkPath(series, 280, 56)}"></path></svg>`;
 }
 
+function fundamentalsBlock(s: StockMetrics, f: Fundamentals | undefined): string {
+  if (!f) return '';
+  const v = stockView(s, f);
+  const inst = f.instBuyDays >= 0 ? `連買 ${f.instBuyDays} 天` : `連賣 ${-f.instBuyDays} 天`;
+  return `<h3 class="d-sub">基本面與籌碼 <small>模擬</small></h3>
+    <dl class="d-grid">
+      ${kv('本益比', Number.isFinite(v.pe) ? `${v.pe.toFixed(1)} 倍` : '—')}
+      ${kv('殖利率', `${v.yieldPct.toFixed(2)}%`)}
+      ${kv('EPS 年增（近四季）', pct(f.epsYoY, 1), dirCls(f.epsYoY))}
+      ${kv('連續配息', `${f.dividendYears} 年`)}
+      ${kv('3 年股價位階', `${Math.round(v.pos3y * 100)}%`)}
+      ${kv('距一年高點', `${((1 - v.toHigh52w) * 100).toFixed(1)}%`)}
+      ${kv('法人', inst, dirCls(f.instBuyDays))}
+      ${kv('千張大戶（4 週）', `${f.bigHolderChg >= 0 ? '+' : '−'}${Math.abs(f.bigHolderChg).toFixed(1)} 百分點`, dirCls(f.bigHolderChg))}
+    </dl>`;
+}
+
 function renderStock(s: StockMetrics, ctx: PanelContext): string {
   const ind = ctx.metrics.industryById.get(s.industryId);
   return `
@@ -157,6 +178,7 @@ function renderStock(s: StockMetrics, ctx: PanelContext): string {
       ${kv('今日成交佔比', sharePct(s.share))}
       ${kv('20 日平均佔比', sharePct(s.baseShare))}
     </dl>
+    ${fundamentalsBlock(s, ctx.fundamentals.get(s.code))}
     <h3 class="d-sub">所屬產業</h3>
     <div class="chips">${ind ? `<button class="chip-btn" data-industry="${ind.id}">${esc(ind.name)} · ${pct(ind.changePct)}</button>` : ''}</div>`;
 }

@@ -131,6 +131,12 @@ export class GlassMapView {
     if (first) this.root.classList.add('is-ready');
   }
 
+  /** 只亮出指定的股票（例如選股結果）；null 取消。 */
+  setHighlight(codes: Set<string> | null): void {
+    this.root.classList.toggle('has-highlight', !!codes);
+    for (const [code, c] of this.cells) c.classList.toggle('is-hit', !!codes?.has(code));
+  }
+
   setFocus(focus: Focus): void {
     this.focus = focus;
     this.applyFocus();

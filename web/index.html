@@ -36,6 +36,7 @@
         <div class="pages" role="tablist" aria-label="頁面">
           <button type="button" role="tab" id="tab-map" data-page="map" aria-selected="true" aria-controls="page-map">熱力圖</button>
           <button type="button" role="tab" id="tab-intel" data-page="intel" aria-selected="false">市場情報</button>
+          <button type="button" role="tab" id="tab-screen" data-page="screen" aria-selected="false">五大選股</button>
         </div>
         <dl class="ticker" id="ticker"></dl>
         <details class="menu">
@@ -71,6 +72,7 @@
             <li><i class="dot-glow"></i>發光 = 吸金最強</li>
             <li><i class="dot-drain"></i>變淡 = 資金撤出</li>
           </ul>
+          <button type="button" class="filter-chip" id="filter-chip" hidden></button>
         </div>
         <div class="view" id="map"></div>
         <aside class="map-detail glass" id="map-detail" aria-live="polite" hidden></aside>
@@ -86,6 +88,12 @@
       </aside>
 
       <section class="dock" id="dock" aria-label="盤中統計"></section>
+
+      <section class="screener" id="page-screen" aria-label="五大核心選股">
+        <nav class="strategies glass" id="strategies"></nav>
+        <div class="scr-main glass" id="screen"></div>
+        <aside class="scr-detail glass" id="screen-detail" aria-live="polite"></aside>
+      </section>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

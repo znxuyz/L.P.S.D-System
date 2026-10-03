@@ -79,3 +79,39 @@ describe('作戰日誌', () => {
     for (const e of events) expect(e.t).toBeGreaterThan(0);
   });
 });
+
+describe('五大選股', () => {
+  it('每個策略在模擬資料裡都有符合與接近的股票', async () => {
+    const { STRATEGIES, runScreen } = await import('../domain/screens');
+    const universe = buildMockUniverse();
+    const m = computeMetrics(universe, snapshotAt());
+    for (const s of STRATEGIES) {
+      const rows = runScreen(s, m, universe);
+      const matched = rows.filter((r) => r.status === 'match').length;
+      expect(matched).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('本益比與殖利率隨即時股價計算', async () => {
+    const { stockView } = await import('../domain/screens');
+    const universe = buildMockUniverse();
+    const m = computeMetrics(universe, snapshotAt());
+    const meta = universe.stocks[0];
+    const v = stockView(m.stockByCode.get(meta.code)!, meta.fundamentals!);
+    expect(v.pe).toBeCloseTo(v.stock.price / meta.fundamentals!.eps4q, 6);
+    expect(v.yieldPct).toBeCloseTo((meta.fundamentals!.dividend / v.stock.price) * 100, 6);
+    expect(v.pos3y).toBeGreaterThanOrEqual(0);
+    expect(v.pos3y).toBeLessThanOrEqual(1);
+  });
+
+  it('全部條件通過才算符合；只差一個是接近', async () => {
+    const { STRATEGIES, runScreen } = await import('../domain/screens');
+    const universe = buildMockUniverse();
+    const m = computeMetrics(universe, snapshotAt());
+    const value = STRATEGIES.find((s) => s.id === 'value')!;
+    for (const r of runScreen(value, m, universe)) {
+      if (r.status === 'match') expect(r.passed).toBe(3);
+      if (r.status === 'near') expect(r.passed).toBe(2);
+    }
+  });
+});

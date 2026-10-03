@@ -15,6 +15,48 @@ export interface IndustryMeta {
   short: string;
 }
 
+/**
+ * 選股用的基本面、籌碼與技術資料（低頻，盤前更新一次）。
+ * 和股價有關的指標（本益比、殖利率、股價位階）由即時股價搭配這裡的數字計算。
+ */
+export interface Fundamentals {
+  /** 近四季 EPS（元）。 */
+  eps4q: number;
+  /** 近四季 EPS 年增率（%）。 */
+  epsYoY: number;
+  /** 最近一年現金股利（元）。 */
+  dividend: number;
+  /** 股利發放率（%）。 */
+  payoutRatio: number;
+  /** 連續配息年數。 */
+  dividendYears: number;
+  /** 近一年自由現金流為正。 */
+  fcfPositive: boolean;
+  /** 毛利率年變化（百分點）。 */
+  grossMarginChg: number;
+  /** 營益率年變化（百分點）。 */
+  opMarginChg: number;
+  /** 近 3 年最低 / 最高價。 */
+  low3y: number;
+  high3y: number;
+  /** 近一年最高價。 */
+  high52w: number;
+  /** 近 20 日最高價（不含今日）。 */
+  high20: number;
+  /** 5、20、60 日均線。 */
+  ma5: number;
+  ma20: number;
+  ma60: number;
+  /** 法人（外資＋投信）連續買超天數；負數為連續賣超。 */
+  instBuyDays: number;
+  /** 千張大戶持股比率近 4 週變化（百分點）。 */
+  bigHolderChg: number;
+  /** 特殊事件標籤。 */
+  events: StockEvent[];
+}
+
+export type StockEvent = 'guidance-up' | 'merger' | 'subsidy';
+
 export interface StockMeta {
   code: string;
   name: string;
@@ -24,6 +66,8 @@ export interface StockMeta {
   /** 近 20 日平均每日成交額（億元），資金流的基準線。 */
   avgTurnover20: number;
   prevClose: number;
+  /** 選股資料；資料來源不支援時可省略。 */
+  fundamentals?: Fundamentals;
 }
 
 export interface Universe {

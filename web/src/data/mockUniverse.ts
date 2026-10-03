@@ -1,5 +1,5 @@
 import { createRng } from './random';
-import type { IndustryMeta, StockMeta, Universe } from './types';
+import type { Fundamentals, IndustryMeta, StockEvent, StockMeta, Universe } from './types';
 
 /**
  * Mock 股票池。代號與名稱是真實的台股，市值、股價只是量級上合理的示意值，
@@ -122,6 +122,82 @@ const SEEDS: IndustrySeed[] = [
   },
 ];
 
+/** 各產業基本面的典型範圍：本益比、EPS 年增率（%）、殖利率（%）、連續配息年數、技術面偏多的機率。 */
+interface Profile {
+  pe: [number, number];
+  yoy: [number, number];
+  yld: [number, number];
+  years: [number, number];
+  bull: number;
+}
+
+const PROFILES: Record<string, Profile> = {
+  semi: { pe: [14, 34], yoy: [-10, 60], yld: [1, 3.2], years: [5, 22], bull: 0.55 },
+  comp: { pe: [12, 26], yoy: [-10, 45], yld: [2, 4.5], years: [6, 20], bull: 0.45 },
+  pc: { pe: [11, 22], yoy: [0, 65], yld: [2, 5], years: [8, 22], bull: 0.6 },
+  oe: { pe: [9, 18], yoy: [-5, 30], yld: [3, 5.5], years: [8, 20], bull: 0.5 },
+  net: { pe: [15, 28], yoy: [-5, 45], yld: [2, 4.8], years: [10, 22], bull: 0.5 },
+  opto: { pe: [7, 20], yoy: [-40, 30], yld: [2, 6], years: [3, 15], bull: 0.3 },
+  fin: { pe: [8, 14], yoy: [-10, 30], yld: [4, 7], years: [10, 22], bull: 0.45 },
+  ship: { pe: [3, 9], yoy: [-60, 40], yld: [3, 11], years: [2, 12], bull: 0.25 },
+  plastic: { pe: [15, 40], yoy: [-50, 10], yld: [1, 4], years: [10, 30], bull: 0.2 },
+  steel: { pe: [10, 30], yoy: [-40, 20], yld: [2, 5], years: [5, 25], bull: 0.25 },
+  bio: { pe: [20, 60], yoy: [-20, 80], yld: [0, 2], years: [0, 8], bull: 0.4 },
+  mech: { pe: [15, 35], yoy: [10, 80], yld: [1, 3], years: [5, 20], bull: 0.7 },
+  trad: { pe: [10, 20], yoy: [-10, 15], yld: [3, 6], years: [10, 25], bull: 0.35 },
+};
+
+/** 示意用的特殊事件（模擬，不代表實際公告）。 */
+const EVENTS: Record<string, StockEvent[]> = {
+  '2330': ['guidance-up'],
+  '3661': ['guidance-up'],
+  '2345': ['guidance-up'],
+  '2382': ['guidance-up'],
+  '2887': ['merger'],
+  '2890': ['merger'],
+  '1402': ['merger'],
+  '1519': ['subsidy'],
+  '1513': ['subsidy'],
+  '1503': ['subsidy'],
+  '2002': ['subsidy'],
+};
+
+function fundamentalsFor(industryId: string, code: string, price: number, rng: () => number): Fundamentals {
+  const p = PROFILES[industryId] ?? PROFILES.oe;
+  const between = ([lo, hi]: [number, number]) => lo + (hi - lo) * rng();
+  const pe = between(p.pe);
+  const eps4q = price / pe;
+  const yld = between(p.yld);
+  const dividend = (price * yld) / 100;
+  const low3y = price * (0.55 + rng() * 0.42);
+  const high3y = price * (1.04 + rng() * 0.8);
+  const bullish = rng() < p.bull;
+  const ma5 = price * (bullish ? 0.975 + rng() * 0.02 : 0.99 + rng() * 0.04);
+  const ma20 = ma5 * (bullish ? 0.95 + rng() * 0.04 : 0.99 + rng() * 0.05);
+  const ma60 = ma20 * (bullish ? 0.9 + rng() * 0.08 : 0.98 + rng() * 0.06);
+  return {
+    eps4q,
+    epsYoY: between(p.yoy),
+    dividend,
+    payoutRatio: Math.min(120, (dividend / eps4q) * 100),
+    dividendYears: Math.round(between(p.years)),
+    fcfPositive: rng() < 0.75,
+    // 技術面偏多的股票，基本面也較常同步改善
+    grossMarginChg: (rng() - (bullish ? 0.25 : 0.5)) * 6,
+    opMarginChg: (rng() - (bullish ? 0.25 : 0.5)) * 5,
+    low3y,
+    high3y,
+    high52w: price * (bullish ? 1.0 + rng() * 0.08 : 1.05 + rng() * 0.35),
+    high20: price * (bullish ? 0.97 + rng() * 0.035 : 1.01 + rng() * 0.06),
+    ma5,
+    ma20,
+    ma60,
+    instBuyDays: Math.round((rng() - (bullish ? 0.25 : 0.6)) * 12),
+    bigHolderChg: (rng() - (bullish ? 0.3 : 0.6)) * 3,
+    events: EVENTS[code] ?? [],
+  };
+}
+
 /** 股票池 20 日平均成交額總和的目標值（億元），讓數字接近台股實際量級。 */
 const TARGET_AVG_TURNOVER = 3400;
 
@@ -142,9 +218,12 @@ export function buildMockUniverse(seed = 20260930): Universe {
   );
   const scale = TARGET_AVG_TURNOVER / raw.reduce((sum, s) => sum + s.rawTurnover, 0);
 
+  // 基本面用獨立的亂數序列，調整基本面時不會改變行情
+  const fRng = createRng(seed + 1);
   const stocks: StockMeta[] = raw.map(({ rawTurnover, ...rest }) => ({
     ...rest,
     avgTurnover20: rawTurnover * scale,
+    fundamentals: fundamentalsFor(rest.industryId, rest.code, rest.prevClose, fRng),
   }));
 
   return { industries, stocks, index: { name: '加權指數', prevClose: 23850.42 } };

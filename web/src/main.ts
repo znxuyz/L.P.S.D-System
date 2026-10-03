@@ -9,6 +9,9 @@ import { palette, type Convention } from './ui/colors';
 import { sameFocus, type Focus } from './ui/focus';
 import { renderDetail, renderDock, renderLog, renderSectors, renderTicker, type PanelContext } from './ui/panels';
 import { renderRotation } from './ui/rotationView';
+import { renderScreen, renderStrategyList } from './ui/screener';
+import { runScreen, strategyById, type StrategyId } from './domain/screens';
+import type { Fundamentals } from './data/types';
 import { GlassMapView } from './ui/glassMapView';
 import { Toasts } from './ui/toasts';
 
@@ -32,11 +35,23 @@ function saveConvention(value: Convention): void {
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
+const PAGES = ['map', 'intel', 'screen'] as const;
+type Page = (typeof PAGES)[number];
+
+function pageFromHash(): Page {
+  const h = location.hash.slice(1);
+  return (PAGES as readonly string[]).includes(h) ? (h as Page) : 'map';
+}
+
 class App {
   private readonly map: GlassMapView;
   private readonly toasts: Toasts;
   /** 各股票盤中股價紀錄（每分鐘一筆）。 */
   private readonly history = new Map<string, number[]>();
+  private readonly fundamentals: Map<string, Fundamentals>;
+  private strategy: StrategyId = 'value';
+  /** 熱力圖上正在標示的策略。 */
+  private highlight: StrategyId | null = null;
   private readonly detector = new EventDetector();
   private metrics?: MarketMetrics;
   private rotation?: Rotation;
@@ -51,11 +66,14 @@ class App {
     private readonly universe: Universe,
     private readonly provider: MockMarketProvider,
   ) {
+    this.fundamentals = new Map(
+      universe.stocks.filter((s) => s.fundamentals).map((s) => [s.code, s.fundamentals!] as [string, Fundamentals]),
+    );
     const onSelect = (f: Focus) => this.select(f);
     this.map = new GlassMapView($('#map'), universe, onSelect);
     this.toasts = new Toasts($('#toasts'), onSelect);
     this.bindControls();
-    this.showPage(location.hash === '#intel' ? 'intel' : 'map');
+    this.showPage(pageFromHash());
     provider.subscribe((snap) => this.onSnapshot(snap));
   }
 
@@ -99,6 +117,7 @@ class App {
   private refresh(): void {
     if (!this.metrics) return;
     this.map.update(this.metrics, this.pal, this.history);
+    this.applyHighlight();
     this.renderPanels();
   }
 
@@ -110,15 +129,21 @@ class App {
       pal: this.pal,
       playing: !this.provider.paused,
       history: this.history,
+      fundamentals: this.fundamentals,
     };
     renderTicker($('#ticker'), ctx);
     renderSectors($('#sectors'), ctx);
-    renderDetail($('#detail'), ctx);
+    if (this.page === 'intel') renderDetail($('#detail'), ctx);
+    if (this.page === 'screen') {
+      renderStrategyList($('#strategies'), this.metrics, this.universe, this.strategy);
+      renderScreen($('#screen'), this.metrics, this.universe, this.strategy, this.focus?.kind === 'stock' ? this.focus.id : null);
+      renderDetail($('#screen-detail'), ctx);
+    }
     // 地圖頁：選取時在地圖右上角浮出狀態視窗
     const floating = $('#map-detail');
     floating.hidden = !this.focus || this.page !== 'map';
     if (!floating.hidden) renderDetail(floating, ctx);
-    renderDock($('#dock'), ctx, (el) => this.rotation && renderRotation(el, this.rotation, this.pal, this.openMs));
+    if (this.page === 'intel') renderDock($('#dock'), ctx, (el) => this.rotation && renderRotation(el, this.rotation, this.pal, this.openMs));
     renderLog($('#log'), this.events, this.fresh);
     this.fresh = new Set();
     this.syncControls();
@@ -130,18 +155,33 @@ class App {
     this.renderPanels();
   }
 
-  private showPage(page: 'map' | 'intel'): void {
+  private showPage(page: Page): void {
     const app = $('.app');
-    app.classList.toggle('page-map', page === 'map');
-    app.classList.toggle('page-intel', page === 'intel');
-    $('#tab-map').setAttribute('aria-selected', String(page === 'map'));
-    $('#tab-intel').setAttribute('aria-selected', String(page === 'intel'));
+    for (const p of PAGES) {
+      app.classList.toggle(`page-${p}`, p === page);
+      $(`#tab-${p}`).setAttribute('aria-selected', String(p === page));
+    }
     if (location.hash !== `#${page}`) history.replaceState(null, '', `#${page}`);
     this.renderPanels();
   }
 
-  private get page(): 'map' | 'intel' {
-    return $('.app').classList.contains('page-intel') ? 'intel' : 'map';
+  private get page(): Page {
+    return PAGES.find((p) => $('.app').classList.contains(`page-${p}`)) ?? 'map';
+  }
+
+  /** 熱力圖只亮出指定策略符合的股票。 */
+  private applyHighlight(): void {
+    const chip = $('#filter-chip');
+    if (!this.highlight || !this.metrics) {
+      this.map.setHighlight(null);
+      chip.hidden = true;
+      return;
+    }
+    const s = strategyById(this.highlight);
+    const codes = new Set(runScreen(s, this.metrics, this.universe).filter((r) => r.status === 'match').map((r) => r.view.stock.code));
+    this.map.setHighlight(codes);
+    chip.hidden = false;
+    chip.textContent = `篩選中：${s.name}（${codes.size} 檔）✕`;
   }
 
   private bindControls(): void {
@@ -160,9 +200,28 @@ class App {
       if (row && (e.key === 'Enter' || e.key === ' ')) this.select({ kind: 'stock', id: row.dataset.stock! });
     });
     for (const tab of document.querySelectorAll<HTMLButtonElement>('[data-page]')) {
-      tab.addEventListener('click', () => this.showPage(tab.dataset.page as 'map' | 'intel'));
+      tab.addEventListener('click', () => this.showPage(tab.dataset.page as Page));
     }
-    window.addEventListener('hashchange', () => this.showPage(location.hash === '#intel' ? 'intel' : 'map'));
+    window.addEventListener('hashchange', () => this.showPage(pageFromHash()));
+    document.addEventListener('click', (e) => {
+      const el = (e.target as Element).closest<HTMLElement>('[data-strategy],[data-highlight]');
+      if (!el) return;
+      if (el.dataset.strategy) {
+        this.strategy = el.dataset.strategy as StrategyId;
+        this.renderPanels();
+      } else if (el.dataset.highlight) {
+        this.highlight = el.dataset.highlight as StrategyId;
+        // 標示篩選結果時取消個別選取，避免符合的股票也被變暗
+        this.focus = null;
+        this.map.setFocus(null);
+        this.applyHighlight();
+        this.showPage('map');
+      }
+    });
+    $('#filter-chip').addEventListener('click', () => {
+      this.highlight = null;
+      this.applyHighlight();
+    });
     for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-speed]')) {
       btn.addEventListener('click', () => {
         this.provider.setSpeed(Number(btn.dataset.speed));
