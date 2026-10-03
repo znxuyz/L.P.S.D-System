@@ -145,7 +145,7 @@ class App {
   }
 
   private bindControls(): void {
-    // 面板裡的王國、領地按鈕都走同一個選取流程
+    // 面板裡的產業、個股按鈕都走同一個選取流程
     document.addEventListener('click', (e) => {
       const el = (e.target as Element).closest<HTMLElement>('[data-industry],[data-stock],[data-clear]');
       if (!el) return;
