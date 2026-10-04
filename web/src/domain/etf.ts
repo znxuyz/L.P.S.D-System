@@ -1,4 +1,4 @@
-import type { EtfCategory, EtfMeta, MarketSnapshot, Universe } from '../data/types';
+import type { EtfCategory, EtfMeta, HoldingChange, MarketSnapshot, Universe } from '../data/types';
 import type { MarketMetrics, StockMetrics } from './metrics';
 
 /**
@@ -18,6 +18,10 @@ export interface HoldingView {
   weight: number;
 }
 
+export interface ChangeView extends HoldingChange {
+  stock: StockMetrics;
+}
+
 export interface EtfView {
   meta: EtfMeta;
   price: number;
@@ -35,6 +39,14 @@ export interface EtfView {
   coveredWeight: number;
   holdingsChangePct: number;
   holdingsFlow: number;
+  changes: ChangeView[];
+}
+
+/** 主動式 ETF 共識：同一檔股票被幾檔主動式 ETF 加碼（含新進）或減碼（含出清）。 */
+export interface ConsensusRow {
+  stock: StockMetrics;
+  buyers: string[];
+  sellers: string[];
 }
 
 export interface EtfCategorySummary {
@@ -70,12 +82,15 @@ export function computeEtfs(universe: Universe, snapshot: MarketSnapshot, metric
       coveredWeight,
       holdingsChangePct: coveredWeight > 0 ? holdings.reduce((s, h) => s + h.weight * h.stock.changePct, 0) / coveredWeight : 0,
       holdingsFlow: holdings.reduce((s, h) => s + h.stock.flow, 0),
+      changes: meta.changes
+        .map((c) => ({ ...c, stock: metrics.stockByCode.get(c.code) }))
+        .filter((c): c is ChangeView => !!c.stock),
     };
   });
 }
 
 export function summarizeEtfs(etfs: EtfView[]): EtfCategorySummary[] {
-  const order: EtfCategory[] = ['market', 'dividend', 'theme', 'bond'];
+  const order: EtfCategory[] = ['market', 'dividend', 'theme', 'active', 'bond'];
   return order.map((category) => {
     const list = etfs.filter((e) => e.meta.category === category);
     return {
@@ -85,4 +100,21 @@ export function summarizeEtfs(etfs: EtfView[]): EtfCategorySummary[] {
       turnover: list.reduce((s, e) => s + e.turnover, 0),
     };
   });
+}
+
+export function activeConsensus(etfs: EtfView[]): ConsensusRow[] {
+  const rows = new Map<string, ConsensusRow>();
+  for (const e of etfs.filter((x) => x.meta.category === 'active')) {
+    const buy = new Set<string>();
+    const sell = new Set<string>();
+    for (const c of e.changes) (c.kind === 'add' || c.kind === 'increase' ? buy : sell).add(c.code);
+    for (const c of e.changes) {
+      if (!rows.has(c.code)) rows.set(c.code, { stock: c.stock, buyers: [], sellers: [] });
+    }
+    for (const code of buy) rows.get(code)!.buyers.push(e.meta.code);
+    for (const code of sell) rows.get(code)!.sellers.push(e.meta.code);
+  }
+  return [...rows.values()].sort(
+    (a, b) => b.buyers.length - b.sellers.length - (a.buyers.length - a.sellers.length) || b.buyers.length - a.buyers.length,
+  );
 }

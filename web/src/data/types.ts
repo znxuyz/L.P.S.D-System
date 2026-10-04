@@ -70,7 +70,20 @@ export interface StockMeta {
   fundamentals?: Fundamentals;
 }
 
-export type EtfCategory = 'market' | 'dividend' | 'theme' | 'bond';
+export type EtfCategory = 'market' | 'dividend' | 'theme' | 'active' | 'bond';
+
+export type HoldingChangeKind = 'add' | 'remove' | 'increase' | 'decrease';
+
+/** 成分股異動。被動式 ETF 是定期調整，主動式 ETF 是每日持股變化。 */
+export interface HoldingChange {
+  /** 生效日（YYYY-MM-DD）。 */
+  date: string;
+  code: string;
+  kind: HoldingChangeKind;
+  /** 異動前後權重（%）。 */
+  before: number;
+  after: number;
+}
 
 export interface EtfHolding {
   /** 成分股代號（需在股票池內）。 */
@@ -104,6 +117,10 @@ export interface EtfMeta {
   holders: number;
   /** 前幾大成分股；債券型可為空。 */
   holdings: EtfHolding[];
+  /** 指數調整的時程（被動式）；主動式為每日公告。 */
+  rebalance?: { schedule: string; last: string; next?: string };
+  /** 成分股異動紀錄（新到舊）。 */
+  changes: HoldingChange[];
 }
 
 export interface Universe {

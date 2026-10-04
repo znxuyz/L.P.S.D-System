@@ -151,3 +151,48 @@ describe('ETF', () => {
     expect(m.totalTurnover).toBeCloseTo(stockTotal, 6);
   });
 });
+
+describe('ETF 成分股異動', () => {
+  const universe = buildMockUniverse();
+  const codes = new Set(universe.stocks.map((s) => s.code));
+
+  it('異動的股票都在股票池內，權重變化方向和類型一致', () => {
+    for (const etf of universe.etfs ?? []) {
+      for (const c of etf.changes) {
+        expect(codes.has(c.code)).toBe(true);
+        if (c.kind === 'add') expect(c.before === 0 && c.after > 0).toBe(true);
+        if (c.kind === 'remove') expect(c.before > 0 && c.after === 0).toBe(true);
+        if (c.kind === 'increase') expect(c.after).toBeGreaterThan(c.before);
+        if (c.kind === 'decrease') expect(c.after).toBeLessThan(c.before);
+      }
+    }
+  });
+
+  it('主動式 ETF：新進的股票在目前持股裡、出清的不在，異動由新到舊', () => {
+    for (const etf of (universe.etfs ?? []).filter((e) => e.category === 'active')) {
+      const held = new Set(etf.holdings.map((h) => h.code));
+      for (const c of etf.changes) {
+        if (c.kind === 'add') expect(held.has(c.code)).toBe(true);
+        if (c.kind === 'remove') expect(held.has(c.code)).toBe(false);
+      }
+      const dates = etf.changes.map((c) => c.date);
+      expect([...dates].sort().reverse()).toEqual(dates);
+    }
+  });
+});
+
+describe('主動式 ETF 共識', () => {
+  it('同一檔股票被多檔主動式 ETF 加碼時排在前面', async () => {
+    const { activeConsensus, computeEtfs } = await import('../domain/etf');
+    const universe = buildMockUniverse();
+    const snap = snapshotAt();
+    const rows = activeConsensus(computeEtfs(universe, snap, computeMetrics(universe, snap)));
+    expect(rows.length).toBeGreaterThan(3);
+    const top = rows[0];
+    expect(top.buyers.length).toBeGreaterThanOrEqual(2);
+    for (let i = 1; i < rows.length; i++) {
+      const net = (r: (typeof rows)[number]) => r.buyers.length - r.sellers.length;
+      expect(net(rows[i - 1])).toBeGreaterThanOrEqual(net(rows[i]));
+    }
+  });
+});

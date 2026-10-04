@@ -53,7 +53,11 @@ class App {
   private readonly fundamentals: Map<string, Fundamentals>;
   private strategy: StrategyId = 'value';
   /** 熱力圖上正在標示的股票群：五大選股的某個策略，或某檔 ETF 的成分股。 */
-  private highlight: { kind: 'strategy'; id: StrategyId } | { kind: 'etf'; code: string } | null = null;
+  private highlight:
+    | { kind: 'strategy'; id: StrategyId }
+    | { kind: 'etf'; code: string }
+    | { kind: 'etf-changes'; code: string }
+    | null = null;
   private etfs: EtfView[] = [];
   private etfFilter: EtfFilter = 'all';
   private etfSelected: string | null = null;
@@ -196,10 +200,15 @@ class App {
       codes = new Set(runScreen(s, this.metrics, this.universe).filter((r) => r.status === 'match').map((r) => r.view.stock.code));
       label = s.name;
     } else {
-      const code = this.highlight.code;
+      const { kind, code } = this.highlight;
       const etf = this.universe.etfs?.find((e) => e.code === code);
-      codes = new Set(etf?.holdings.map((h) => h.code) ?? []);
-      label = `${etf?.name ?? code} 成分股`;
+      if (kind === 'etf') {
+        codes = new Set(etf?.holdings.map((h) => h.code) ?? []);
+        label = `${etf?.name ?? code} 成分股`;
+      } else {
+        codes = new Set(etf?.changes.map((c) => c.code) ?? []);
+        label = `${etf?.name ?? code} 異動股`;
+      }
     }
     this.map.setHighlight(codes);
     chip.hidden = false;
@@ -214,7 +223,11 @@ class App {
       const data = el.dataset;
       if (data.clear !== undefined) this.select(null);
       else if (data.industry) this.select({ kind: 'industry', id: data.industry });
-      else if (data.stock) this.select({ kind: 'stock', id: data.stock });
+      else if (data.stock) {
+        this.select({ kind: 'stock', id: data.stock });
+        // ETF 頁沒有個股細節欄，點股票時切到熱力圖並選取它
+        if (this.page === 'etf') this.showPage('map');
+      }
     });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.focus) this.select(this.focus);
@@ -232,7 +245,7 @@ class App {
     }
     window.addEventListener('hashchange', () => this.showPage(pageFromHash()));
     document.addEventListener('click', (e) => {
-      const el = (e.target as Element).closest<HTMLElement>('[data-strategy],[data-highlight],[data-etf],[data-etf-cat],[data-etf-highlight]');
+      const el = (e.target as Element).closest<HTMLElement>('[data-strategy],[data-highlight],[data-etf],[data-etf-cat],[data-etf-highlight],[data-etf-changes]');
       if (!el) return;
       if (el.dataset.etfCat) {
         this.etfFilter = el.dataset.etfCat as EtfFilter;
@@ -240,8 +253,10 @@ class App {
       } else if (el.dataset.etf) {
         this.etfSelected = this.etfSelected === el.dataset.etf ? null : el.dataset.etf;
         this.renderPanels();
-      } else if (el.dataset.etfHighlight) {
-        this.highlight = { kind: 'etf', code: el.dataset.etfHighlight };
+      } else if (el.dataset.etfHighlight || el.dataset.etfChanges) {
+        this.highlight = el.dataset.etfHighlight
+          ? { kind: 'etf', code: el.dataset.etfHighlight }
+          : { kind: 'etf-changes', code: el.dataset.etfChanges! };
         this.focus = null;
         this.map.setFocus(null);
         this.applyHighlight();
