@@ -70,9 +70,47 @@ export interface StockMeta {
   fundamentals?: Fundamentals;
 }
 
+export type EtfCategory = 'market' | 'dividend' | 'theme' | 'bond';
+
+export interface EtfHolding {
+  /** 成分股代號（需在股票池內）。 */
+  code: string;
+  /** 權重（%）。 */
+  weight: number;
+}
+
+/** ETF 基本資料（低頻）。 */
+export interface EtfMeta {
+  code: string;
+  name: string;
+  category: EtfCategory;
+  /** 追蹤標的或投資範圍的簡短說明。 */
+  underlying: string;
+  prevClose: number;
+  /** 近 20 日平均成交額（億元）。 */
+  avgTurnover20: number;
+  /** 基金規模（億元）。 */
+  aum: number;
+  /** 內扣費用率（%／年，經理費 + 保管費）。 */
+  expenseRatio: number;
+  /** 近一年配息合計（元）。 */
+  dividendPerYear: number;
+  frequency: '月' | '季' | '半年' | '年';
+  /** 連續配息年數。 */
+  dividendYears: number;
+  /** 近一年填息率（%）。 */
+  fillRate: number;
+  /** 受益人數（萬人）。 */
+  holders: number;
+  /** 前幾大成分股；債券型可為空。 */
+  holdings: EtfHolding[];
+}
+
 export interface Universe {
   industries: IndustryMeta[];
   stocks: StockMeta[];
+  /** ETF；資料來源不支援時可省略。 */
+  etfs?: EtfMeta[];
   index: { name: string; prevClose: number };
 }
 
@@ -85,6 +123,8 @@ export interface Quote {
   volume: number;
   /** 今日累計成交額（億元）。 */
   turnover: number;
+  /** ETF 的預估淨值；個股沒有。 */
+  nav?: number;
 }
 
 export interface IndexPoint {

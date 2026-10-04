@@ -127,7 +127,18 @@ button { font: inherit; color: inherit; }
 }
 .app.page-intel .field,
 .app.page-intel .screener,
-.app.page-map .screener { display: none; }
+.app.page-map .screener,
+.app.page-screen .etf-page,
+.app.page-etf #page-screen { display: none; }
+.app.page-etf {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: 'top' 'screen';
+}
+.app.page-etf .field,
+.app.page-etf .sectors,
+.app.page-etf .side,
+.app.page-etf .dock { display: none; }
 .app.page-screen {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
@@ -434,6 +445,34 @@ button { font: inherit; color: inherit; }
 .small { font-size: 12px; }
 .d-sub small { font-weight: 400; letter-spacing: 0; margin-left: 6px; color: var(--muted); }
 
+/* ---------------- ETF ---------------- */
+.etf-cats { display: grid; gap: 8px; }
+.etf-cat {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; text-align: left; cursor: pointer;
+  padding: 12px 14px; border-radius: 14px; border: 1px solid var(--glass-line); background: var(--row);
+  transition: background 0.2s, border-color 0.2s;
+}
+.etf-cat:hover { background: var(--row-hover); }
+.etf-cat.is-active { border-color: rgba(143, 240, 255, 0.5); background: linear-gradient(150deg, rgba(143, 240, 255, 0.14), rgba(139, 123, 255, 0.08)); }
+.etf-cat-name { font-size: 15px; font-weight: 600; }
+.etf-cat-meta { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+.etf-note { padding: 12px 6px 0; }
+.etf-tag { font-size: 10px; font-weight: 600; padding: 0 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); color: var(--ink-2); }
+.tag-market { color: #8ff0ff; background: rgba(143, 240, 255, 0.1); }
+.tag-dividend { color: #ffd27a; background: rgba(255, 196, 80, 0.1); }
+.tag-theme { color: #c3b8ff; background: rgba(139, 123, 255, 0.14); }
+.tag-bond { color: #b5bfdc; }
+.warn { color: #ffd27a; }
+.etf-under { margin: 8px 0 0; }
+.hold-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 6px; }
+.hold-list li { display: grid; grid-template-columns: minmax(0, 1fr) 36px 40px 56px 40px; gap: 8px; align-items: center; font-size: 12px; }
+.hold-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.hold-name small { margin-left: 6px; color: var(--muted); font-size: 11px; }
+.hold-bar { height: 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); overflow: hidden; }
+.hold-bar i { display: block; height: 100%; border-radius: 4px; background: var(--accent-grad); }
+.hold-w, .hold-list li > span:nth-child(4), .hold-list li > span:nth-child(5) { text-align: right; }
+.btn-block { width: 100%; padding: 9px 14px; }
+
 /* ---------------- 情報頁 ---------------- */
 .sectors { grid-area: sectors; padding: 16px 12px; overflow-y: auto; }
 .sectors .panel-title { padding: 0 8px 10px; }
@@ -566,8 +605,9 @@ button.log-text:hover { color: var(--ink); }
 @media (max-width: 980px) {
   .app.page-intel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'top top' 'sectors side' 'dock dock'; grid-template-rows: auto minmax(420px, auto) auto; height: auto; }
   .app.page-intel .dock { grid-template-rows: 280px 280px; }
-  html:has(.page-intel), body:has(.page-intel), html:has(.page-screen), body:has(.page-screen) { height: auto; }
-  .app.page-screen { height: auto; }
+  html:has(.page-intel), body:has(.page-intel), html:has(.page-screen), body:has(.page-screen), html:has(.page-etf), body:has(.page-etf) { height: auto; }
+  .app.page-screen, .app.page-etf { height: auto; }
+  .etf-cats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .screener { grid-template-columns: minmax(0, 1fr); }
   .strat-list { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
   .scr-detail { max-height: none; }

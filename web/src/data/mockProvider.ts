@@ -55,6 +55,20 @@ interface StockState {
   turnover: number;
 }
 
+interface EtfState extends StockState {
+  /** 淨值的對數報酬。 */
+  navReturn: number;
+  nav: number;
+  /** 市價相對淨值的折溢價（比例）。 */
+  premium: number;
+}
+
+/** ETF 升降單位：50 元以下 0.01、以上 0.05。 */
+function etfTick(price: number): number {
+  const tick = price < 50 ? 0.01 : 0.05;
+  return Math.round(Math.round(price / tick) * tick * 100) / 100;
+}
+
 export interface MockProviderOptions {
   seed?: number;
   /** 從開盤後第幾分鐘開始播放（預設 65，也就是 10:05）。 */
@@ -76,6 +90,9 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
   private rng!: () => number;
   private minute = 0;
   private states = new Map<string, StockState>();
+  private etfStates = new Map<string, EtfState>();
+  /** ETF 用獨立亂數，加入 ETF 不會改變個股行情。 */
+  private etfRng!: () => number;
   private series: IndexPoint[] = [];
   private turnoverHistory: TurnoverBar[] = [];
   private listeners = new Set<(s: MarketSnapshot) => void>();
@@ -146,6 +163,14 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
     this.series = [];
     this.turnoverHistory = [];
     this.states.clear();
+    this.etfRng = createRng(this.seed + 500);
+    this.etfStates.clear();
+    for (const e of this.universe.etfs ?? []) {
+      this.etfStates.set(e.code, {
+        logReturn: 0, price: e.prevClose, high: e.prevClose, low: e.prevClose, volume: 0, turnover: 0,
+        navReturn: 0, nav: e.prevClose, premium: e.category === 'dividend' ? 0.001 : 0,
+      });
+    }
     for (const s of this.universe.stocks) {
       this.states.set(s.code, {
         logReturn: 0, price: s.prevClose, high: s.prevClose, low: s.prevClose, volume: 0, turnover: 0,
@@ -190,10 +215,43 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
       st.volume += Math.round((turnover * 1e8) / (st.price * 1000));
     }
 
+    this.stepEtfs(dt, sqrtDt, profile);
+
     const crossedMinute = Math.floor(to) !== Math.floor(from);
     this.minute = to;
     if (crossedMinute || to >= SESSION_MINUTES) this.pushIndexPoint();
     else this.series[this.series.length - 1] = this.indexPoint();
+  }
+
+  /** 股票型 ETF 淨值跟著成分股加權報酬；債券型獨立隨機漫步。市價 = 淨值 ×（1 + 折溢價）。 */
+  private stepEtfs(dt: number, sqrtDt: number, profile: number): void {
+    for (const meta of this.universe.etfs ?? []) {
+      const st = this.etfStates.get(meta.code)!;
+      if (meta.holdings.length) {
+        let w = 0;
+        let r = 0;
+        for (const h of meta.holdings) {
+          const hs = this.states.get(h.code);
+          if (!hs) continue;
+          w += h.weight;
+          r += h.weight * hs.logReturn;
+        }
+        st.navReturn = w > 0 ? r / w : 0;
+      } else {
+        st.navReturn += gaussian(this.etfRng) * 0.00045 * sqrtDt - 0.000004 * dt;
+      }
+      st.nav = meta.prevClose * Math.exp(st.navReturn);
+      const target = meta.category === 'dividend' ? 0.001 : 0;
+      st.premium += (target - st.premium) * 0.05 * dt + gaussian(this.etfRng) * 0.00025 * sqrtDt;
+      st.premium = Math.max(-0.006, Math.min(0.006, st.premium));
+      st.price = etfTick(st.nav * (1 + st.premium));
+      st.logReturn = Math.log(st.price / meta.prevClose);
+      st.high = Math.max(st.high, st.price);
+      st.low = Math.min(st.low, st.price);
+      const turnover = (meta.avgTurnover20 / SESSION_MINUTES) * dt * profile * Math.exp(gaussian(this.etfRng) * 0.3) / 1.05;
+      st.turnover += turnover;
+      st.volume += Math.round((turnover * 1e8) / (st.price * 1000));
+    }
   }
 
   private indexValue(): number {
@@ -215,7 +273,7 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
     this.series.push(this.indexPoint());
     const byStock: Record<string, number> = {};
     const prices: Record<string, number> = {};
-    for (const [code, st] of this.states) {
+    for (const [code, st] of [...this.states, ...this.etfStates]) {
       byStock[code] = st.turnover;
       prices[code] = st.price;
     }
@@ -228,6 +286,9 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
     for (const [code, st] of this.states) {
       quotes[code] = { code, price: st.price, high: st.high, low: st.low, volume: st.volume, turnover: st.turnover };
       turnover += st.turnover;
+    }
+    for (const [code, st] of this.etfStates) {
+      quotes[code] = { code, price: st.price, high: st.high, low: st.low, volume: st.volume, turnover: st.turnover, nav: st.nav };
     }
     return {
       time: this.openMs + this.minute * 60_000,

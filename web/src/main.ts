@@ -12,6 +12,8 @@ import { renderRotation } from './ui/rotationView';
 import { renderScreen, renderStrategyList } from './ui/screener';
 import { runScreen, strategyById, type StrategyId } from './domain/screens';
 import type { Fundamentals } from './data/types';
+import { computeEtfs, type EtfView } from './domain/etf';
+import { renderEtfCategories, renderEtfDetail, renderEtfTable, type EtfFilter } from './ui/etfPage';
 import { GlassMapView } from './ui/glassMapView';
 import { Toasts } from './ui/toasts';
 
@@ -35,7 +37,7 @@ function saveConvention(value: Convention): void {
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
-const PAGES = ['map', 'intel', 'screen'] as const;
+const PAGES = ['map', 'intel', 'screen', 'etf'] as const;
 type Page = (typeof PAGES)[number];
 
 function pageFromHash(): Page {
@@ -50,8 +52,11 @@ class App {
   private readonly history = new Map<string, number[]>();
   private readonly fundamentals: Map<string, Fundamentals>;
   private strategy: StrategyId = 'value';
-  /** 熱力圖上正在標示的策略。 */
-  private highlight: StrategyId | null = null;
+  /** 熱力圖上正在標示的股票群：五大選股的某個策略，或某檔 ETF 的成分股。 */
+  private highlight: { kind: 'strategy'; id: StrategyId } | { kind: 'etf'; code: string } | null = null;
+  private etfs: EtfView[] = [];
+  private etfFilter: EtfFilter = 'all';
+  private etfSelected: string | null = null;
   private readonly detector = new EventDetector();
   private metrics?: MarketMetrics;
   private rotation?: Rotation;
@@ -85,6 +90,7 @@ class App {
       this.toasts.clear();
     }
     this.metrics = computeMetrics(this.universe, snap);
+    this.etfs = computeEtfs(this.universe, snap, this.metrics);
     this.rotation = computeRotation(this.universe, snap.turnoverHistory);
     const found = this.detector.detect(this.metrics);
     this.fresh = new Set(found.map((e) => e.id));
@@ -134,6 +140,12 @@ class App {
     renderTicker($('#ticker'), ctx);
     renderSectors($('#sectors'), ctx);
     if (this.page === 'intel') renderDetail($('#detail'), ctx);
+    if (this.page === 'etf') {
+      renderEtfCategories($('#etf-cats'), this.etfs, this.etfFilter);
+      renderEtfTable($('#etf-list'), this.etfs, this.etfFilter, this.etfSelected);
+      const etf = this.etfs.find((e) => e.meta.code === this.etfSelected);
+      renderEtfDetail($('#etf-detail'), etf, etf ? this.history.get(etf.meta.code) : undefined);
+    }
     if (this.page === 'screen') {
       renderStrategyList($('#strategies'), this.metrics, this.universe, this.strategy);
       renderScreen($('#screen'), this.metrics, this.universe, this.strategy, this.focus?.kind === 'stock' ? this.focus.id : null);
@@ -177,11 +189,21 @@ class App {
       chip.hidden = true;
       return;
     }
-    const s = strategyById(this.highlight);
-    const codes = new Set(runScreen(s, this.metrics, this.universe).filter((r) => r.status === 'match').map((r) => r.view.stock.code));
+    let codes: Set<string>;
+    let label: string;
+    if (this.highlight.kind === 'strategy') {
+      const s = strategyById(this.highlight.id);
+      codes = new Set(runScreen(s, this.metrics, this.universe).filter((r) => r.status === 'match').map((r) => r.view.stock.code));
+      label = s.name;
+    } else {
+      const code = this.highlight.code;
+      const etf = this.universe.etfs?.find((e) => e.code === code);
+      codes = new Set(etf?.holdings.map((h) => h.code) ?? []);
+      label = `${etf?.name ?? code} 成分股`;
+    }
     this.map.setHighlight(codes);
     chip.hidden = false;
-    chip.textContent = `篩選中：${s.name}（${codes.size} 檔）✕`;
+    chip.textContent = `篩選中：${label}（${codes.size} 檔）✕`;
   }
 
   private bindControls(): void {
@@ -198,19 +220,37 @@ class App {
       if (e.key === 'Escape' && this.focus) this.select(this.focus);
       const row = (e.target as Element).closest?.<HTMLElement>('tr[data-stock]');
       if (row && (e.key === 'Enter' || e.key === ' ')) this.select({ kind: 'stock', id: row.dataset.stock! });
+      const etfRow = (e.target as Element).closest?.<HTMLElement>('tr[data-etf]');
+      if (etfRow && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        this.etfSelected = etfRow.dataset.etf!;
+        this.renderPanels();
+      }
     });
     for (const tab of document.querySelectorAll<HTMLButtonElement>('[data-page]')) {
       tab.addEventListener('click', () => this.showPage(tab.dataset.page as Page));
     }
     window.addEventListener('hashchange', () => this.showPage(pageFromHash()));
     document.addEventListener('click', (e) => {
-      const el = (e.target as Element).closest<HTMLElement>('[data-strategy],[data-highlight]');
+      const el = (e.target as Element).closest<HTMLElement>('[data-strategy],[data-highlight],[data-etf],[data-etf-cat],[data-etf-highlight]');
       if (!el) return;
-      if (el.dataset.strategy) {
+      if (el.dataset.etfCat) {
+        this.etfFilter = el.dataset.etfCat as EtfFilter;
+        this.renderPanels();
+      } else if (el.dataset.etf) {
+        this.etfSelected = this.etfSelected === el.dataset.etf ? null : el.dataset.etf;
+        this.renderPanels();
+      } else if (el.dataset.etfHighlight) {
+        this.highlight = { kind: 'etf', code: el.dataset.etfHighlight };
+        this.focus = null;
+        this.map.setFocus(null);
+        this.applyHighlight();
+        this.showPage('map');
+      } else if (el.dataset.strategy) {
         this.strategy = el.dataset.strategy as StrategyId;
         this.renderPanels();
       } else if (el.dataset.highlight) {
-        this.highlight = el.dataset.highlight as StrategyId;
+        this.highlight = { kind: 'strategy', id: el.dataset.highlight as StrategyId };
         // 標示篩選結果時取消個別選取，避免符合的股票也被變暗
         this.focus = null;
         this.map.setFocus(null);

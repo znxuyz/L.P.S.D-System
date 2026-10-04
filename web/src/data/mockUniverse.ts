@@ -1,3 +1,4 @@
+import { MOCK_ETFS } from './mockEtfs';
 import { createRng } from './random';
 import type { Fundamentals, IndustryMeta, StockEvent, StockMeta, Universe } from './types';
 
@@ -226,5 +227,5 @@ export function buildMockUniverse(seed = 20260930): Universe {
     fundamentals: fundamentalsFor(rest.industryId, rest.code, rest.prevClose, fRng),
   }));
 
-  return { industries, stocks, index: { name: '加權指數', prevClose: 23850.42 } };
+  return { industries, stocks, etfs: MOCK_ETFS, index: { name: '加權指數', prevClose: 23850.42 } };
 }

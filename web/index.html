@@ -37,6 +37,7 @@
           <button type="button" role="tab" id="tab-map" data-page="map" aria-selected="true" aria-controls="page-map">熱力圖</button>
           <button type="button" role="tab" id="tab-intel" data-page="intel" aria-selected="false">市場情報</button>
           <button type="button" role="tab" id="tab-screen" data-page="screen" aria-selected="false">五大選股</button>
+          <button type="button" role="tab" id="tab-etf" data-page="etf" aria-selected="false">ETF</button>
         </div>
         <dl class="ticker" id="ticker"></dl>
         <details class="menu">
@@ -93,6 +94,12 @@
         <nav class="strategies glass" id="strategies"></nav>
         <div class="scr-main glass" id="screen"></div>
         <aside class="scr-detail glass" id="screen-detail" aria-live="polite"></aside>
+      </section>
+
+      <section class="screener etf-page" id="page-etf" aria-label="ETF">
+        <nav class="strategies glass" id="etf-cats"></nav>
+        <div class="scr-main glass" id="etf-list"></div>
+        <aside class="scr-detail glass" id="etf-detail" aria-live="polite"></aside>
       </section>
     </div>
     <script type="module" src="/src/main.ts"></script>

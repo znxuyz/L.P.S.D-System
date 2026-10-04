@@ -115,3 +115,39 @@ describe('五大選股', () => {
     }
   });
 });
+
+describe('ETF', () => {
+  it('成分股都在股票池內，權重合理', () => {
+    const universe = buildMockUniverse();
+    const codes = new Set(universe.stocks.map((s) => s.code));
+    for (const etf of universe.etfs ?? []) {
+      for (const h of etf.holdings) expect(codes.has(h.code)).toBe(true);
+      expect(etf.holdings.reduce((s, h) => s + h.weight, 0)).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('股票型 ETF 的淨值跟著成分股加權變動，折溢價在 ±0.6% 內', async () => {
+    const { computeEtfs } = await import('../domain/etf');
+    const universe = buildMockUniverse();
+    const snap = snapshotAt(120);
+    const m = computeMetrics(universe, snap);
+    const etfs = computeEtfs(universe, snap, m);
+    expect(etfs.length).toBe(universe.etfs!.length);
+    for (const e of etfs) {
+      expect(Math.abs(e.premiumPct)).toBeLessThan(0.7);
+      if (e.holdings.length) {
+        const navPct = (e.nav / e.meta.prevClose - 1) * 100;
+        // 淨值用對數報酬加權，與成分股漲跌的加權平均非常接近
+        expect(navPct).toBeCloseTo(e.holdingsChangePct, 0);
+      }
+    }
+  });
+
+  it('ETF 成交額不計入產業資金流的總成交額', () => {
+    const universe = buildMockUniverse();
+    const snap = snapshotAt();
+    const m = computeMetrics(universe, snap);
+    const stockTotal = universe.stocks.reduce((s, x) => s + snap.quotes[x.code].turnover, 0);
+    expect(m.totalTurnover).toBeCloseTo(stockTotal, 6);
+  });
+});
