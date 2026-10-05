@@ -14,12 +14,16 @@ import type { MarketMetrics, StockMetrics } from './metrics';
  */
 
 export interface HoldingView {
-  stock: StockMetrics;
+  code: string;
+  name: string;
   weight: number;
+  /** 在股票池裡才有即時行情。 */
+  stock?: StockMetrics;
 }
 
 export interface ChangeView extends HoldingChange {
-  stock: StockMetrics;
+  name: string;
+  stock?: StockMetrics;
 }
 
 export interface EtfView {
@@ -37,6 +41,8 @@ export interface EtfView {
   holdings: HoldingView[];
   /** 列出的成分股佔 ETF 的總權重（%）。 */
   coveredWeight: number;
+  /** 其中有即時行情（在股票池裡）的權重（%）。 */
+  trackedWeight: number;
   holdingsChangePct: number;
   holdingsFlow: number;
   changes: ChangeView[];
@@ -44,7 +50,9 @@ export interface EtfView {
 
 /** 主動式 ETF 共識：同一檔股票被幾檔主動式 ETF 加碼（含新進）或減碼（含出清）。 */
 export interface ConsensusRow {
-  stock: StockMetrics;
+  code: string;
+  name: string;
+  stock?: StockMetrics;
   buyers: string[];
   sellers: string[];
 }
@@ -61,11 +69,15 @@ export function computeEtfs(universe: Universe, snapshot: MarketSnapshot, metric
     const q = snapshot.quotes[meta.code];
     const price = q?.price ?? meta.prevClose;
     const nav = q?.nav ?? price;
-    const holdings = meta.holdings
-      .map((h) => ({ stock: metrics.stockByCode.get(h.code), weight: h.weight }))
-      .filter((h): h is HoldingView => !!h.stock)
+    const holdings: HoldingView[] = meta.holdings
+      .map((h) => {
+        const stock = metrics.stockByCode.get(h.code);
+        return { code: h.code, name: stock?.name ?? h.name ?? h.code, weight: h.weight, stock };
+      })
       .sort((a, b) => b.weight - a.weight);
     const coveredWeight = holdings.reduce((s, h) => s + h.weight, 0);
+    const tracked = holdings.filter((h): h is HoldingView & { stock: StockMetrics } => !!h.stock);
+    const trackedWeight = tracked.reduce((s, h) => s + h.weight, 0);
     return {
       meta,
       price,
@@ -80,11 +92,13 @@ export function computeEtfs(universe: Universe, snapshot: MarketSnapshot, metric
       yieldPct: (meta.dividendPerYear / price) * 100,
       holdings,
       coveredWeight,
-      holdingsChangePct: coveredWeight > 0 ? holdings.reduce((s, h) => s + h.weight * h.stock.changePct, 0) / coveredWeight : 0,
-      holdingsFlow: holdings.reduce((s, h) => s + h.stock.flow, 0),
-      changes: meta.changes
-        .map((c) => ({ ...c, stock: metrics.stockByCode.get(c.code) }))
-        .filter((c): c is ChangeView => !!c.stock),
+      trackedWeight,
+      holdingsChangePct: trackedWeight > 0 ? tracked.reduce((s, h) => s + h.weight * h.stock.changePct, 0) / trackedWeight : 0,
+      holdingsFlow: tracked.reduce((s, h) => s + h.stock.flow, 0),
+      changes: meta.changes.map((c) => {
+        const stock = metrics.stockByCode.get(c.code);
+        return { ...c, name: stock?.name ?? c.name ?? c.code, stock };
+      }),
     };
   });
 }
@@ -109,7 +123,7 @@ export function activeConsensus(etfs: EtfView[]): ConsensusRow[] {
     const sell = new Set<string>();
     for (const c of e.changes) (c.kind === 'add' || c.kind === 'increase' ? buy : sell).add(c.code);
     for (const c of e.changes) {
-      if (!rows.has(c.code)) rows.set(c.code, { stock: c.stock, buyers: [], sellers: [] });
+      if (!rows.has(c.code)) rows.set(c.code, { code: c.code, name: c.name, stock: c.stock, buyers: [], sellers: [] });
     }
     for (const code of buy) rows.get(code)!.buyers.push(e.meta.code);
     for (const code of sell) rows.get(code)!.sellers.push(e.meta.code);

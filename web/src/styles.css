@@ -664,6 +664,9 @@ html:has(.page-stock), body:has(.page-stock) { height: auto; }
 .up-card { background: linear-gradient(160deg, color-mix(in srgb, var(--up) 12%, transparent), transparent 70%); }
 .down-card { background: linear-gradient(160deg, color-mix(in srgb, var(--down) 12%, transparent), transparent 70%); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.hold-list.is-long { max-height: 420px; overflow-y: auto; padding-right: 4px; }
+.hold-note { margin: 0 0 8px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.cons-row:disabled { cursor: default; }
 .tag-mock, .tag-real {
   display: inline-block; margin: 0 6px; padding: 1px 7px; border-radius: 999px;
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; vertical-align: 1px;
