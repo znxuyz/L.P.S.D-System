@@ -22,6 +22,13 @@ export function renderEtfCategories(el: HTMLElement, etfs: EtfView[], active: Et
     `</div>${renderConsensus(etfs)}<p class="muted small etf-note">ETF 的成交額不計入熱力圖的資金流，避免和成分股重複計算；「成分股資金流」是成分股今天的資金方向。</p>`;
 }
 
+/** 資料來源標籤：模擬資料要明確標示，真實資料標出公告日期。 */
+function srcTag(e: EtfView | undefined): string {
+  const src = e?.meta.holdingsSource;
+  if (src?.kind === 'real') return `<span class="tag-real">投信公告${src.asOf ? ` ${src.asOf.slice(5).replace('-', '/')}` : ''}</span>`;
+  return '<span class="tag-mock" title="示意資料，不代表實際持股">模擬</span>';
+}
+
 /** 主動式 ETF 共識：近 5 個交易日被多檔主動式 ETF 加碼或減碼的股票。 */
 function renderConsensus(etfs: EtfView[]): string {
   const rows = activeConsensus(etfs);
@@ -33,7 +40,9 @@ function renderConsensus(etfs: EtfView[]): string {
       <span class="cons-n ${buy ? 'buy' : 'sell'}">${buy ? `${r.buyers.length} 檔加碼` : `${r.sellers.length} 檔減碼`}</span>
       <small>${(buy ? r.buyers : r.sellers).join('、')}</small></button></li>`;
   return `<section class="consensus">
-    <h3 class="d-sub">主動式 ETF 共識 <small>近 5 個交易日</small></h3>
+    <h3 class="d-sub">主動式 ETF 共識 <small>近 5 個交易日</small>${
+      etfs.some((e) => e.meta.category === 'active' && e.meta.holdingsSource?.kind !== 'real') ? srcTag(undefined) : srcTag(etfs.find((e) => e.meta.category === 'active'))
+    }</h3>
     <ul class="cons-list">${buys.map((r) => row(r, true)).join('')}${sells.map((r) => row(r, false)).join('')}</ul>
   </section>`;
 }
@@ -68,13 +77,13 @@ function renderChanges(e: EtfView): string {
       if (!byDate.has(c.date)) byDate.set(c.date, []);
       byDate.get(c.date)!.push(c);
     }
-    return `<h3 class="d-sub">每日持股異動 <small>${esc(r?.schedule ?? '')}</small></h3>
+    return `<h3 class="d-sub">每日持股異動 ${srcTag(e)}<small>${esc(r?.schedule ?? '')}</small></h3>
       ${[...byDate.entries()]
         .map(([date, list]) => `<p class="chg-date">${date.slice(5).replace('-', '/')}</p><ul class="chg-list">${list.map(changeRow).join('')}</ul>`)
         .join('')}
       ${highlight}`;
   }
-  return `<h3 class="d-sub">成分股變化 <small>${esc(r?.schedule ?? '')}</small></h3>
+  return `<h3 class="d-sub">成分股變化 ${srcTag(e)}<small>${esc(r?.schedule ?? '')}</small></h3>
     <p class="chg-date">最近調整 ${r?.last.replace(/-/g, '/') ?? ''}${r?.next ? `・下次預計 ${r.next.replace(/-/g, '/')}` : ''}</p>
     <ul class="chg-list">${e.changes.map(changeRow).join('')}</ul>
     ${highlight}`;
@@ -132,7 +141,7 @@ export function renderEtfDetail(el: HTMLElement, e: EtfView | undefined, history
       : '';
   const maxW = Math.max(1, ...e.holdings.map((h) => h.weight));
   const holdings = e.holdings.length
-    ? `<h3 class="d-sub">前幾大成分股 <small>佔 ${num(e.coveredWeight, 1)}%・加權漲跌 <span class="${direction(e.holdingsChangePct)}">${pct(e.holdingsChangePct)}</span></small></h3>
+    ? `<h3 class="d-sub">前幾大成分股 ${srcTag(e)}<small>佔 ${num(e.coveredWeight, 1)}%・加權漲跌 <span class="${direction(e.holdingsChangePct)}">${pct(e.holdingsChangePct)}</span></small></h3>
       <ul class="hold-list">${e.holdings
         .map(
           (h) => `<li><span class="hold-name">${esc(h.stock.name)}<small>${h.stock.code}</small></span>
