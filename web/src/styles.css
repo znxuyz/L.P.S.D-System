@@ -172,7 +172,8 @@ button { font: inherit; color: inherit; }
 .brand-text { display: grid; line-height: 1.15; }
 .brand-text b { font-size: 15px; font-weight: 700; letter-spacing: 0.22em; }
 .brand-text span { font-size: 11px; color: var(--muted); letter-spacing: 0.12em; }
-.chip-mock {
+.chip-source {
+  font: inherit;
   font-size: 11px;
   padding: 3px 10px;
   border-radius: 999px;
@@ -180,7 +181,18 @@ button { font: inherit; color: inherit; }
   background: rgba(255, 196, 80, 0.1);
   border: 1px solid rgba(255, 196, 80, 0.3);
   white-space: nowrap;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
+.chip-source::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.chip-source.is-connecting { color: #9fd8ff; background: rgba(120, 200, 255, 0.1); border-color: rgba(120, 200, 255, 0.3); }
+.chip-source.is-connecting::before { animation: pulse 1.2s ease-in-out infinite; }
+.chip-source.is-live { color: #7ff5c8; background: rgba(80, 230, 170, 0.1); border-color: rgba(80, 230, 170, 0.32); }
+.chip-source.is-closed { color: var(--ink-2); background: rgba(255, 255, 255, 0.05); border-color: var(--glass-line); }
+.chip-source.is-error { color: #ff9c9c; background: rgba(255, 110, 110, 0.12); border-color: rgba(255, 110, 110, 0.35); }
+@keyframes pulse { 50% { opacity: 0.25; } }
 .pages { display: inline-flex; padding: 3px; gap: 2px; border-radius: 999px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--glass-line); }
 .pages button {
   border: 0;
@@ -238,9 +250,13 @@ button { font: inherit; color: inherit; }
 .icon-btn:hover, .menu[open] .icon-btn { color: var(--ink); background: rgba(255, 255, 255, 0.1); }
 .menu-body {
   position: absolute; right: 0; top: calc(100% + 12px); z-index: 30;
-  width: 240px; padding: 14px 16px 16px;
+  width: 270px; padding: 14px 16px 16px;
   display: grid; gap: 8px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)), var(--glass-strong);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)), rgba(12, 16, 32, 0.94);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  max-height: calc(100dvh - 120px);
+  overflow-y: auto;
 }
 .menu-label { margin: 6px 0 0; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; color: var(--muted); }
 .menu-row { display: flex; gap: 8px; }
@@ -256,6 +272,44 @@ button { font: inherit; color: inherit; }
 .btn:hover, .seg button:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.2); }
 .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
 .seg button[aria-pressed='true'] { background: var(--accent-grad); color: #071022; font-weight: 600; border-color: transparent; }
+.seg-2 { grid-template-columns: repeat(2, 1fr); }
+.playback { display: grid; gap: 8px; }
+.playback[hidden] { display: none; }
+.key-form { display: grid; gap: 6px; }
+.key-form[hidden] { display: none; }
+.key-form input {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-line);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.key-form input:focus { outline: none; border-color: rgba(143, 240, 255, 0.6); }
+.menu-note { margin: 0; font-size: 11px; color: var(--muted); line-height: 1.5; }
+.menu-status {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-line;
+  color: var(--ink-2);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-line);
+}
+.menu-status.is-error { color: #ffb4b4; border-color: rgba(255, 110, 110, 0.35); }
+.data-note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #ffd27a;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 196, 80, 0.08);
+  border: 1px solid rgba(255, 196, 80, 0.25);
+}
 
 /* ---------------- 熱力圖頁 ---------------- */
 .field { grid-area: field; display: flex; flex-direction: column; }
