@@ -34,11 +34,24 @@ export interface StockPageContext {
 const MA_COLORS: Record<MaPeriod, string> = { 20: '#3987e5', 60: '#c98500', 120: '#9d73e6' };
 const MA_NAME: Record<MaPeriod, string> = { 20: '月線', 60: '季線', 120: '半年線' };
 
-/** 圖例用的小圖示：上虛線（MA）、下實線（EMA）。 */
+/** K 線圖上要顯示哪些均線，記在這台裝置的瀏覽器。 */
+const LINES_KEY = 'lplc.kchart.lines';
+const lineVis: { ma: boolean; ema: boolean } = (() => {
+  try {
+    const v = JSON.parse(localStorage.getItem(LINES_KEY) ?? '{}');
+    return { ma: v.ma !== false, ema: v.ema !== false };
+  } catch {
+    return { ma: true, ema: true };
+  }
+})();
+/** 切換均線後立刻重畫圖例與 K 線圖（不用等下一次行情更新）。 */
+let redrawChart: (() => void) | null = null;
+
+/** 圖例用的小圖示：虛線是 MA、實線是 EMA，只畫有勾選的。 */
 function lineIcon(color: string): string {
-  return `<svg class="ma-icon" width="18" height="10" viewBox="0 0 18 10" aria-hidden="true">
-    <line x1="0" x2="18" y1="2.5" y2="2.5" stroke="${color}" stroke-width="1.6" stroke-dasharray="3 2"></line>
-    <line x1="0" x2="18" y1="7.5" y2="7.5" stroke="${color}" stroke-width="1.8"></line></svg>`;
+  const dashed = `<line x1="0" x2="18" y1="${lineVis.ema ? 2.5 : 5}" y2="${lineVis.ema ? 2.5 : 5}" stroke="${color}" stroke-width="1.6" stroke-dasharray="3 2"></line>`;
+  const solid = `<line x1="0" x2="18" y1="${lineVis.ma ? 7.5 : 5}" y2="${lineVis.ma ? 7.5 : 5}" stroke="${color}" stroke-width="1.8"></line>`;
+  return `<svg class="ma-icon" width="18" height="10" viewBox="0 0 18 10" aria-hidden="true">${lineVis.ma ? dashed : ''}${lineVis.ema ? solid : ''}</svg>`;
 }
 const TILT_LABEL: Record<Tilt, string> = { bull: '偏多', bear: '偏空', neutral: '中性' };
 const TILT_ICON: Record<Tilt, string> = { bull: '▲', bear: '▼', neutral: '●' };
@@ -110,8 +123,11 @@ export function renderStockPage(root: HTMLElement, code: string, ctx: StockPageC
   const scores = strategyScores(view);
   const summary = buildSummary(view, scores, tech, ctx.metrics, ctx.universe);
 
-  renderChartHead($('#sa-chart-head'), ctx, tech);
-  renderKChart($('#sa-kchart'), candles, tech, ctx);
+  redrawChart = () => {
+    renderChartHead($('#sa-chart-head'), ctx, tech);
+    renderKChart($('#sa-kchart'), candles, tech, ctx);
+  };
+  redrawChart();
   renderSummary($('#sa-summary'), summary);
   renderScores($('#sa-score'), scores);
   renderTech($('#sa-tech'), tech, ctx.daily === undefined);
@@ -157,14 +173,41 @@ function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechRepor
     return v == null ? '—' : price(v);
   };
   const src = ctx.daily === undefined ? '載入中…' : ctx.daily.source === 'fugle' ? '富果日 K' : ctx.live ? '示意資料（選單填富果金鑰可看真實日 K）' : '示意資料';
-  el.innerHTML = `<h2 class="panel-title">日 K 線 <small>${src}</small></h2>
-    <ul class="ma-legend" aria-label="均線：虛線為 MA，實線為 EMA">
-      ${MA_PERIODS.map(
-        (n) => `<li>${lineIcon(MA_COLORS[n])}<span>${n}（${MA_NAME[n]}）</span>
-          <span class="ma-vals num">MA <b>${lastOf(tech?.series.ma[n])}</b> · EMA <b>${lastOf(tech?.series.ema[n])}</b></span></li>`,
-      ).join('')}
-      <li class="ma-key">虛線 MA・實線 EMA</li>
-    </ul>`;
+  // 勾選框只建立一次，之後只更新標題與圖例，避免每秒重畫打斷點擊
+  if (!el.dataset.ready) {
+    el.innerHTML = `<div class="kc-title"></div>
+      <div class="kc-toggles" role="group" aria-label="顯示的均線">
+        <label class="kc-toggle"><input type="checkbox" data-line="ma" /><svg width="16" height="6" aria-hidden="true"><line x1="0" x2="16" y1="3" y2="3" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2"></line></svg>MA</label>
+        <label class="kc-toggle"><input type="checkbox" data-line="ema" /><svg width="16" height="6" aria-hidden="true"><line x1="0" x2="16" y1="3" y2="3" stroke="currentColor" stroke-width="1.8"></line></svg>EMA</label>
+      </div>
+      <ul class="ma-legend" aria-label="均線：虛線為 MA，實線為 EMA"></ul>`;
+    for (const box of el.querySelectorAll<HTMLInputElement>('[data-line]')) {
+      const key = box.dataset.line as 'ma' | 'ema';
+      box.checked = lineVis[key];
+      box.addEventListener('change', () => {
+        lineVis[key] = box.checked;
+        try {
+          localStorage.setItem(LINES_KEY, JSON.stringify(lineVis));
+        } catch {
+          /* 無法儲存時只在這次有效 */
+        }
+        redrawChart?.();
+      });
+    }
+    el.dataset.ready = '1';
+  }
+  setHtml(el.querySelector<HTMLElement>('.kc-title')!, `<h2 class="panel-title">日 K 線 <small>${src}</small></h2>`);
+  const vals = (n: MaPeriod) =>
+    [lineVis.ma ? `MA <b>${lastOf(tech?.series.ma[n])}</b>` : '', lineVis.ema ? `EMA <b>${lastOf(tech?.series.ema[n])}</b>` : '']
+      .filter(Boolean)
+      .join(' · ');
+  const legend =
+    lineVis.ma || lineVis.ema
+      ? MA_PERIODS.map(
+          (n) => `<li>${lineIcon(MA_COLORS[n])}<span>${n}（${MA_NAME[n]}）</span><span class="ma-vals num">${vals(n)}</span></li>`,
+        ).join('')
+      : '<li class="ma-key">均線已隱藏</li>';
+  setHtml(el.querySelector<HTMLElement>('.ma-legend')!, legend);
 }
 
 function renderKChart(el: HTMLElement, all: Candle[], tech: TechReport | null, ctx: StockPageContext): void {
@@ -185,8 +228,11 @@ function renderKChart(el: HTMLElement, all: Candle[], tech: TechReport | null, c
 
   const x = scaleBand<number>().domain(candles.map((_, i) => i)).range([pad.l, w - pad.r]).padding(0.28);
   const ma = tech?.series;
+  // 只把有顯示的均線算進縱軸範圍
   const maVals = ma
-    ? MA_PERIODS.flatMap((n) => [ma.ma[n], ma.ema[n]]).flatMap((arr) => arr.slice(off).filter((v): v is number => v != null))
+    ? MA_PERIODS.flatMap((n) => [...(lineVis.ma ? [ma.ma[n]] : []), ...(lineVis.ema ? [ma.ema[n]] : [])]).flatMap((arr) =>
+        arr.slice(off).filter((v): v is number => v != null),
+      )
     : [];
   const lo = Math.min(...candles.map((c) => c.low), ...maVals);
   const hi = Math.max(...candles.map((c) => c.high), ...maVals);
@@ -239,8 +285,9 @@ function renderKChart(el: HTMLElement, all: Candle[], tech: TechReport | null, c
     ${[...MA_PERIODS]
       .reverse()
       .map(
-        (n) => `<path d="${maPath(ma?.ma[n])}" fill="none" stroke="${MA_COLORS[n]}" stroke-width="1.4" stroke-dasharray="5 4"></path>
-          <path d="${maPath(ma?.ema[n])}" fill="none" stroke="${MA_COLORS[n]}" stroke-width="1.8"></path>`,
+        (n) =>
+          (lineVis.ma ? `<path d="${maPath(ma?.ma[n])}" fill="none" stroke="${MA_COLORS[n]}" stroke-width="1.4" stroke-dasharray="5 4"></path>` : '') +
+          (lineVis.ema ? `<path d="${maPath(ma?.ema[n])}" fill="none" stroke="${MA_COLORS[n]}" stroke-width="1.8"></path>` : ''),
       )
       .join('')}
     ${tech ? levelLine(tech.resistance, '壓力') + levelLine(tech.support, '支撐') : ''}
@@ -280,8 +327,14 @@ function renderKChart(el: HTMLElement, all: Candle[], tech: TechReport | null, c
       tip.innerHTML = `<b>${c.date}</b>
         <dl><dt>開</dt><dd>${price(c.open)}</dd><dt>高</dt><dd>${price(c.high)}</dd><dt>低</dt><dd>${price(c.low)}</dd>
         <dt>收</dt><dd class="${dirCls(chg)}">${price(c.close)}（${pct(chg)}）</dd><dt>量</dt><dd>${num(c.volume)} 張</dd>
-        ${MA_PERIODS.map((n) => `<dt><i style="background:${MA_COLORS[n]}"></i>${n} 日</dt><dd>${mv(ma?.ma[n])} / ${mv(ma?.ema[n])}</dd>`).join('')}
-        <dt></dt><dd class="muted">MA / EMA</dd></dl>`;
+        ${
+          lineVis.ma || lineVis.ema
+            ? MA_PERIODS.map(
+                (n) =>
+                  `<dt><i style="background:${MA_COLORS[n]}"></i>${n} 日</dt><dd>${[lineVis.ma ? mv(ma?.ma[n]) : '', lineVis.ema ? mv(ma?.ema[n]) : ''].filter(Boolean).join(' / ')}</dd>`,
+              ).join('') + `<dt></dt><dd class="muted">${[lineVis.ma ? 'MA' : '', lineVis.ema ? 'EMA' : ''].filter(Boolean).join(' / ')}</dd>`
+            : ''
+        }</dl>`;
       const left = cx(i) + 14 + tip.offsetWidth > w - pad.r ? cx(i) - 14 - tip.offsetWidth : cx(i) + 14;
       tip.style.transform = `translate(${Math.max(4, left)}px, ${pad.t + 6}px)`;
     })
