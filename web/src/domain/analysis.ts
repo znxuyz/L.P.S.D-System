@@ -163,7 +163,8 @@ export function buildSummary(
   // 基本面
   const pe = Number.isFinite(view.pe) && view.pe > 0 ? `${view.pe.toFixed(1)} 倍` : '虧損';
   const growth = f.epsYoY > 20 ? 'bull' : f.epsYoY < -10 ? 'bear' : 'neutral';
-  add(growth, `基本面：本益比 ${pe}、殖利率 ${view.yieldPct.toFixed(2)}%、EPS 年增 ${f.epsYoY >= 0 ? '+' : ''}${f.epsYoY.toFixed(1)}%`);
+  const peNote = view.pePct !== null && pe !== '虧損' ? `（自身 5 年 ${Math.round(view.pePct * 100)}% 分位，${view.pePct <= 0.3 ? '偏便宜' : view.pePct >= 0.7 ? '偏貴' : '合理'}）` : '';
+  add(growth, `基本面：本益比 ${pe}${peNote}、殖利率 ${view.yieldPct.toFixed(2)}%、EPS 年增 ${f.epsYoY >= 0 ? '+' : ''}${f.epsYoY.toFixed(1)}%`);
 
   // 策略
   const matched = scores.filter((x) => x.matched).map((x) => x.strategy.name);

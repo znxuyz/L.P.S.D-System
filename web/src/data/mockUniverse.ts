@@ -196,7 +196,22 @@ function fundamentalsFor(industryId: string, code: string, price: number, rng: (
     instBuyDays: Math.round((rng() - (bullish ? 0.25 : 0.6)) * 12),
     bigHolderChg: (rng() - (bullish ? 0.3 : 0.6)) * 3,
     events: EVENTS[code] ?? [],
+    pe5y: peBand(code, pe),
   };
+}
+
+/**
+ * 示意的 5 年本益比分布：每檔股票有自己的「常態本益比」，
+ * 用獨立的亂數產生，不影響其他模擬數字。
+ */
+function peBand(code: string, pe: number): Fundamentals['pe5y'] {
+  let seed = 0;
+  for (const c of code) seed = (seed * 131 + c.charCodeAt(0)) >>> 0;
+  const r = createRng(seed ^ 0x5eed);
+  // 常態本益比落在目前本益比的 0.75～1.35 倍：有的股票現在偏貴、有的偏便宜
+  const center = pe * (0.75 + r() * 0.6);
+  const q = (k: number) => Math.round(center * k * (0.96 + r() * 0.08) * 10) / 10;
+  return [q(0.62), q(0.84), q(1), q(1.2), q(1.65)];
 }
 
 /** 股票池 20 日平均成交額總和的目標值（億元），讓數字接近台股實際量級。 */
