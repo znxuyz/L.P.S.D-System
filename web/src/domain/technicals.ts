@@ -24,10 +24,15 @@ export interface Signal {
   note: string;
 }
 
+/** 圖上畫的均線週期：月線、季線、半年線。 */
+export const MA_PERIODS = [20, 60, 120] as const;
+export type MaPeriod = (typeof MA_PERIODS)[number];
+
 export interface TechSeries {
-  ma5: (number | null)[];
-  ma20: (number | null)[];
-  ma60: (number | null)[];
+  /** 簡單移動平均（MA）。 */
+  ma: Record<MaPeriod, (number | null)[]>;
+  /** 指數移動平均（EMA），對近期價格反應較快。 */
+  ema: Record<MaPeriod, (number | null)[]>;
 }
 
 export interface TechReport {
@@ -52,6 +57,24 @@ export function ema(values: number[], n: number): number[] {
   const k = 2 / (n + 1);
   const out: number[] = [];
   values.forEach((v, i) => out.push(i === 0 ? v : v * k + out[i - 1] * (1 - k)));
+  return out;
+}
+
+/** 均線用的 EMA：前 n−1 天為空，第 n 天以 SMA 起算，之後遞迴。 */
+export function emaSeries(values: number[], n: number): (number | null)[] {
+  const k = 2 / (n + 1);
+  const out: (number | null)[] = [];
+  let prev = 0;
+  for (let i = 0; i < values.length; i++) {
+    if (i < n - 1) out.push(null);
+    else if (i === n - 1) {
+      prev = values.slice(0, n).reduce((a, b) => a + b, 0) / n;
+      out.push(prev);
+    } else {
+      prev = values[i] * k + prev * (1 - k);
+      out.push(prev);
+    }
+  }
   return out;
 }
 
@@ -111,22 +134,30 @@ const f1 = (v: number) => v.toFixed(1);
 export function analyzeTechnicals(candles: Candle[]): TechReport | null {
   if (candles.length < 30) return null;
   const closes = candles.map((c) => c.close);
-  const series: TechSeries = { ma5: sma(closes, 5), ma20: sma(closes, 20), ma60: sma(closes, 60) };
+  const series: TechSeries = {
+    ma: { 20: sma(closes, 20), 60: sma(closes, 60), 120: sma(closes, 120) },
+    ema: { 20: emaSeries(closes, 20), 60: emaSeries(closes, 60), 120: emaSeries(closes, 120) },
+  };
   const price = last(closes);
   const signals: Signal[] = [];
 
-  // 均線排列
-  const m5 = last(series.ma5)!;
-  const m20 = last(series.ma20)!;
-  const m60 = last(series.ma60) ?? m20;
-  const bullAlign = price > m5 && m5 > m20 && m20 > m60;
-  const bearAlign = price < m5 && m5 < m20 && m20 < m60;
+  // 均線排列：股價 > 月線 > 季線 > 半年線為多頭；資料不足半年時只看月線、季線
+  const m20 = last(series.ma[20])!;
+  const m60 = last(series.ma[60]);
+  const m120 = last(series.ma[120]);
+  // 由短到長排列，沒有資料的週期略過
+  const chain = [price, m20, m60, m120].filter((v): v is number => v != null);
+  const bullAlign = chain.every((v, i) => i === 0 || chain[i - 1] > v);
+  const bearAlign = chain.every((v, i) => i === 0 || chain[i - 1] < v);
+  const e20 = last(series.ema[20]);
+  const e60 = last(series.ema[60]);
+  const emaNote = e20 != null && e60 != null ? (e20 >= e60 ? '；EMA20 在 EMA60 之上' : '；EMA20 跌破 EMA60') : '';
   signals.push({
     id: 'ma',
     name: '均線排列',
     value: bullAlign ? '多頭排列' : bearAlign ? '空頭排列' : price >= m20 ? '站上月線' : '跌破月線',
     tilt: bullAlign || (!bearAlign && price >= m20) ? 'bull' : 'bear',
-    note: `收盤 ${f1(price)}、5 日 ${f1(m5)}、20 日 ${f1(m20)}、60 日 ${f1(m60)}`,
+    note: `收盤 ${f1(price)}、MA20 ${f1(m20)}、MA60 ${m60 == null ? '—' : f1(m60)}、MA120 ${m120 == null ? '—' : f1(m120)}${emaNote}`,
   });
 
   // RSI
