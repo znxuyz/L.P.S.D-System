@@ -113,3 +113,14 @@ describe('本益比和自身歷史比較', () => {
     expect(crit.test({ ...base, pePct: null } as never).pass).toBe(false);
   });
 });
+
+describe('EMA 均線', () => {
+  it('前 n−1 天為空，第 n 天等於 SMA，之後偏向近期價格', async () => {
+    const { emaSeries } = await import('../domain/technicals');
+    const e = emaSeries([1, 2, 3, 4, 10], 3);
+    expect(e.slice(0, 2)).toEqual([null, null]);
+    expect(e[2]).toBeCloseTo(2);
+    expect(e[3]).toBeCloseTo(3); // 4 × 0.5 + 2 × 0.5
+    expect(e[4]).toBeCloseTo(6.5); // 10 × 0.5 + 3 × 0.5
+  });
+});

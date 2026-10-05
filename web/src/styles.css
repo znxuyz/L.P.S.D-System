@@ -727,7 +727,11 @@ button.log-text:hover { color: var(--ink); }
 .sa-chart { grid-area: chart; display: flex; flex-direction: column; min-height: 460px; }
 .sa-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
 .sa-chart-head .panel-title { margin: 0; }
-.ma-legend { display: flex; gap: 14px; list-style: none; margin: 0; padding: 0; font-size: 12px; color: var(--ink-2); }
+.ma-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; list-style: none; margin: 0; padding: 0; font-size: 12px; color: var(--ink-2); }
+.ma-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.ma-icon { flex: none; }
+.ma-vals { color: var(--muted); }
+.ma-key { color: var(--muted); font-size: 11px; }
 .ma-legend i, .k-tip i { display: inline-block; width: 12px; height: 2px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 .ma-legend b { color: var(--ink); font-weight: 500; margin-left: 2px; }
 .kchart { position: relative; flex: 1; min-height: 380px; }

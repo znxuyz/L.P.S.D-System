@@ -5,7 +5,7 @@ import { buildSummary, peerRating, peerStars, peerStats, strategyScores, type St
 import type { MarketMetrics, StockMetrics } from '../domain/metrics';
 import { mockNews, newsLinks } from '../domain/news';
 import { industryPeMedians, stockView, type StockView } from '../domain/screens';
-import { analyzeTechnicals, type Candle, type TechReport, type Tilt } from '../domain/technicals';
+import { MA_PERIODS, analyzeTechnicals, type Candle, type MaPeriod, type TechReport, type Tilt } from '../domain/technicals';
 import type { Palette } from './colors';
 import { direction, escapeHtml as esc, num, pct, price, signedYi, yi } from './format';
 
@@ -27,8 +27,19 @@ export interface StockPageContext {
   today: string;
 }
 
-/** 均線顏色（已通過深色背景的色盲與對比檢查）。 */
-const MA_COLORS = { ma5: '#3987e5', ma20: '#c98500', ma60: '#9d73e6' } as const;
+/**
+ * 均線顏色（已通過深色背景的色盲與對比檢查）。同一週期的 MA 與 EMA 同色，
+ * 用線型區分：MA 虛線、EMA 實線。
+ */
+const MA_COLORS: Record<MaPeriod, string> = { 20: '#3987e5', 60: '#c98500', 120: '#9d73e6' };
+const MA_NAME: Record<MaPeriod, string> = { 20: '月線', 60: '季線', 120: '半年線' };
+
+/** 圖例用的小圖示：上虛線（MA）、下實線（EMA）。 */
+function lineIcon(color: string): string {
+  return `<svg class="ma-icon" width="18" height="10" viewBox="0 0 18 10" aria-hidden="true">
+    <line x1="0" x2="18" y1="2.5" y2="2.5" stroke="${color}" stroke-width="1.6" stroke-dasharray="3 2"></line>
+    <line x1="0" x2="18" y1="7.5" y2="7.5" stroke="${color}" stroke-width="1.8"></line></svg>`;
+}
 const TILT_LABEL: Record<Tilt, string> = { bull: '偏多', bear: '偏空', neutral: '中性' };
 const TILT_ICON: Record<Tilt, string> = { bull: '▲', bear: '▼', neutral: '●' };
 
@@ -147,10 +158,12 @@ function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechRepor
   };
   const src = ctx.daily === undefined ? '載入中…' : ctx.daily.source === 'fugle' ? '富果日 K' : ctx.live ? '示意資料（選單填富果金鑰可看真實日 K）' : '示意資料';
   el.innerHTML = `<h2 class="panel-title">日 K 線 <small>${src}</small></h2>
-    <ul class="ma-legend" aria-label="均線">
-      <li><i style="background:${MA_COLORS.ma5}"></i>MA5 <b class="num">${lastOf(tech?.series.ma5)}</b></li>
-      <li><i style="background:${MA_COLORS.ma20}"></i>MA20 <b class="num">${lastOf(tech?.series.ma20)}</b></li>
-      <li><i style="background:${MA_COLORS.ma60}"></i>MA60 <b class="num">${lastOf(tech?.series.ma60)}</b></li>
+    <ul class="ma-legend" aria-label="均線：虛線為 MA，實線為 EMA">
+      ${MA_PERIODS.map(
+        (n) => `<li>${lineIcon(MA_COLORS[n])}<span>${n}（${MA_NAME[n]}）</span>
+          <span class="ma-vals num">MA <b>${lastOf(tech?.series.ma[n])}</b> · EMA <b>${lastOf(tech?.series.ema[n])}</b></span></li>`,
+      ).join('')}
+      <li class="ma-key">虛線 MA・實線 EMA</li>
     </ul>`;
 }
 
@@ -172,7 +185,9 @@ function renderKChart(el: HTMLElement, all: Candle[], tech: TechReport | null, c
 
   const x = scaleBand<number>().domain(candles.map((_, i) => i)).range([pad.l, w - pad.r]).padding(0.28);
   const ma = tech?.series;
-  const maVals = ma ? [ma.ma5, ma.ma20, ma.ma60].flatMap((arr) => arr.slice(off).filter((v): v is number => v != null)) : [];
+  const maVals = ma
+    ? MA_PERIODS.flatMap((n) => [ma.ma[n], ma.ema[n]]).flatMap((arr) => arr.slice(off).filter((v): v is number => v != null))
+    : [];
   const lo = Math.min(...candles.map((c) => c.low), ...maVals);
   const hi = Math.max(...candles.map((c) => c.high), ...maVals);
   const y = scaleLinear().domain([lo, hi]).nice(5).range([priceBottom, pad.t]);
@@ -198,7 +213,11 @@ function renderKChart(el: HTMLElement, all: Candle[], tech: TechReport | null, c
   const months: Array<{ i: number; label: string }> = [];
   candles.forEach((c, i) => {
     const m = c.date.slice(5, 7);
-    if (i === 0 || candles[i - 1].date.slice(5, 7) !== m) months.push({ i, label: `${Number(m)}月` });
+    if (i !== 0 && candles[i - 1].date.slice(5, 7) === m) return;
+    // 太擠時（例如手機）略過離前一個標籤太近的月份
+    const prev = months[months.length - 1];
+    if (prev && cx(i) - cx(prev.i) < 30) months.pop();
+    months.push({ i, label: `${Number(m)}月` });
   });
 
   const ticks = y.ticks(5);
@@ -217,9 +236,13 @@ function renderKChart(el: HTMLElement, all: Candle[], tech: TechReport | null, c
           <rect x="${x(i)}" y="${yv(c.volume)}" width="${bw}" height="${Math.max(0, h - pad.b - yv(c.volume))}" rx="${Math.min(2, bw / 3)}" fill="${col}" opacity="0.45"></rect>`;
       })
       .join('')}
-    <path d="${maPath(ma?.ma60)}" fill="none" stroke="${MA_COLORS.ma60}" stroke-width="1.6"></path>
-    <path d="${maPath(ma?.ma20)}" fill="none" stroke="${MA_COLORS.ma20}" stroke-width="1.6"></path>
-    <path d="${maPath(ma?.ma5)}" fill="none" stroke="${MA_COLORS.ma5}" stroke-width="1.6"></path>
+    ${[...MA_PERIODS]
+      .reverse()
+      .map(
+        (n) => `<path d="${maPath(ma?.ma[n])}" fill="none" stroke="${MA_COLORS[n]}" stroke-width="1.4" stroke-dasharray="5 4"></path>
+          <path d="${maPath(ma?.ema[n])}" fill="none" stroke="${MA_COLORS[n]}" stroke-width="1.8"></path>`,
+      )
+      .join('')}
     ${tech ? levelLine(tech.resistance, '壓力') + levelLine(tech.support, '支撐') : ''}
     <text class="axis strong" x="${w - pad.r + 6}" y="${y(last.close) + 4}">${price(last.close)}</text>
     <text class="axis" x="${pad.l}" y="${h - pad.b - volH - 2}">成交量</text>
@@ -257,9 +280,8 @@ function renderKChart(el: HTMLElement, all: Candle[], tech: TechReport | null, c
       tip.innerHTML = `<b>${c.date}</b>
         <dl><dt>開</dt><dd>${price(c.open)}</dd><dt>高</dt><dd>${price(c.high)}</dd><dt>低</dt><dd>${price(c.low)}</dd>
         <dt>收</dt><dd class="${dirCls(chg)}">${price(c.close)}（${pct(chg)}）</dd><dt>量</dt><dd>${num(c.volume)} 張</dd>
-        <dt><i style="background:${MA_COLORS.ma5}"></i>MA5</dt><dd>${mv(ma?.ma5)}</dd>
-        <dt><i style="background:${MA_COLORS.ma20}"></i>MA20</dt><dd>${mv(ma?.ma20)}</dd>
-        <dt><i style="background:${MA_COLORS.ma60}"></i>MA60</dt><dd>${mv(ma?.ma60)}</dd></dl>`;
+        ${MA_PERIODS.map((n) => `<dt><i style="background:${MA_COLORS[n]}"></i>${n} 日</dt><dd>${mv(ma?.ma[n])} / ${mv(ma?.ema[n])}</dd>`).join('')}
+        <dt></dt><dd class="muted">MA / EMA</dd></dl>`;
       const left = cx(i) + 14 + tip.offsetWidth > w - pad.r ? cx(i) - 14 - tip.offsetWidth : cx(i) + 14;
       tip.style.transform = `translate(${Math.max(4, left)}px, ${pad.t + 6}px)`;
     })
