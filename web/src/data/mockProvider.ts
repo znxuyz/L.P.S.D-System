@@ -1,4 +1,5 @@
 import type { MarketDataProvider, PlaybackControl } from './provider';
+import { mockDailyCandles, type DailySeries } from './candles';
 import { buildMockUniverse } from './mockUniverse';
 import { createRng, gaussian } from './random';
 import { SESSION_MINUTES, roundToTick, sessionOpenMs } from './twse';
@@ -115,6 +116,12 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
 
   async loadUniverse(): Promise<Universe> {
     return this.universe;
+  }
+
+  async dailyCandles(code: string): Promise<DailySeries> {
+    const meta = this.universe.stocks.find((s) => s.code === code) ?? this.universe.etfs?.find((e) => e.code === code);
+    const today = new Date(this.openMs).toISOString().slice(0, 10);
+    return { candles: meta ? mockDailyCandles(code, meta.prevClose, today) : [], source: 'mock' };
   }
 
   subscribe(listener: (snapshot: MarketSnapshot) => void): () => void {

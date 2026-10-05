@@ -1,5 +1,6 @@
 import { FUGLE_WS, FugleClient, FugleError, TAIEX, computeBaseline, parseQuote, type Baseline, type ParsedQuote } from './fugle';
 import { MIS_BATCH, MIS_TAIEX, MisClient, MisError, misChannel, parseMis, type MisExchange } from './twseMis';
+import { mockDailyCandles, type DailySeries } from './candles';
 import { buildMockUniverse } from './mockUniverse';
 import type { MarketDataProvider } from './provider';
 import { SESSION_MINUTES, sessionOpenMs } from './twse';
@@ -171,6 +172,25 @@ export class LiveProvider implements MarketDataProvider {
 
   async loadUniverse(): Promise<Universe> {
     return this.universe;
+  }
+
+  /** 有富果金鑰時抓一年真實日 K，否則用示意資料。 */
+  async dailyCandles(code: string): Promise<DailySeries> {
+    const prev = this.prevOf(code) ?? 0;
+    if (this.client) {
+      try {
+        const rows = await this.client.dailyCandles(code, shiftDate(this.today, -365), this.today);
+        const candles = rows
+          .filter((c) => c.date < this.today && c.close && c.open && c.high && c.low)
+          .sort((a, b) => (a.date < b.date ? -1 : 1))
+          // 富果日 K 的成交量單位是股，換成張
+          .map((c) => ({ date: c.date, open: c.open!, high: c.high!, low: c.low!, close: c.close!, volume: Math.round((c.volume ?? 0) / 1000) }));
+        if (candles.length >= 30) return { candles, source: 'fugle' };
+      } catch {
+        /* 改用示意資料 */
+      }
+    }
+    return { candles: prev ? mockDailyCandles(code, prev, this.today) : [], source: 'mock' };
   }
 
   subscribe(listener: (snapshot: MarketSnapshot) => void): () => void {

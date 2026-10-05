@@ -19,6 +19,9 @@ import { computeEtfs, type EtfView } from './domain/etf';
 import { renderEtfCategories, renderEtfDetail, renderEtfTable, type EtfFilter } from './ui/etfPage';
 import { GlassMapView } from './ui/glassMapView';
 import { Toasts } from './ui/toasts';
+import { renderStockPage } from './ui/stockPage';
+import type { DailySeries } from './data/candles';
+import { taipeiDate } from './data/liveProvider';
 
 const CONVENTION_KEY = 'lplc.convention';
 
@@ -40,12 +43,18 @@ function saveConvention(value: Convention): void {
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
-const PAGES = ['map', 'intel', 'screen', 'etf'] as const;
+const PAGES = ['map', 'intel', 'screen', 'etf', 'stock'] as const;
 type Page = (typeof PAGES)[number];
 
 function pageFromHash(): Page {
-  const h = location.hash.slice(1);
+  const h = location.hash.slice(1).split('/')[0];
   return (PAGES as readonly string[]).includes(h) ? (h as Page) : 'map';
+}
+
+/** #stock/2330 → 2330 */
+function stockFromHash(): string | null {
+  const [page, code] = location.hash.slice(1).split('/');
+  return page === 'stock' && code ? decodeURIComponent(code) : null;
 }
 
 class App {
@@ -64,6 +73,10 @@ class App {
   private etfs: EtfView[] = [];
   private etfFilter: EtfFilter = 'all';
   private etfSelected: string | null = null;
+  /** 個股分析頁目前的股票。 */
+  private analyzed = stockFromHash() ?? '2330';
+  private readonly daily = new Map<string, DailySeries>();
+  private readonly dailyLoading = new Set<string>();
   private readonly detector = new EventDetector();
   private metrics?: MarketMetrics;
   private rotation?: Rotation;
@@ -157,6 +170,19 @@ class App {
       const etf = this.etfs.find((e) => e.meta.code === this.etfSelected);
       renderEtfDetail($('#etf-detail'), etf, etf ? this.history.get(etf.meta.code) : undefined);
     }
+    if (this.page === 'stock') {
+      this.ensureDaily(this.analyzed);
+      renderStockPage($('#page-stock'), this.analyzed, {
+        metrics: this.metrics,
+        universe: this.universe,
+        fundamentals: this.fundamentals,
+        pal: this.pal,
+        history: this.history,
+        daily: this.daily.get(this.analyzed),
+        live: this.live,
+        today: taipeiDate(Date.now()),
+      });
+    }
     if (this.page === 'screen') {
       renderStrategyList($('#strategies'), this.metrics, this.universe, this.strategy);
       renderScreen(
@@ -192,8 +218,31 @@ class App {
       app.classList.toggle(`page-${p}`, p === page);
       $(`#tab-${p}`).setAttribute('aria-selected', String(p === page));
     }
-    if (location.hash !== `#${page}`) history.replaceState(null, '', `#${page}`);
+    if (page === 'stock') this.analyzed = stockFromHash() ?? this.analyzed;
+    const hash = page === 'stock' ? `#stock/${this.analyzed}` : `#${page}`;
+    if (location.hash !== hash) history.replaceState(null, '', hash);
     this.renderPanels();
+  }
+
+  /** 打開某檔股票的個股分析。 */
+  private analyze(code: string): void {
+    this.analyzed = code;
+    history.replaceState(null, '', `#stock/${code}`);
+    this.showPage('stock');
+    window.scrollTo({ top: 0 });
+  }
+
+  private ensureDaily(code: string): void {
+    if (this.daily.has(code) || this.dailyLoading.has(code) || !this.provider.dailyCandles) return;
+    this.dailyLoading.add(code);
+    this.provider
+      .dailyCandles(code)
+      .then((series) => this.daily.set(code, series))
+      .catch(() => this.daily.set(code, { candles: [], source: 'mock' }))
+      .finally(() => {
+        this.dailyLoading.delete(code);
+        this.renderPanels();
+      });
   }
 
   private get page(): Page {
@@ -260,9 +309,16 @@ class App {
     }
     window.addEventListener('hashchange', () => this.showPage(pageFromHash()));
     document.addEventListener('click', (e) => {
-      const el = (e.target as Element).closest<HTMLElement>('[data-strategy],[data-highlight],[data-etf],[data-etf-cat],[data-etf-highlight],[data-etf-changes]');
+      const el = (e.target as Element).closest<HTMLElement>(
+        '[data-strategy],[data-highlight],[data-etf],[data-etf-cat],[data-etf-highlight],[data-etf-changes],[data-analyze],[data-goto-strategy]',
+      );
       if (!el) return;
-      if (el.dataset.etfCat) {
+      if (el.dataset.analyze) {
+        this.analyze(el.dataset.analyze);
+      } else if (el.dataset.gotoStrategy) {
+        this.strategy = el.dataset.gotoStrategy as StrategyId;
+        this.showPage('screen');
+      } else if (el.dataset.etfCat) {
         this.etfFilter = el.dataset.etfCat as EtfFilter;
         this.renderPanels();
       } else if (el.dataset.etf) {
@@ -287,6 +343,24 @@ class App {
         this.applyHighlight();
         this.showPage('map');
       }
+    });
+    // 個股分析頁的搜尋：可以輸入代號、名稱，或從清單選「2330 台積電」
+    document.addEventListener('submit', (e) => {
+      const form = e.target as HTMLElement;
+      if (form.id !== 'sa-search') return;
+      e.preventDefault();
+      const q = (form.querySelector<HTMLInputElement>('#sa-q')?.value ?? '').trim();
+      if (!q) return;
+      const token = q.split(/\s+/)[0];
+      const hit =
+        this.universe.stocks.find((s) => s.code === token) ??
+        this.universe.stocks.find((s) => s.name === q || s.name === token) ??
+        this.universe.stocks.find((s) => s.name.includes(q) || q.includes(s.name));
+      if (hit) this.analyze(hit.code);
+      else form.querySelector<HTMLInputElement>('#sa-q')?.setCustomValidity('找不到這檔股票');
+    });
+    document.addEventListener('input', (e) => {
+      if ((e.target as HTMLElement).id === 'sa-q') (e.target as HTMLInputElement).setCustomValidity('');
     });
     $('#filter-chip').addEventListener('click', () => {
       this.highlight = null;
