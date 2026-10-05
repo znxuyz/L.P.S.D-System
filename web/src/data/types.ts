@@ -86,14 +86,18 @@ export interface HoldingChange {
   date: string;
   code: string;
   kind: HoldingChangeKind;
+  /** 股票名稱（不在股票池裡的股票靠這個顯示）。 */
+  name?: string;
   /** 異動前後權重（%）。 */
   before: number;
   after: number;
 }
 
 export interface EtfHolding {
-  /** 成分股代號（需在股票池內）。 */
+  /** 成分股代號；不在股票池裡的股票只顯示，不會出現在熱力圖上。 */
   code: string;
+  /** 股票名稱（投信公告的名稱）。 */
+  name?: string;
   /** 權重（%）。 */
   weight: number;
 }
@@ -131,7 +135,13 @@ export interface EtfMeta {
    * 成分股與異動的資料來源：mock = 模擬；real = 投信公告（asOf 為公告日期）。
    * 省略時視為模擬。
    */
-  holdingsSource?: { kind: 'mock' | 'real'; asOf?: string };
+  holdingsSource?: {
+    kind: 'mock' | 'real';
+    asOf?: string;
+    /** 已累積幾個交易日的持股快照（要 2 天以上才算得出異動）。 */
+    snapshots?: number;
+    issuer?: string;
+  };
 }
 
 export interface Universe {

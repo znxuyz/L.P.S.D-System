@@ -25,7 +25,8 @@ export function renderEtfCategories(el: HTMLElement, etfs: EtfView[], active: Et
 /** 資料來源標籤：模擬資料要明確標示，真實資料標出公告日期。 */
 function srcTag(e: EtfView | undefined): string {
   const src = e?.meta.holdingsSource;
-  if (src?.kind === 'real') return `<span class="tag-real">投信公告${src.asOf ? ` ${src.asOf.slice(5).replace('-', '/')}` : ''}</span>`;
+  if (src?.kind === 'real')
+    return `<span class="tag-real" title="${esc(src.issuer ?? '投信')}官網每日公告的持股">${esc(src.issuer ?? '投信')}公告${src.asOf ? ` ${src.asOf.slice(5).replace('-', '/')}` : ''}</span>`;
   return '<span class="tag-mock" title="示意資料，不代表實際持股">模擬</span>';
 }
 
@@ -36,7 +37,7 @@ function renderConsensus(etfs: EtfView[]): string {
   const buys = rows.filter((r) => r.buyers.length > r.sellers.length).slice(0, 5);
   const sells = rows.filter((r) => r.sellers.length > r.buyers.length).slice(0, 3);
   const row = (r: (typeof rows)[number], buy: boolean) =>
-    `<li><button type="button" class="cons-row" data-stock="${r.stock.code}"><span>${esc(r.stock.name)}</span>
+    `<li><button type="button" class="cons-row"${r.stock ? ` data-stock="${r.code}"` : ' disabled'}><span>${esc(r.name)}</span>
       <span class="cons-n ${buy ? 'buy' : 'sell'}">${buy ? `${r.buyers.length} 檔加碼` : `${r.sellers.length} 檔減碼`}</span>
       <small>${(buy ? r.buyers : r.sellers).join('、')}</small></button></li>`;
   return `<section class="consensus">
@@ -60,13 +61,26 @@ function changeSummary(e: EtfView): string {
 function changeRow(c: ChangeView): string {
   const delta = c.after - c.before;
   return `<li class="chg-row"><span class="chg-kind k-${c.kind}">${KIND_LABEL[c.kind]}</span>
-    <button type="button" class="chg-name" data-stock="${c.stock.code}">${esc(c.stock.name)}<small>${c.stock.code}</small></button>
+    ${
+      c.stock
+        ? `<button type="button" class="chg-name" data-stock="${c.code}">${esc(c.name)}<small>${c.code}</small></button>`
+        : `<span class="chg-name">${esc(c.name)}<small>${esc(c.code)}</small></span>`
+    }
     <span class="num chg-w">${c.before.toFixed(1)}% → ${c.after.toFixed(1)}%</span>
     <span class="num chg-d ${delta >= 0 ? 'pos' : 'neg'}">${delta >= 0 ? '+' : '−'}${Math.abs(delta).toFixed(1)}</span></li>`;
 }
 
 function renderChanges(e: EtfView): string {
   const r = e.meta.rebalance;
+  const src = e.meta.holdingsSource;
+  if (!e.changes.length && src?.kind === 'real') {
+    const n = src.snapshots ?? 1;
+    return `<h3 class="d-sub">每日持股異動 ${srcTag(e)}</h3><p class="d-lead">${
+      n < 2
+        ? `持股異動要比對前後兩個交易日。目前已收集 ${n} 天的持股，下一個交易日收盤後就會出現異動。`
+        : '最近幾個交易日沒有明顯的持股調整（每單位持股變化未達 2%）。'
+    }</p>`;
+  }
   if (!e.changes.length) {
     return `<h3 class="d-sub">成分股變化</h3><p class="d-lead">${esc(r?.schedule ?? '無公告的成分股異動')}。${e.meta.category === 'bond' ? '債券型 ETF 依指數調整債券組合，沒有台股成分股異動。' : ''}</p>`;
   }
@@ -118,7 +132,7 @@ export function renderEtfTable(el: HTMLElement, etfs: EtfView[], filter: EtfFilt
           .join('')}</tbody>
       </table>
     </div>
-    <p class="muted small">ETF 的股價、規模、配息、費用率與成分股權重為模擬資料，不代表實際數字。</p>`;
+    <p class="muted small">ETF 的股價、規模、配息與費用率為模擬資料；成分股除了標示「投信公告」的主動式 ETF 以外，也是模擬資料。</p>`;
 }
 
 const paysDividend = (e: EtfView) => e.meta.dividendPerYear > 0;
@@ -141,14 +155,23 @@ export function renderEtfDetail(el: HTMLElement, e: EtfView | undefined, history
       : '';
   const maxW = Math.max(1, ...e.holdings.map((h) => h.weight));
   const holdings = e.holdings.length
-    ? `<h3 class="d-sub">前幾大成分股 ${srcTag(e)}<small>佔 ${num(e.coveredWeight, 1)}%・加權漲跌 <span class="${direction(e.holdingsChangePct)}">${pct(e.holdingsChangePct)}</span></small></h3>
-      <ul class="hold-list">${e.holdings
+    ? `<h3 class="d-sub">${e.meta.holdingsSource?.kind === 'real' ? `全部持股 ${e.holdings.length} 檔` : '前幾大成分股'} ${srcTag(e)}<small>佔 ${num(e.coveredWeight, 1)}%・加權漲跌 <span class="${direction(e.holdingsChangePct)}">${pct(e.holdingsChangePct)}</span></small></h3>
+      ${
+        e.trackedWeight < e.coveredWeight - 0.05
+          ? `<p class="hold-note">熱力圖股票池涵蓋其中 ${num(e.trackedWeight, 1)}% 權重；其餘股票只顯示權重，沒有即時漲跌。</p>`
+          : ''
+      }
+      <ul class="hold-list${e.holdings.length > 15 ? ' is-long' : ''}">${e.holdings
         .map(
-          (h) => `<li><span class="hold-name">${esc(h.stock.name)}<small>${h.stock.code}</small></span>
+          (h) => `<li><span class="hold-name">${esc(h.name)}<small>${esc(h.code)}</small></span>
             <span class="hold-bar"><i style="width:${((h.weight / maxW) * 100).toFixed(1)}%"></i></span>
             <span class="num hold-w">${h.weight.toFixed(1)}%</span>
-            <span class="num ${direction(h.stock.changePct)}">${pct(h.stock.changePct)}</span>
-            <span class="num ${direction(h.stock.flow)}">${signed(h.stock.flow, 1)}</span></li>`,
+            ${
+              h.stock
+                ? `<span class="num ${direction(h.stock.changePct)}">${pct(h.stock.changePct)}</span>
+                   <span class="num ${direction(h.stock.flow)}">${signed(h.stock.flow, 1)}</span>`
+                : '<span class="muted">—</span><span class="muted">—</span>'
+            }</li>`,
         )
         .join('')}</ul>
       <button type="button" class="btn btn-accent btn-block" data-etf-highlight="${e.meta.code}">在熱力圖上標示成分股</button>`

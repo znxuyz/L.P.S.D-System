@@ -19,6 +19,8 @@ import { computeEtfs, type EtfView } from './domain/etf';
 import { renderEtfCategories, renderEtfDetail, renderEtfTable, type EtfFilter } from './ui/etfPage';
 import { GlassMapView } from './ui/glassMapView';
 import { Toasts } from './ui/toasts';
+import { applyActiveEtfData, loadActiveEtfData } from './data/activeEtfData';
+import { MOCK_ETFS } from './data/mockEtfs';
 import { renderStockPage } from './ui/stockPage';
 import type { DailySeries } from './data/candles';
 import { taipeiDate } from './data/liveProvider';
@@ -77,6 +79,8 @@ class App {
   private analyzed = stockFromHash() ?? '2330';
   private readonly daily = new Map<string, DailySeries>();
   private readonly dailyLoading = new Set<string>();
+  /** 熱力圖上有的股票（ETF 持股可能包含股票池以外的股票）。 */
+  private readonly stockCodes: Set<string>;
   private readonly detector = new EventDetector();
   private metrics?: MarketMetrics;
   private rotation?: Rotation;
@@ -92,6 +96,7 @@ class App {
     private readonly provider: MarketDataProvider & Partial<PlaybackControl>,
     private readonly settings: SourceSettings,
   ) {
+    this.stockCodes = new Set(universe.stocks.map((s) => s.code));
     this.fundamentals = new Map(
       universe.stocks.filter((s) => s.fundamentals).map((s) => [s.code, s.fundamentals!] as [string, Fundamentals]),
     );
@@ -267,10 +272,10 @@ class App {
       const { kind, code } = this.highlight;
       const etf = this.universe.etfs?.find((e) => e.code === code);
       if (kind === 'etf') {
-        codes = new Set(etf?.holdings.map((h) => h.code) ?? []);
+        codes = new Set(etf?.holdings.map((h) => h.code).filter((c) => this.stockCodes.has(c)) ?? []);
         label = `${etf?.name ?? code} 成分股`;
       } else {
-        codes = new Set(etf?.changes.map((c) => c.code) ?? []);
+        codes = new Set(etf?.changes.map((c) => c.code).filter((c) => this.stockCodes.has(c)) ?? []);
         label = `${etf?.name ?? code} 異動股`;
       }
     }
@@ -472,6 +477,9 @@ class App {
 
 async function main(): Promise<void> {
   const settings = loadSettings();
+  // 先換上每日抓取的主動式 ETF 持股，股票池與行情都會用到
+  const etfData = await loadActiveEtfData();
+  if (etfData) applyActiveEtfData(MOCK_ETFS, etfData);
   const provider =
     settings.source === 'mock'
       ? new MockMarketProvider({ speed: 60 })
