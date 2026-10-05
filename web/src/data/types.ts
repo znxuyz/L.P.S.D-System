@@ -127,6 +127,11 @@ export interface EtfMeta {
   rebalance?: { schedule: string; last: string; next?: string };
   /** 成分股異動紀錄（新到舊）。 */
   changes: HoldingChange[];
+  /**
+   * 成分股與異動的資料來源：mock = 模擬；real = 投信公告（asOf 為公告日期）。
+   * 省略時視為模擬。
+   */
+  holdingsSource?: { kind: 'mock' | 'real'; asOf?: string };
 }
 
 export interface Universe {
