@@ -1,3 +1,4 @@
+import type { DailySeries } from './candles';
 import type { MarketSnapshot, Universe } from './types';
 
 /**
@@ -11,6 +12,8 @@ import type { MarketSnapshot, Universe } from './types';
 export interface MarketDataProvider {
   loadUniverse(): Promise<Universe>;
   subscribe(listener: (snapshot: MarketSnapshot) => void): () => void;
+  /** 個股的日 K（個股分析頁用）；不支援時可省略。 */
+  dailyCandles?(code: string): Promise<DailySeries>;
 }
 
 /** 可重播的資料來源（mock）額外提供的播放控制。 */

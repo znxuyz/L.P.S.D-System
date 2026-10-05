@@ -164,6 +164,7 @@ function renderStock(s: StockMetrics, ctx: PanelContext): string {
   return `
     <p class="eyebrow">個股 · ${s.code}</p>
     <h2 class="d-title">${esc(s.name)}</h2>
+    <button type="button" class="btn btn-accent btn-sm d-analyze" data-analyze="${s.code}">個股分析 →</button>
     <div class="d-price"><b class="num">${price(s.price)}</b>
       <span class="num ${dirCls(s.change)}">${s.change >= 0 ? '▲' : '▼'} ${price(Math.abs(s.change))} (${pct(s.changePct)})</span></div>
     ${spark(ctx.history.get(s.code), dirCls(s.change))}

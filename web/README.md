@@ -56,7 +56,22 @@ ETF 的股價、淨值、規模、配息、費用率、成分股權重與成分�
 基本面、籌碼與事件目前是**模擬資料**（`StockMeta.fundamentals`）；接真實資料時可用證交所 OpenAPI（本益比、殖利率、三大法人）、
 集保結算所開放資料（千張大戶，每週）與公開資訊觀測站（EPS、毛利率、重大訊息）。
 
-## 使用真實行情
+## 個股分析
+
+上方分頁「個股分析」，或在任何頁面點股票後按「個股分析 →」。網址是 `#stock/2330`，可以直接加書籤。
+
+| 區塊 | 內容 |
+|---|---|
+| 日 K 線 | 近 120 日 K 棒、MA5 / MA20 / MA60、成交量、近 20 日支撐與壓力；滑鼠移上去看每日數字 |
+| 綜合摘要 | 技術、資金、籌碼、基本面、策略逐項判斷偏多 / 偏空，合成 −100～+100 的分數 |
+| 五大策略評分 | 雷達圖顯示五個策略各符合幾成，展開可看每個條件 ✓ ✗ |
+| 技術指標 | 均線排列、RSI(14)、MACD、KD(9)、布林通道、量能、支撐壓力 |
+| 基本面與籌碼 | 本益比、殖利率、EPS、法人、大戶，和同產業的中位數與排名比較 |
+| 新聞 | 模擬模式為示意新聞（關鍵字標示利多 / 利空）；真實行情模式提供 Yahoo、鉅亨、Goodinfo 等外部連結 |
+
+日 K：有富果金鑰時用富果一年真實日 K，沒有時是示意資料（圖上會標示）。
+摘要是依指標規則自動整理的文字，不構成投資建議。
+
 
 有兩種真實資料來源，在右上角 **☰ 選單 → 資料來源** 切換：
 
@@ -165,7 +180,8 @@ npm run build      # 型別檢查 + 打包到 dist/
 ```
 src/
   data/       資料層：型別、MarketDataProvider 介面、mock 股票池與模擬行情、真實行情（fugle.ts 富果、twseMis.ts 證交所、liveProvider.ts）
-  domain/     資金流（metrics.ts）、資金輪動（rotation.ts）、事件偵測（events.ts）、五大選股（screens.ts）、ETF（etf.ts）
+  domain/     資金流（metrics.ts）、資金輪動（rotation.ts）、事件偵測（events.ts）、五大選股（screens.ts）、ETF（etf.ts）、
+              技術指標（technicals.ts）、個股分析（analysis.ts）、新聞（news.ts）
   ui/         玻璃熱力圖、事件通知、輪動條碼、選股頁、ETF 頁與各資訊面板
   main.ts     組裝：provider → metrics → views / panels
 ../worker/    證交所即時行情的 Cloudflare Worker 轉接服務
