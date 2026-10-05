@@ -76,3 +76,18 @@ describe('個股分析', () => {
     expect(classifyHeadline('鴻海召開股東會')).toBe('neutral');
   });
 });
+
+describe('同業推薦度', () => {
+  it('第 1 名 5 顆星、最後一名 1 顆星，平均四捨五入到半顆', async () => {
+    const { peerRating, peerStars } = await import('../domain/analysis');
+    const mk = (label: string, rank: number) => ({ label, hint: '', value: 0, median: 0, rank, count: 5, better: 'high' as const, format: String });
+    expect(peerStars(mk('殖利率', 1))).toBe(5);
+    expect(peerStars(mk('殖利率', 5))).toBe(1);
+    expect(peerStars(mk('殖利率', 3))).toBe(3);
+    const r = peerRating([mk('本益比', 1), mk('殖利率', 1), mk('今日漲跌', 5)])!;
+    // (5 + 5 + 1 × 0.5) / 2.5 = 4.2 → 4
+    expect(r.stars).toBe(4);
+    expect(r.label).toBe('同業中的優等生');
+    expect(r.note).toContain('今日漲跌落後');
+  });
+});

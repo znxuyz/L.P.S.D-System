@@ -1,7 +1,7 @@
 import { bisector, pointer, scaleBand, scaleLinear, select } from 'd3';
 import type { DailySeries } from '../data/candles';
 import type { Fundamentals, Universe } from '../data/types';
-import { buildSummary, peerStats, strategyScores, type StrategyScore, type Summary } from '../domain/analysis';
+import { buildSummary, peerRating, peerStars, peerStats, strategyScores, type StrategyScore, type Summary } from '../domain/analysis';
 import type { MarketMetrics, StockMetrics } from '../domain/metrics';
 import { mockNews, newsLinks } from '../domain/news';
 import { stockView } from '../domain/screens';
@@ -33,6 +33,25 @@ const TILT_LABEL: Record<Tilt, string> = { bull: '偏多', bear: '偏空', neutr
 const TILT_ICON: Record<Tilt, string> = { bull: '▲', bear: '▼', neutral: '●' };
 
 const dirCls = (v: number) => direction(v);
+
+/** 內容沒變就不重畫，避免每秒更新時打斷使用者的操作（例如展開的項目被收起）。 */
+function setHtml(el: HTMLElement, html: string): void {
+  if (el.dataset.html === html) return;
+  el.innerHTML = html;
+  el.dataset.html = html;
+}
+
+/** 使用者展開過的策略（跨更新與換股都保留）。 */
+const openStrategies = new Set<string>();
+
+/** 星等（1–5，可有半顆）。 */
+function starsHtml(stars: number, cls = ''): string {
+  const icons = [1, 2, 3, 4, 5].map((i) => {
+    const kind = stars >= i ? 'full' : stars >= i - 0.5 ? 'half' : 'empty';
+    return `<i class="s-${kind}">★</i>`;
+  });
+  return `<span class="stars ${cls}" role="img" aria-label="${stars} 顆星（滿分 5 顆）">${icons.join('')}</span>`;
+}
 
 function kv(label: string, value: string, cls = ''): string {
   return `<div class="d-kv"><dt>${label}</dt><dd class="num ${cls}">${value}</dd></div>`;
@@ -294,12 +313,27 @@ function radar(scores: StrategyScore[]): string {
 }
 
 function renderScores(el: HTMLElement, scores: StrategyScore[]): void {
+  if (!el.dataset.bound) {
+    // toggle 事件不會冒泡，用捕獲階段記住哪些項目是展開的
+    el.addEventListener(
+      'toggle',
+      (e) => {
+        const d = e.target as HTMLDetailsElement;
+        const id = d.dataset.strategy;
+        if (!id) return;
+        if (d.open) openStrategies.add(id);
+        else openStrategies.delete(id);
+      },
+      true,
+    );
+    el.dataset.bound = '1';
+  }
   const best = [...scores].sort((a, b) => b.score - a.score)[0];
-  el.innerHTML = `<h2 class="panel-title">五大策略評分 <small>最接近：${esc(best.strategy.name)}</small></h2>
+  setHtml(el, `<h2 class="panel-title">五大策略評分 <small>最接近：${esc(best.strategy.name)}</small></h2>
     <div class="score-wrap">${radar(scores)}</div>
     <div class="score-list">${scores
       .map(
-        (s) => `<details class="score-item${s.matched ? ' is-match' : ''}">
+        (s) => `<details class="score-item${s.matched ? ' is-match' : ''}" data-strategy="${s.strategy.id}"${openStrategies.has(s.strategy.id) ? ' open' : ''}>
           <summary><span class="si-name">${esc(s.strategy.name)}</span>
             <span class="si-bar"><i style="width:${(s.score * 100).toFixed(0)}%"></i></span>
             <span class="si-n num">${s.strategy.match === 'any' ? (s.passed ? '符合' : '—') : `${s.passed} / ${s.checks.length}`}</span></summary>
@@ -309,7 +343,7 @@ function renderScores(el: HTMLElement, scores: StrategyScore[]): void {
           <button type="button" class="btn btn-sm" data-goto-strategy="${s.strategy.id}">看同策略的其他股票</button>
         </details>`,
       )
-      .join('')}</div>`;
+      .join('')}</div>`);
 }
 
 // ---------------------------------------------------------------- 技術指標
@@ -330,7 +364,8 @@ function renderTech(el: HTMLElement, tech: TechReport | null, loading: boolean):
 function renderFund(el: HTMLElement, s: StockMetrics, f: Fundamentals, ctx: StockPageContext): void {
   const v = stockView(s, f);
   const peers = peerStats(s, ctx.metrics, ctx.fundamentals);
-  el.innerHTML = `<h2 class="panel-title">基本面與籌碼 <small>模擬資料</small></h2>
+  const rating = peerRating(peers);
+  setHtml(el, `<h2 class="panel-title">基本面與籌碼 <small>模擬資料</small></h2>
     <dl class="d-grid d-grid-4">
       ${kv('本益比', Number.isFinite(v.pe) && v.pe > 0 ? `${v.pe.toFixed(1)} 倍` : '—')}
       ${kv('殖利率', `${v.yieldPct.toFixed(2)}%`)}
@@ -342,16 +377,27 @@ function renderFund(el: HTMLElement, s: StockMetrics, f: Fundamentals, ctx: Stoc
       ${kv('千張大戶（4 週）', `${f.bigHolderChg >= 0 ? '+' : '−'}${Math.abs(f.bigHolderChg).toFixed(1)} 百分點`, dirCls(f.bigHolderChg))}
     </dl>
     <h3 class="d-sub">同業比較 <small>${esc(ctx.metrics.industryById.get(s.industryId)?.name ?? '')}・${peers[0]?.count ?? 0} 檔</small></h3>
+    ${
+      rating
+        ? `<div class="peer-rating">
+            <div><span class="pr-title">同業推薦度</span><b class="pr-label">${rating.label}</b></div>
+            ${starsHtml(rating.stars)}<b class="pr-num num">${rating.stars.toFixed(1)}</b>
+            <p class="pr-note">${esc(rating.note)}。只代表和同產業相比的相對位置，不是買賣建議。</p>
+          </div>`
+        : ''
+    }
     <table class="peer-table">
-      <thead><tr><th>指標</th><th>本股</th><th>同業中位數</th><th>排名</th></tr></thead>
+      <thead><tr><th>指標</th><th>本股</th><th>同業中間值</th><th>同業評等</th></tr></thead>
       <tbody>${peers
         .map((p) => {
-          const better = p.better === 'high' ? p.value > p.median : p.value < p.median;
-          return `<tr><td>${p.label}</td><td class="num">${p.format(p.value)}</td><td class="num muted">${p.format(p.median)}</td>
-            <td class="num"><span class="rank ${better ? 'rank-good' : ''}">${p.rank} / ${p.count}</span></td></tr>`;
+          const st = peerStars(p);
+          const word = st >= 4 ? '優於同業' : st === 3 ? '和同業差不多' : '落後同業';
+          return `<tr><td>${p.label}<small class="peer-hint">${p.hint}</small></td><td class="num">${p.format(p.value)}</td><td class="num muted">${p.format(p.median)}</td>
+            <td>${starsHtml(st, 'stars-sm')}<span class="peer-word w-${st >= 4 ? 'good' : st === 3 ? 'mid' : 'weak'}">${word}</span>
+            <small class="peer-hint num">第 ${p.rank} 名 / ${p.count} 檔</small></td></tr>`;
         })
         .join('')}</tbody>
-    </table>`;
+    </table>`);
 }
 
 // ---------------------------------------------------------------- 新聞
