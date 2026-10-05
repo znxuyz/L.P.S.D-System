@@ -1,0 +1,21 @@
+name: Probe ETF holdings sources (temporary)
+on:
+  push:
+    branches: [claude/charming-pasteur-mt3jzo]
+    paths: ['.github/probe/**', '.github/workflows/probe-etf.yml']
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: >
+          node .github/probe/probe.mjs
+          "https://www.ezmoney.com.tw/ETF/Fund/Info?fundCode=49YTW"
+          "https://www.ezmoney.com.tw/ETF/Transaction/PCF"
+          "https://www.nomurafunds.com.tw/ETFWEB/product-description?fundNo=00980A&tab=Shareholding"
+          "https://www.capitalfund.com.tw/etf/product/detail/399/portfolio"
+          "https://etf.allianzgi.com.tw/"
+          "https://www.twse.com.tw/zh/ETFortune/index"
+          "https://www.twse.com.tw/rwd/zh/ETF/etfPcf?response=json"
