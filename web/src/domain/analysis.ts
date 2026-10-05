@@ -28,6 +28,8 @@ export function strategyScores(view: StockView): StrategyScore[] {
 
 export interface PeerStat {
   label: string;
+  /** 給新手的一句說明：這個數字怎麼看。 */
+  hint: string;
   value: number;
   median: number;
   /** 在同業中的排名（1 = 最好）。 */
@@ -53,20 +55,53 @@ export function peerStats(stock: StockMetrics, metrics: MarketMetrics, fundament
   });
   const self = views.find((v) => v.stock.code === stock.code);
   const out: PeerStat[] = [];
-  const add = (label: string, pick: (v: StockView) => number, better: 'high' | 'low', format: (v: number) => string) => {
+  const add = (label: string, hint: string, pick: (v: StockView) => number, better: 'high' | 'low', format: (v: number) => string) => {
     if (!self) return;
     const vals = views.map(pick).filter(Number.isFinite);
     const value = pick(self);
     if (!Number.isFinite(value) || vals.length === 0) return;
     const sorted = [...vals].sort((a, b) => (better === 'high' ? b - a : a - b));
-    out.push({ label, value, median: median(vals), rank: sorted.indexOf(value) + 1, count: vals.length, better, format });
+    out.push({ label, hint, value, median: median(vals), rank: sorted.indexOf(value) + 1, count: vals.length, better, format });
   };
-  add('本益比', (v) => (v.pe > 0 ? v.pe : NaN), 'low', (v) => `${v.toFixed(1)} 倍`);
-  add('殖利率', (v) => v.yieldPct, 'high', (v) => `${v.toFixed(2)}%`);
-  add('EPS 年增', (v) => v.f.epsYoY, 'high', (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`);
-  add('今日漲跌', (v) => v.stock.changePct, 'high', (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
-  add('今日資金流', (v) => v.stock.flow, 'high', (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)} 億`);
+  add('本益比', '越低代表股價越便宜', (v) => (v.pe > 0 ? v.pe : NaN), 'low', (v) => `${v.toFixed(1)} 倍`);
+  add('殖利率', '越高代表配息越多', (v) => v.yieldPct, 'high', (v) => `${v.toFixed(2)}%`);
+  add('EPS 年增', '越高代表獲利成長越快', (v) => v.f.epsYoY, 'high', (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`);
+  add('今日漲跌', '今天的股價表現', (v) => v.stock.changePct, 'high', (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
+  add('今日資金流', '正數代表今天資金流入', (v) => v.stock.flow, 'high', (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)} 億`);
   return out;
+}
+
+/** 單一指標在同業中的星等：第 1 名 5 顆星，最後一名 1 顆星。 */
+export function peerStars(p: PeerStat): number {
+  if (p.count <= 1) return 3;
+  const pct = (p.count - p.rank) / (p.count - 1);
+  return 1 + Math.round(pct * 4);
+}
+
+export interface PeerRating {
+  /** 1–5，以 0.5 為單位。 */
+  stars: number;
+  label: string;
+  note: string;
+}
+
+/**
+ * 同業推薦度：各指標星等的平均（評價、配息、成長的權重較高，今天的漲跌與資金流較低）。
+ * 只是「和同產業相比的相對位置」，不是買賣建議。
+ */
+export function peerRating(peers: PeerStat[]): PeerRating | null {
+  if (!peers.length) return null;
+  const weight = (p: PeerStat) => (p.label.startsWith('今日') ? 0.5 : 1);
+  const total = peers.reduce((s, p) => s + peerStars(p) * weight(p), 0);
+  const w = peers.reduce((s, p) => s + weight(p), 0);
+  const stars = Math.round((total / w) * 2) / 2;
+  const good = peers.filter((p) => peerStars(p) >= 4).map((p) => p.label);
+  const weak = peers.filter((p) => peerStars(p) <= 2).map((p) => p.label);
+  const label = stars >= 4 ? '同業中的優等生' : stars >= 3 ? '同業中段班' : '落後多數同業';
+  const parts = [];
+  if (good.length) parts.push(`${good.join('、')}優於多數同業`);
+  if (weak.length) parts.push(`${weak.join('、')}落後`);
+  return { stars, label, note: parts.join('；') || '各項都和同業差不多' };
 }
 
 export interface Summary {
