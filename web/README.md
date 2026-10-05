@@ -56,7 +56,7 @@ GitHub Actions 每個交易日台北時間 18:37（22:07 再補抓一次）到�
 - 異動要比對兩個交易日，所以第一次抓到資料的隔天才會出現。
 - ETF 有人申購或買回時，所有持股股數會等比例增減，那不是經理人的決定；比對時改看「每單位持有幾股」，變化 2% 以上才算加碼或減碼。
 - 持股裡不在熱力圖股票池的股票只顯示權重，沒有即時漲跌。
-- 想立刻更新：到 GitHub 的 Actions →「Deploy to GitHub Pages」→ Run workflow。
+- 每次推送到 `main` 部署時也會順便更新；想立刻更新可以到 GitHub 的 Actions →「Deploy to GitHub Pages」→ Run workflow。
 - 抓取程式在 `scripts/active-etf.ts`，比對邏輯在 `src/data/activeEtfDiff.ts`。
 
 其餘 ETF 的股價、淨值、規模、配息、費用率、成分股權重與異動仍是模擬資料（`src/data/mockEtfs.ts`）。

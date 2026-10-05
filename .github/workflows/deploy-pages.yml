@@ -41,13 +41,12 @@ jobs:
             git -C .data remote add origin "$DATA_REMOTE"
           fi
 
+      # 每次部署（包含推送到 main）都更新一次，網站上的持股永遠是最新的
       - name: 抓主動式 ETF 持股
-        if: github.event_name != 'push'
         continue-on-error: true
         run: node scripts/active-etf.ts .data
 
       - name: 存回 data 分支
-        if: github.event_name != 'push'
         working-directory: .data
         run: |
           git config user.name "github-actions[bot]"
