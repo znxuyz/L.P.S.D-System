@@ -277,6 +277,8 @@ button { font: inherit; color: inherit; }
 .playback[hidden] { display: none; }
 .key-form { display: grid; gap: 6px; }
 .key-form[hidden] { display: none; }
+.field-proxy { display: grid; gap: 6px; }
+.field-proxy[hidden] { display: none; }
 .key-form input {
   width: 100%;
   padding: 7px 10px;

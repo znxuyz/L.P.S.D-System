@@ -1,6 +1,6 @@
 import './styles.css';
 import { MockMarketProvider } from './data/mockProvider';
-import { FugleProvider, type FugleStatus } from './data/fugleProvider';
+import { LiveProvider, type LiveStatus } from './data/liveProvider';
 import type { MarketDataProvider, PlaybackControl } from './data/provider';
 import { loadSettings, saveSettings, type SourceSettings } from './data/settings';
 import { sessionOpenMs } from './data/twse';
@@ -165,7 +165,7 @@ class App {
         this.universe,
         this.strategy,
         this.focus?.kind === 'stock' ? this.focus.id : null,
-        this.live ? '股價為富果真實行情；EPS、股利、法人與大戶籌碼、特殊事件目前仍是模擬資料，篩選結果僅供介面測試。' : undefined,
+        this.live ? '股價為真實行情；EPS、股利、法人與大戶籌碼、特殊事件目前仍是模擬資料，篩選結果僅供介面測試。' : undefined,
       );
       renderDetail($('#screen-detail'), ctx);
     }
@@ -182,7 +182,7 @@ class App {
   private select(f: Focus): void {
     this.focus = sameFocus(f, this.focus) ? null : f;
     this.map.setFocus(this.focus);
-    if (this.provider instanceof FugleProvider) this.provider.setFocus(this.focus?.kind === 'stock' ? this.focus.id : null);
+    if (this.provider instanceof LiveProvider) this.provider.setFocus(this.focus?.kind === 'stock' ? this.focus.id : null);
     this.renderPanels();
   }
 
@@ -312,62 +312,78 @@ class App {
   private sourceError = false;
 
   private get live(): boolean {
-    return this.provider instanceof FugleProvider;
+    return this.provider instanceof LiveProvider;
   }
 
-  /** 設定選單的「資料來源」：切換模擬 / 富果，輸入 API 金鑰。切換後重新載入頁面。 */
+  /** 設定選單的「資料來源」：模擬 / 富果 / 證交所，輸入金鑰或轉接網址。儲存後重新載入頁面。 */
   private bindSource(): void {
-    const form = $<HTMLFormElement>('#fugle-form');
-    const input = $<HTMLInputElement>('#fugle-key');
+    const form = $<HTMLFormElement>('#source-form');
+    const keyInput = $<HTMLInputElement>('#fugle-key');
+    const proxyInput = $<HTMLInputElement>('#mis-proxy');
     const chip = $('#source-chip');
+    let pending = this.settings.source;
     const apply = (next: SourceSettings) => {
       saveSettings(next);
       location.reload();
     };
+    const sync = () => {
+      for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-source]')) {
+        btn.setAttribute('aria-pressed', String(btn.dataset.source === pending));
+      }
+      form.hidden = pending === 'mock' || (this.formCollapsed && !this.sourceError);
+      $('.field-proxy').hidden = pending !== 'twse';
+      $('#fugle-key-label').textContent = pending === 'twse' ? '富果 API 金鑰（選填，用來算 20 日常態）' : '富果 API 金鑰';
+    };
     for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-source]')) {
-      btn.setAttribute('aria-pressed', String(btn.dataset.source === this.settings.source));
       btn.addEventListener('click', () => {
         const source = btn.dataset.source as SourceSettings['source'];
-        if (source === this.settings.source) return;
-        if (source === 'fugle' && !this.settings.fugleKey) {
-          form.hidden = false;
-          input.focus();
+        if (source === 'mock') {
+          if (this.settings.source !== 'mock') apply({ ...this.settings, source });
           return;
         }
-        apply({ ...this.settings, source });
+        pending = source;
+        this.formCollapsed = false;
+        sync();
+        (source === 'twse' && !proxyInput.value ? proxyInput : keyInput).focus();
       });
     }
-    // 已經在用富果時收起金鑰欄，避免誤改；按「富果真實」或清除才會再出現
-    form.hidden = this.live;
-    input.value = this.settings.fugleKey;
+    keyInput.value = this.settings.fugleKey;
+    proxyInput.value = this.settings.misProxy;
+    // 已經連上真實行情時先收起表單，避免誤改；點來源按鈕才展開
+    this.formCollapsed = this.live;
+    sync();
     form.addEventListener('submit', (e) => {
       e.preventDefault();
-      const key = input.value.trim();
-      if (!key) {
-        input.focus();
-        return;
-      }
-      apply({ source: 'fugle', fugleKey: key });
+      const fugleKey = keyInput.value.trim();
+      const misProxy = proxyInput.value.trim();
+      if (pending === 'fugle' && !fugleKey) return keyInput.focus();
+      if (pending === 'twse' && !/^https:\/\/\S+$/.test(misProxy)) return proxyInput.focus();
+      apply({ source: pending, fugleKey, misProxy });
     });
-    $('#fugle-clear').addEventListener('click', () => apply({ source: 'mock', fugleKey: '' }));
+    $('#source-clear').addEventListener('click', () => apply({ source: 'mock', fugleKey: '', misProxy: '' }));
     chip.addEventListener('click', () => ($<HTMLDetailsElement>('details.menu').open = true));
     $('#playback').hidden = this.live;
 
-    if (this.provider instanceof FugleProvider) {
+    if (this.provider instanceof LiveProvider) {
       const status = $('#source-status');
       status.hidden = false;
-      this.provider.onStatus((s: FugleStatus) => {
+      this.provider.onStatus((s: LiveStatus) => {
         chip.textContent = s.message;
         chip.title = s.detail;
         chip.className = `chip-source is-${s.state}`;
         status.textContent = `${s.message}\n${s.detail}`;
         status.classList.toggle('is-error', s.state === 'error');
-        if (s.state === 'error') form.hidden = false;
         this.sourceError = s.state === 'error';
+        if (this.sourceError) {
+          this.formCollapsed = false;
+          sync();
+        }
         this.renderPanels();
       });
     }
   }
+
+  private formCollapsed = false;
 
   private syncControls(): void {
     for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-speed]')) {
@@ -382,7 +398,10 @@ class App {
 
 async function main(): Promise<void> {
   const settings = loadSettings();
-  const provider = settings.source === 'fugle' ? new FugleProvider(settings.fugleKey) : new MockMarketProvider({ speed: 60 });
+  const provider =
+    settings.source === 'mock'
+      ? new MockMarketProvider({ speed: 60 })
+      : new LiveProvider({ fugleKey: settings.fugleKey, misProxy: settings.source === 'twse' ? settings.misProxy : undefined });
   const universe = await provider.loadUniverse();
   new App(universe, provider, settings);
 }

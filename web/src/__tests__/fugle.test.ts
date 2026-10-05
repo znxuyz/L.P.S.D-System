@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeBaseline, parseQuote } from '../data/fugle';
-import { sessionAt, taipeiDate } from '../data/fugleProvider';
+import { sessionAt, taipeiDate } from '../data/liveProvider';
 
 describe('富果資料轉換', () => {
   it('報價：金額換成億元，缺成交價時用收盤價', () => {
@@ -47,5 +47,23 @@ describe('富果資料轉換', () => {
     expect(sessionAt(Date.UTC(2026, 9, 5, 6, 0))).toBe('closed'); // 14:00
     expect(sessionAt(Date.UTC(2026, 9, 4, 3, 0))).toBe('closed'); // 星期日
     expect(taipeiDate(Date.UTC(2026, 9, 4, 17, 0))).toBe('2026-10-05');
+  });
+});
+
+describe('證交所 MIS 資料轉換', () => {
+  it('解析報價並估算成交額', async () => {
+    const { parseMis } = await import('../data/twseMis');
+    const q = parseMis({ c: '2330', ex: 'tse', d: '20261005', z: '1010.0000', y: '1000.0000', o: '1000', h: '1020', l: '1000', v: '20000' });
+    expect(q).toMatchObject({ symbol: '2330', ex: 'tse', date: '2026-10-05', prevClose: 1000, price: 1010, high: 1020, low: 1000, volume: 20000 });
+    // 均價 (1000 + 1020 + 1000 + 1010) / 4 = 1007.5；20000 張 × 1000 股 × 1007.5 元 = 201.5 億
+    expect(q.turnover).toBeCloseTo(201.5);
+  });
+
+  it('沒有成交價（-）時價格留空', async () => {
+    const { parseMis } = await import('../data/twseMis');
+    const q = parseMis({ c: '6488', ex: 'otc', z: '-', y: '380', v: '-' });
+    expect(q.price).toBeUndefined();
+    expect(q.prevClose).toBe(380);
+    expect(q.turnover).toBe(0);
   });
 });
