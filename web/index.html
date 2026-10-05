@@ -46,18 +46,23 @@
           </summary>
           <div class="menu-body glass">
             <p class="menu-label">資料來源</p>
-            <div class="seg seg-2" role="group" aria-label="資料來源">
-              <button type="button" data-source="mock" aria-pressed="true">模擬行情</button>
-              <button type="button" data-source="fugle" aria-pressed="false">富果真實</button>
+            <div class="seg" role="group" aria-label="資料來源">
+              <button type="button" data-source="mock" aria-pressed="true">模擬</button>
+              <button type="button" data-source="fugle" aria-pressed="false">富果</button>
+              <button type="button" data-source="twse" aria-pressed="false">證交所</button>
             </div>
-            <form class="key-form" id="fugle-form">
-              <label class="menu-note" for="fugle-key">富果 API 金鑰</label>
+            <form class="key-form" id="source-form" hidden>
+              <div class="field-proxy">
+                <label class="menu-note" for="mis-proxy">證交所轉接網址（Cloudflare Worker）</label>
+                <input id="mis-proxy" type="url" autocomplete="off" spellcheck="false" placeholder="https://xxx.workers.dev" />
+              </div>
+              <label class="menu-note" for="fugle-key" id="fugle-key-label">富果 API 金鑰</label>
               <input id="fugle-key" type="password" autocomplete="off" spellcheck="false" placeholder="貼上 API 金鑰" />
               <div class="menu-row">
                 <button type="submit" class="btn btn-accent">儲存並連線</button>
-                <button type="button" class="btn" id="fugle-clear">清除</button>
+                <button type="button" class="btn" id="source-clear">清除</button>
               </div>
-              <p class="menu-note">金鑰只存在這台裝置的瀏覽器，不會上傳。</p>
+              <p class="menu-note">設定只存在這台裝置的瀏覽器，不會上傳。</p>
             </form>
             <p class="menu-status" id="source-status" hidden></p>
             <div class="playback" id="playback">
