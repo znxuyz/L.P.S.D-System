@@ -25,7 +25,15 @@ function statusCell(r: ScreenRow): string {
 }
 
 /** 中間：策略說明、條件與篩選結果。 */
-export function renderScreen(el: HTMLElement, metrics: MarketMetrics, universe: Universe, id: StrategyId, selected: string | null): void {
+export function renderScreen(
+  el: HTMLElement,
+  metrics: MarketMetrics,
+  universe: Universe,
+  id: StrategyId,
+  selected: string | null,
+  /** 資料來源的提醒（例如基本面仍為模擬資料）。 */
+  note?: string,
+): void {
   const s = strategyById(id);
   const rows = runScreen(s, metrics, universe);
   const matched = rows.filter((r) => r.status === 'match');
@@ -48,6 +56,7 @@ export function renderScreen(el: HTMLElement, metrics: MarketMetrics, universe: 
       <div class="fact"><span>缺點 / 風險</span><p>${esc(s.cons)}</p></div>
       <div class="fact"><span>適合投資人</span><p>${esc(s.fit)}</p></div>
     </div>
+    ${note ? `<p class="data-note">${esc(note)}</p>` : ''}
     <h3 class="d-sub">篩選條件${s.match === 'any' ? '（任一成立即符合）' : '（全部成立才符合）'}</h3>
     <ol class="crit-list">${s.criteria
       .map((c, i) => `<li><span class="crit-i num">${i + 1}</span><span class="crit-label">${esc(c.label)}</span>

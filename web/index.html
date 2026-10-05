@@ -31,7 +31,7 @@
             <b>L.P.L.C.</b>
             <span>資金熱力圖</span>
           </div>
-          <span class="chip-mock" title="目前使用模擬行情，數字不代表實際市場">模擬行情</span>
+          <button type="button" class="chip-source is-mock" id="source-chip" title="目前使用模擬行情，數字不代表實際市場">模擬行情</button>
         </div>
         <div class="pages" role="tablist" aria-label="頁面">
           <button type="button" role="tab" id="tab-map" data-page="map" aria-selected="true" aria-controls="page-map">熱力圖</button>
@@ -45,16 +45,33 @@
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
           </summary>
           <div class="menu-body glass">
-            <p class="menu-label">播放速度</p>
-            <div class="seg" role="group" aria-label="播放速度">
-              <button type="button" id="speed-1" data-speed="1" aria-pressed="false">1×</button>
-              <button type="button" id="speed-10" data-speed="10" aria-pressed="false">10×</button>
-              <button type="button" id="speed-60" data-speed="60" aria-pressed="true">60×</button>
+            <p class="menu-label">資料來源</p>
+            <div class="seg seg-2" role="group" aria-label="資料來源">
+              <button type="button" data-source="mock" aria-pressed="true">模擬行情</button>
+              <button type="button" data-source="fugle" aria-pressed="false">富果真實</button>
             </div>
-            <p class="menu-label">行情</p>
-            <div class="menu-row">
-              <button type="button" class="btn" id="btn-play">暫停</button>
-              <button type="button" class="btn" id="btn-restart">重播</button>
+            <form class="key-form" id="fugle-form">
+              <label class="menu-note" for="fugle-key">富果 API 金鑰</label>
+              <input id="fugle-key" type="password" autocomplete="off" spellcheck="false" placeholder="貼上 API 金鑰" />
+              <div class="menu-row">
+                <button type="submit" class="btn btn-accent">儲存並連線</button>
+                <button type="button" class="btn" id="fugle-clear">清除</button>
+              </div>
+              <p class="menu-note">金鑰只存在這台裝置的瀏覽器，不會上傳。</p>
+            </form>
+            <p class="menu-status" id="source-status" hidden></p>
+            <div class="playback" id="playback">
+              <p class="menu-label">播放速度</p>
+              <div class="seg" role="group" aria-label="播放速度">
+                <button type="button" id="speed-1" data-speed="1" aria-pressed="false">1×</button>
+                <button type="button" id="speed-10" data-speed="10" aria-pressed="false">10×</button>
+                <button type="button" id="speed-60" data-speed="60" aria-pressed="true">60×</button>
+              </div>
+              <p class="menu-label">行情</p>
+              <div class="menu-row">
+                <button type="button" class="btn" id="btn-play">暫停</button>
+                <button type="button" class="btn" id="btn-restart">重播</button>
+              </div>
             </div>
             <p class="menu-label">漲跌配色</p>
             <button type="button" class="btn" id="btn-convention" title="切換漲跌配色">紅漲綠跌</button>

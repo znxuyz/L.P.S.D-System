@@ -1,5 +1,8 @@
 import './styles.css';
 import { MockMarketProvider } from './data/mockProvider';
+import { FugleProvider, type FugleStatus } from './data/fugleProvider';
+import type { MarketDataProvider, PlaybackControl } from './data/provider';
+import { loadSettings, saveSettings, type SourceSettings } from './data/settings';
 import { sessionOpenMs } from './data/twse';
 import type { MarketSnapshot, Universe } from './data/types';
 import { EventDetector, type MarketEvent } from './domain/events';
@@ -73,7 +76,8 @@ class App {
 
   constructor(
     private readonly universe: Universe,
-    private readonly provider: MockMarketProvider,
+    private readonly provider: MarketDataProvider & Partial<PlaybackControl>,
+    private readonly settings: SourceSettings,
   ) {
     this.fundamentals = new Map(
       universe.stocks.filter((s) => s.fundamentals).map((s) => [s.code, s.fundamentals!] as [string, Fundamentals]),
@@ -82,6 +86,7 @@ class App {
     this.map = new GlassMapView($('#map'), universe, onSelect);
     this.toasts = new Toasts($('#toasts'), onSelect);
     this.bindControls();
+    this.bindSource();
     this.showPage(pageFromHash());
     provider.subscribe((snap) => this.onSnapshot(snap));
   }
@@ -96,7 +101,9 @@ class App {
     this.metrics = computeMetrics(this.universe, snap);
     this.etfs = computeEtfs(this.universe, snap, this.metrics);
     this.rotation = computeRotation(this.universe, snap.turnoverHistory);
-    const found = this.detector.detect(this.metrics);
+    // 報價還沒到齊時，漲跌與資金排名都不完整，先不發事件
+    if (snap.partial) this.detector.reset();
+    const found = snap.partial ? [] : this.detector.detect(this.metrics);
     this.fresh = new Set(found.map((e) => e.id));
     this.events = [...[...found].reverse(), ...this.events].slice(0, 40);
     this.toasts.push(found.filter((e) => e.level !== 'info'));
@@ -137,7 +144,7 @@ class App {
       metrics: this.metrics,
       selection: this.focus,
       pal: this.pal,
-      playing: !this.provider.paused,
+      playing: !this.provider.paused && !this.sourceError,
       history: this.history,
       fundamentals: this.fundamentals,
     };
@@ -152,7 +159,14 @@ class App {
     }
     if (this.page === 'screen') {
       renderStrategyList($('#strategies'), this.metrics, this.universe, this.strategy);
-      renderScreen($('#screen'), this.metrics, this.universe, this.strategy, this.focus?.kind === 'stock' ? this.focus.id : null);
+      renderScreen(
+        $('#screen'),
+        this.metrics,
+        this.universe,
+        this.strategy,
+        this.focus?.kind === 'stock' ? this.focus.id : null,
+        this.live ? '股價為富果真實行情；EPS、股利、法人與大戶籌碼、特殊事件目前仍是模擬資料，篩選結果僅供介面測試。' : undefined,
+      );
       renderDetail($('#screen-detail'), ctx);
     }
     // 地圖頁：選取時在地圖右上角浮出狀態視窗
@@ -168,6 +182,7 @@ class App {
   private select(f: Focus): void {
     this.focus = sameFocus(f, this.focus) ? null : f;
     this.map.setFocus(this.focus);
+    if (this.provider instanceof FugleProvider) this.provider.setFocus(this.focus?.kind === 'stock' ? this.focus.id : null);
     this.renderPanels();
   }
 
@@ -279,18 +294,79 @@ class App {
     });
     for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-speed]')) {
       btn.addEventListener('click', () => {
-        this.provider.setSpeed(Number(btn.dataset.speed));
+        this.provider.setSpeed?.(Number(btn.dataset.speed));
         this.syncControls();
       });
     }
-    $('#btn-play').addEventListener('click', () => (this.provider.paused ? this.provider.resume() : this.provider.pause()));
-    $('#btn-restart').addEventListener('click', () => this.provider.restart());
+    $('#btn-play').addEventListener('click', () => (this.provider.paused ? this.provider.resume?.() : this.provider.pause?.()));
+    $('#btn-restart').addEventListener('click', () => this.provider.restart?.());
     $('#btn-convention').addEventListener('click', () => {
       this.convention = this.convention === 'tw' ? 'intl' : 'tw';
       saveConvention(this.convention);
       this.pal = palette(this.convention);
       this.refresh();
     });
+  }
+
+  /** 真實資料連線失敗時，頂部不顯示 Live。 */
+  private sourceError = false;
+
+  private get live(): boolean {
+    return this.provider instanceof FugleProvider;
+  }
+
+  /** 設定選單的「資料來源」：切換模擬 / 富果，輸入 API 金鑰。切換後重新載入頁面。 */
+  private bindSource(): void {
+    const form = $<HTMLFormElement>('#fugle-form');
+    const input = $<HTMLInputElement>('#fugle-key');
+    const chip = $('#source-chip');
+    const apply = (next: SourceSettings) => {
+      saveSettings(next);
+      location.reload();
+    };
+    for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-source]')) {
+      btn.setAttribute('aria-pressed', String(btn.dataset.source === this.settings.source));
+      btn.addEventListener('click', () => {
+        const source = btn.dataset.source as SourceSettings['source'];
+        if (source === this.settings.source) return;
+        if (source === 'fugle' && !this.settings.fugleKey) {
+          form.hidden = false;
+          input.focus();
+          return;
+        }
+        apply({ ...this.settings, source });
+      });
+    }
+    // 已經在用富果時收起金鑰欄，避免誤改；按「富果真實」或清除才會再出現
+    form.hidden = this.live;
+    input.value = this.settings.fugleKey;
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const key = input.value.trim();
+      if (!key) {
+        input.focus();
+        return;
+      }
+      apply({ source: 'fugle', fugleKey: key });
+    });
+    $('#fugle-clear').addEventListener('click', () => apply({ source: 'mock', fugleKey: '' }));
+    chip.addEventListener('click', () => ($<HTMLDetailsElement>('details.menu').open = true));
+    $('#playback').hidden = this.live;
+
+    if (this.provider instanceof FugleProvider) {
+      const status = $('#source-status');
+      status.hidden = false;
+      this.provider.onStatus((s: FugleStatus) => {
+        chip.textContent = s.message;
+        chip.title = s.detail;
+        chip.className = `chip-source is-${s.state}`;
+        status.textContent = `${s.message}\n${s.detail}`;
+        status.classList.toggle('is-error', s.state === 'error');
+        if (s.state === 'error') form.hidden = false;
+        this.sourceError = s.state === 'error';
+        this.renderPanels();
+      });
+    }
   }
 
   private syncControls(): void {
@@ -305,9 +381,10 @@ class App {
 }
 
 async function main(): Promise<void> {
-  const provider = new MockMarketProvider({ speed: 60 });
+  const settings = loadSettings();
+  const provider = settings.source === 'fugle' ? new FugleProvider(settings.fugleKey) : new MockMarketProvider({ speed: 60 });
   const universe = await provider.loadUniverse();
-  new App(universe, provider);
+  new App(universe, provider, settings);
 }
 
 void main();
