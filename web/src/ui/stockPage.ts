@@ -4,7 +4,7 @@ import type { Fundamentals, Universe } from '../data/types';
 import { buildSummary, peerRating, peerStars, peerStats, strategyScores, type StrategyScore, type Summary } from '../domain/analysis';
 import type { MarketMetrics, StockMetrics } from '../domain/metrics';
 import { mockNews, newsLinks } from '../domain/news';
-import { stockView } from '../domain/screens';
+import { industryPeMedians, stockView, type StockView } from '../domain/screens';
 import { analyzeTechnicals, type Candle, type TechReport, type Tilt } from '../domain/technicals';
 import type { Palette } from './colors';
 import { direction, escapeHtml as esc, num, pct, price, signedYi, yi } from './format';
@@ -95,7 +95,7 @@ export function renderStockPage(root: HTMLElement, code: string, ctx: StockPageC
   }
   const candles = ctx.daily ? withToday(ctx.daily.candles, s, ctx.history.get(code), ctx.today, ctx.metrics.session) : [];
   const tech = analyzeTechnicals(candles);
-  const view = stockView(s, f);
+  const view = stockView(s, f, industryPeMedians(ctx.metrics, ctx.universe).get(s.industryId) ?? null);
   const scores = strategyScores(view);
   const summary = buildSummary(view, scores, tech, ctx.metrics, ctx.universe);
 
@@ -104,7 +104,7 @@ export function renderStockPage(root: HTMLElement, code: string, ctx: StockPageC
   renderSummary($('#sa-summary'), summary);
   renderScores($('#sa-score'), scores);
   renderTech($('#sa-tech'), tech, ctx.daily === undefined);
-  renderFund($('#sa-fund'), s, f, ctx);
+  renderFund($('#sa-fund'), view, ctx);
   renderNews($('#sa-news'), s, f, ctx);
 }
 
@@ -361,8 +361,78 @@ function renderTech(el: HTMLElement, tech: TechReport | null, loading: boolean):
 
 // ---------------------------------------------------------------- 基本面、籌碼、同業
 
-function renderFund(el: HTMLElement, s: StockMetrics, f: Fundamentals, ctx: StockPageContext): void {
-  const v = stockView(s, f);
+/** 區間條：最低到最高，標出目前位置（和可選的參考線）。 */
+function rangeBar(o: {
+  title: string;
+  lo: number;
+  hi: number;
+  current: number;
+  fmt: (v: number) => string;
+  verdict: string;
+  verdictTilt: Tilt;
+  note: string;
+  zones?: [number, number];
+  ref?: { value: number; label: string };
+}): string {
+  const at = (v: number) => Math.max(0, Math.min(100, ((v - o.lo) / Math.max(1e-9, o.hi - o.lo)) * 100));
+  const zones = o.zones
+    ? `<i class="rb-zone rb-cheap" style="left:0;width:${at(o.zones[0])}%"></i>
+       <i class="rb-zone rb-fair" style="left:${at(o.zones[0])}%;width:${at(o.zones[1]) - at(o.zones[0])}%"></i>
+       <i class="rb-zone rb-rich" style="left:${at(o.zones[1])}%;width:${100 - at(o.zones[1])}%"></i>`
+    : '<i class="rb-zone rb-fair" style="left:0;width:100%"></i>';
+  return `<div class="rb">
+    <div class="rb-head"><span>${o.title}</span><b class="tilt-text-${o.verdictTilt}">${o.verdict}</b></div>
+    <div class="rb-track">${zones}
+      ${o.ref ? `<i class="rb-ref" style="left:${at(o.ref.value)}%" title="${o.ref.label} ${o.fmt(o.ref.value)}"></i>` : ''}
+      <i class="rb-now" style="left:${at(o.current)}%"></i>
+    </div>
+    <div class="rb-scale num"><span>${o.fmt(o.lo)}</span><span>${o.fmt(o.hi)}</span></div>
+    <p class="rb-note">${o.note}</p>
+  </div>`;
+}
+
+function valuationBlock(v: StockView): string {
+  const f = v.f;
+  const parts: string[] = [];
+  const band = f.pe5y;
+  if (band && v.pe > 0 && Number.isFinite(v.pe) && v.pePct !== null) {
+    const pctile = Math.round(v.pePct * 100);
+    const verdict = v.pePct <= 0.3 ? '偏便宜' : v.pePct >= 0.7 ? '偏貴' : '合理';
+    parts.push(
+      rangeBar({
+        title: '本益比位置（和自己近 5 年比）',
+        lo: Math.min(band[0], v.pe),
+        hi: Math.max(band[4], v.pe),
+        current: v.pe,
+        fmt: (x) => `${x.toFixed(1)} 倍`,
+        verdict,
+        verdictTilt: v.pePct <= 0.3 ? 'bull' : v.pePct >= 0.7 ? 'bear' : 'neutral',
+        zones: [band[1], band[3]],
+        ref: v.industryPe ? { value: v.industryPe, label: '產業中位數' } : undefined,
+        note: `目前 <b>${v.pe.toFixed(1)} 倍</b>，過去 5 年有 ${pctile}% 的時間比現在便宜。5 年中位數 ${band[2].toFixed(1)} 倍${v.industryPe ? `，產業中位數 ${v.industryPe.toFixed(1)} 倍（灰線）` : ''}。`,
+      }),
+    );
+  }
+  const pos = Math.round(v.pos3y * 100);
+  parts.push(
+    rangeBar({
+      title: '股價位階（和自己近 3 年比）',
+      lo: Math.min(f.low3y, v.stock.price),
+      hi: Math.max(f.high3y, v.stock.price),
+      current: v.stock.price,
+      fmt: (x) => price(x),
+      verdict: v.pos3y <= 0.3 ? '低檔' : v.pos3y >= 0.7 ? '高檔' : '中間',
+      verdictTilt: v.pos3y <= 0.3 ? 'bull' : v.pos3y >= 0.7 ? 'bear' : 'neutral',
+      zones: [f.low3y + (f.high3y - f.low3y) * 0.3, f.low3y + (f.high3y - f.low3y) * 0.7],
+      note: `目前 <b>${price(v.stock.price)}</b>，位在近 3 年最低到最高之間的 ${pos}% 位置。`,
+    }),
+  );
+  return `<h3 class="d-sub">評價位置 <small>用這檔股票自己的歷史判斷，不用統一標準</small></h3>${parts.join('')}`;
+}
+
+function renderFund(el: HTMLElement, v: StockView, ctx: StockPageContext): void {
+  const s = v.stock;
+  const f = v.f;
   const peers = peerStats(s, ctx.metrics, ctx.fundamentals);
   const rating = peerRating(peers);
   setHtml(el, `<h2 class="panel-title">基本面與籌碼 <small>模擬資料</small></h2>
@@ -376,6 +446,7 @@ function renderFund(el: HTMLElement, s: StockMetrics, f: Fundamentals, ctx: Stoc
       ${kv('法人', f.instBuyDays >= 0 ? `連買 ${f.instBuyDays} 天` : `連賣 ${-f.instBuyDays} 天`, dirCls(f.instBuyDays))}
       ${kv('千張大戶（4 週）', `${f.bigHolderChg >= 0 ? '+' : '−'}${Math.abs(f.bigHolderChg).toFixed(1)} 百分點`, dirCls(f.bigHolderChg))}
     </dl>
+    ${valuationBlock(v)}
     <h3 class="d-sub">同業比較 <small>${esc(ctx.metrics.industryById.get(s.industryId)?.name ?? '')}・${peers[0]?.count ?? 0} 檔</small></h3>
     ${
       rating

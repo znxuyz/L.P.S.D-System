@@ -36,6 +36,12 @@ export interface Fundamentals {
   grossMarginChg: number;
   /** 營益率年變化（百分點）。 */
   opMarginChg: number;
+  /**
+   * 近 5 年本益比分布：[最低, 25% 分位, 中位數, 75% 分位, 最高]。
+   * 用來判斷目前本益比對這檔股票自己來說是便宜還是貴（不同產業的合理本益比差很多）。
+   * 沒有足夠歷史（例如上市未滿 5 年、多年虧損）時省略。
+   */
+  pe5y?: [number, number, number, number, number];
   /** 近 3 年最低 / 最高價。 */
   low3y: number;
   high3y: number;

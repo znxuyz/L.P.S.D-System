@@ -91,3 +91,25 @@ describe('同業推薦度', () => {
     expect(r.note).toContain('今日漲跌落後');
   });
 });
+
+describe('本益比和自身歷史比較', () => {
+  it('分位數在五個分位點之間內插', async () => {
+    const { pePercentile } = await import('../domain/screens');
+    const band: [number, number, number, number, number] = [8, 12, 16, 20, 30];
+    expect(pePercentile(8, band)).toBe(0);
+    expect(pePercentile(14, band)).toBeCloseTo(0.375);
+    expect(pePercentile(16, band)).toBeCloseTo(0.5);
+    expect(pePercentile(40, band)).toBe(1);
+    expect(pePercentile(10, undefined)).toBeNull();
+  });
+
+  it('同樣 24 倍：自己歷史偏低就符合，歷史偏高就不符合', async () => {
+    const { strategyById } = await import('../domain/screens');
+    const crit = strategyById('value').criteria[1];
+    const base = { pe: 24, yieldPct: 2, pos3y: 0.2, toHigh52w: 0.9, industryPe: 15 } as const;
+    expect(crit.test({ ...base, pePct: 0.2 } as never).pass).toBe(true);
+    expect(crit.test({ ...base, pePct: 0.8 } as never).pass).toBe(false);
+    // 沒有歷史時改和產業比：24 > 15 × 0.8
+    expect(crit.test({ ...base, pePct: null } as never).pass).toBe(false);
+  });
+});

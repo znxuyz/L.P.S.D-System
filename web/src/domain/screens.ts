@@ -25,6 +25,10 @@ export interface StockView {
   pos3y: number;
   /** 現價 ÷ 一年高點。 */
   toHigh52w: number;
+  /** 目前本益比在自身近 5 年分布中的位置（0 = 最便宜，1 = 最貴）；沒有歷史資料時為 null。 */
+  pePct: number | null;
+  /** 同產業本益比中位數（有獲利的股票）；沒有時為 null。 */
+  industryPe: number | null;
 }
 
 export interface Check {
@@ -90,8 +94,21 @@ export const STRATEGIES: Strategy[] = [
     fit: '穩健型投資人，喜歡左側交易、逢低布局者',
     match: 'all',
     criteria: [
-      { label: '股價處於近 3 年相對低檔', test: (v) => ({ pass: v.pos3y <= 0.3, value: `位階 ${Math.round(v.pos3y * 100)}%` }) },
-      { label: '本益比 < 12 倍', test: (v) => ({ pass: v.pe > 0 && v.pe < 12, value: `${n1(v.pe)} 倍` }) },
+      {
+        label: '股價處於自身近 3 年低檔（區間 30% 以下）',
+        test: (v) => ({ pass: v.pos3y <= 0.3, value: `位階 ${Math.round(v.pos3y * 100)}%` }),
+      },
+      {
+        // 不同產業的合理本益比差很多（金融 10 倍、半導體 20 倍以上都常見），
+        // 所以和這檔股票自己的歷史比；沒有歷史時改和同產業比。
+        label: '本益比處於自身近 5 年低檔（30% 分位以下）',
+        test: (v) => {
+          if (!(v.pe > 0)) return { pass: false, value: '虧損' };
+          if (v.pePct !== null) return { pass: v.pePct <= 0.3, value: `${n1(v.pe)} 倍・分位 ${Math.round(v.pePct * 100)}%` };
+          if (v.industryPe !== null) return { pass: v.pe < v.industryPe * 0.8, value: `${n1(v.pe)} 倍・產業 ${n1(v.industryPe)} 倍` };
+          return { pass: v.pe < 12, value: `${n1(v.pe)} 倍` };
+        },
+      },
       {
         label: '連續多年配息、現金流為正',
         test: (v) => ({ pass: v.f.dividendYears >= 5 && v.f.fcfPositive, value: `${v.f.dividendYears} 年・${v.f.fcfPositive ? '正' : '負'}` }),
@@ -99,10 +116,10 @@ export const STRATEGIES: Strategy[] = [
     ],
     columns: [
       { label: '本益比', value: (v) => n1(v.pe) },
+      { label: '本益比 5 年分位', value: (v) => (v.pePct === null ? '—' : `${Math.round(v.pePct * 100)}%`) },
       { label: '3 年位階', value: (v) => `${Math.round(v.pos3y * 100)}%` },
-      { label: '殖利率', value: (v) => `${n1(v.yieldPct)}%` },
     ],
-    rank: (v) => -v.pe,
+    rank: (v) => -(v.pePct ?? 1),
   },
   {
     id: 'growth',
@@ -212,25 +229,61 @@ export function strategyById(id: StrategyId): Strategy {
   return STRATEGIES.find((s) => s.id === id) ?? STRATEGIES[0];
 }
 
-export function stockView(stock: StockMetrics, f: Fundamentals): StockView {
+/** 目前本益比在 5 年分布中的位置：在五個分位點之間線性內插。 */
+export function pePercentile(pe: number, band: Fundamentals['pe5y']): number | null {
+  if (!band || !(pe > 0)) return null;
+  const qs = [0, 0.25, 0.5, 0.75, 1];
+  if (pe <= band[0]) return 0;
+  if (pe >= band[4]) return 1;
+  for (let i = 1; i < band.length; i++) {
+    if (pe <= band[i]) return qs[i - 1] + ((pe - band[i - 1]) / Math.max(1e-9, band[i] - band[i - 1])) * 0.25;
+  }
+  return 1;
+}
+
+/** 各產業本益比中位數（只算有獲利的股票）。 */
+export function industryPeMedians(metrics: MarketMetrics, universe: Universe): Map<string, number> {
+  const byInd = new Map<string, number[]>();
+  for (const meta of universe.stocks) {
+    const s = metrics.stockByCode.get(meta.code);
+    const f = meta.fundamentals;
+    if (!s || !f || f.eps4q <= 0) continue;
+    const arr = byInd.get(meta.industryId) ?? [];
+    arr.push(s.price / f.eps4q);
+    byInd.set(meta.industryId, arr);
+  }
+  const out = new Map<string, number>();
+  for (const [id, arr] of byInd) {
+    const sorted = arr.sort((a, b) => a - b);
+    const m = Math.floor(sorted.length / 2);
+    out.set(id, sorted.length % 2 ? sorted[m] : (sorted[m - 1] + sorted[m]) / 2);
+  }
+  return out;
+}
+
+export function stockView(stock: StockMetrics, f: Fundamentals, industryPe: number | null = null): StockView {
   const range = Math.max(1e-9, f.high3y - f.low3y);
+  const pe = f.eps4q > 0 ? stock.price / f.eps4q : Infinity;
   return {
     stock,
     f,
-    pe: f.eps4q > 0 ? stock.price / f.eps4q : Infinity,
+    pe,
     yieldPct: (f.dividend / stock.price) * 100,
     pos3y: Math.max(0, Math.min(1, (stock.price - f.low3y) / range)),
     toHigh52w: stock.price / Math.max(f.high52w, stock.high),
+    pePct: pePercentile(pe, f.pe5y),
+    industryPe,
   };
 }
 
 /** 跑一個策略：回傳至少通過一個條件的股票，符合 → 接近 → 其他，同級依策略排序。 */
 export function runScreen(strategy: Strategy, metrics: MarketMetrics, universe: Universe): ScreenRow[] {
   const rows: ScreenRow[] = [];
+  const indPe = industryPeMedians(metrics, universe);
   for (const meta of universe.stocks) {
     const stock = metrics.stockByCode.get(meta.code);
     if (!stock || !meta.fundamentals) continue;
-    const view = stockView(stock, meta.fundamentals);
+    const view = stockView(stock, meta.fundamentals, indPe.get(meta.industryId) ?? null);
     const checks = strategy.criteria.map((c) => c.test(view));
     const passed = checks.filter((c) => c.pass).length;
     if (passed === 0) continue;
