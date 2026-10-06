@@ -5,7 +5,7 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    # 主動式 ETF 每天收盤後公告持股：台北時間 18:37 抓一次，22:07 再補抓一次（週一到週五）
+    # 主動式 ETF 持股、每日收盤行情：台北時間 18:37 抓一次，22:07 再補抓一次（週一到週五）
     - cron: '37 10 * * 1-5'
     - cron: '7 14 * * 1-5'
 
@@ -50,6 +50,12 @@ jobs:
         continue-on-error: true
         run: node scripts/stock-list.ts .data
 
+      # 證交所、櫃買每日收盤行情累積成日 K（第一次會分幾次回補近一年）
+      - name: 累積官方日 K
+        continue-on-error: true
+        timeout-minutes: 8
+        run: node scripts/candles.ts .data
+
       - name: 存回 data 分支
         working-directory: .data
         run: |
@@ -69,6 +75,7 @@ jobs:
           for f in active-etf.json stocks.json; do
             if [ -f ".data/$f" ]; then cp ".data/$f" web/public/data/; fi
           done
+          if [ -d .data/candles ]; then cp -r .data/candles web/public/data/; fi
 
       - run: npm ci
         working-directory: web
