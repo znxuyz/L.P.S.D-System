@@ -271,7 +271,14 @@ function renderKChart(el: HTMLElement, all: Candle[], tech: TechReport | null, c
   const tickFmt = (t: number) => (step >= 1 ? num(t, 0) : step >= 0.1 ? num(t, 1) : num(t, 2));
   const last = candles[candles.length - 1];
   el.innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="近 ${N} 日 K 線、均線與成交量">
-    ${ticks.map((t) => `<line class="grid" x1="${pad.l}" x2="${w - pad.r}" y1="${y(t)}" y2="${y(t)}"></line><text class="axis" x="${w - pad.r + 6}" y="${y(t) + 4}">${tickFmt(t)}</text>`).join('')}
+    ${ticks
+      .map(
+        (t) =>
+          `<line class="grid" x1="${pad.l}" x2="${w - pad.r}" y1="${y(t)}" y2="${y(t)}"></line>` +
+          // 和最新價標籤太近時省略刻度文字，避免重疊
+          (Math.abs(y(t) - y(all[all.length - 1].close)) < 13 ? '' : `<text class="axis" x="${w - pad.r + 6}" y="${y(t) + 4}">${tickFmt(t)}</text>`),
+      )
+      .join('')}
     ${candles
       .map((c, i) => {
         const col = colorOf(c);
