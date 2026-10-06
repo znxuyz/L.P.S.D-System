@@ -907,8 +907,47 @@ button.log-text:hover { color: var(--ink); }
   .sectors .panel-title { display: none; }
   .sector-list { display: flex; gap: 6px; width: max-content; }
   .sector { min-width: 140px; border-color: var(--glass-line); }
-  .topbar { gap: 12px; padding: 10px 12px; }
-  .ticker { margin: 0; gap: 16px; order: 3; flex-basis: 100%; }
+  /* 頂部：第一列 Logo＋選單，第二列分頁（可左右滑），第三列行情 */
+  .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'brand menu' 'pages pages' 'ticker ticker';
+    gap: 10px;
+    padding: 10px 12px 12px;
+  }
+  .brand { grid-area: brand; min-width: 0; gap: 10px; }
+  .menu { grid-area: menu; position: static; }
+  .pages {
+    grid-area: pages;
+    display: flex;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .pages::-webkit-scrollbar { display: none; }
+  .pages button { flex: 1 0 auto; white-space: nowrap; padding: 7px 9px; font-size: 13px; }
+  .ticker {
+    grid-area: ticker;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px 12px;
+    align-items: end;
+  }
+  .ticker .kv-index { grid-row: 1; grid-column: 1 / 3; }
+  .ticker .kv-live { grid-row: 1; grid-column: 3; justify-self: end; align-self: center; }
+  .kv-index b { font-size: 22px; }
+  .kv b { font-size: 15px; }
+  /* 選單改成固定在畫面上方的整寬面板，不會跑出螢幕 */
+  .menu-body {
+    position: fixed;
+    top: 64px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-height: calc(100dvh - 80px);
+  }
   .view { flex: none; height: clamp(520px, 78vh, 900px); margin: 0 8px 8px; }
   .field-head { padding: 12px 14px 8px; }
   .map-detail { top: auto; bottom: 16px; right: 16px; left: 16px; width: auto; max-height: 55%; }
@@ -918,7 +957,13 @@ button.log-text:hover { color: var(--ink); }
   .scr-facts { grid-template-columns: minmax(0, 1fr); }
   .crit-list li { grid-template-columns: 24px minmax(0, 1fr) 60px; }
   .crit-bar { display: none; }
-  .pages button { padding: 6px 12px; }
+}
+@media (max-width: 380px) {
+  .brand-text span, .chip-source { font-size: 10px; }
+  .pages button { padding: 7px 6px; font-size: 12px; }
+  .kv-index b { font-size: 19px; }
+  .kv-index dd { flex-wrap: wrap; column-gap: 6px; row-gap: 0; }
+  .kv b { font-size: 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .aurora i, .live i, .flash-up, .flash-down, .gm-cell.is-surge::before, .toast, .map-detail, .log-item.is-new { animation: none; }

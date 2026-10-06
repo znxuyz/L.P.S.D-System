@@ -101,7 +101,7 @@ class App {
       universe.stocks.filter((s) => s.fundamentals).map((s) => [s.code, s.fundamentals!] as [string, Fundamentals]),
     );
     const onSelect = (f: Focus) => this.select(f);
-    this.map = new GlassMapView($('#map'), universe, onSelect);
+    this.map = new GlassMapView($('#map-view'), universe, onSelect);
     this.toasts = new Toasts($('#toasts'), onSelect);
     this.bindControls();
     this.bindSource();
@@ -191,7 +191,7 @@ class App {
     if (this.page === 'screen') {
       renderStrategyList($('#strategies'), this.metrics, this.universe, this.strategy);
       renderScreen(
-        $('#screen'),
+        $('#screen-main'),
         this.metrics,
         this.universe,
         this.strategy,
