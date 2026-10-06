@@ -61,6 +61,21 @@ export interface MarketMetrics {
     turnover: number;
     series: IndexPoint[];
   };
+  /** 台指期近月；資料來源不支援時為 undefined。 */
+  futures?: {
+    symbol: string;
+    name: string;
+    price: number;
+    prevClose: number;
+    change: number;
+    changePct: number;
+    /** 價差 = 期貨 − 加權指數（正價差 > 0、逆價差 < 0）。 */
+    basis: number;
+    high: number;
+    low: number;
+    volume: number;
+    series: IndexPoint[];
+  };
   totalTurnover: number;
   advancers: number;
   decliners: number;
@@ -148,6 +163,14 @@ export function computeMetrics(universe: Universe, snapshot: MarketSnapshot): Ma
       turnover: idx.turnover,
       series: idx.series,
     },
+    futures: snapshot.futures
+      ? {
+          ...snapshot.futures,
+          change: snapshot.futures.price - snapshot.futures.prevClose,
+          changePct: (snapshot.futures.price / snapshot.futures.prevClose - 1) * 100,
+          basis: snapshot.futures.price - idx.value,
+        }
+      : undefined,
     totalTurnover: total,
     advancers: stocks.filter((s) => s.change > 0).length,
     decliners: stocks.filter((s) => s.change < 0).length,

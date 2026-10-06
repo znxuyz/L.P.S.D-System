@@ -1,6 +1,7 @@
 import { FUGLE_WS, FugleClient, FugleError, TAIEX, computeBaseline, parseQuote, type Baseline, type ParsedQuote } from './fugle';
 import { MIS_BATCH, MIS_TAIEX, MisClient, MisError, misChannel, parseMis, type MisExchange } from './twseMis';
 import { mockDailyCandles, type DailySeries } from './candles';
+import { nearMonthContract, type FuturesQuote } from './futures';
 import { buildMockUniverse } from './mockUniverse';
 import type { MarketDataProvider } from './provider';
 import { SESSION_MINUTES, sessionOpenMs } from './twse';
@@ -128,6 +129,10 @@ export class LiveProvider implements MarketDataProvider {
   private baselines: Record<string, Baseline> = {};
   private index = { value: 0, turnover: 0, series: [] as IndexPoint[] };
   private bars: TurnoverBar[] = [];
+  /** 台指期近月（需要富果金鑰；方案不支援時記下原因、不再查詢）。 */
+  private fut: FuturesQuote | null = null;
+  private futNote = '';
+  private futLastPoll = 0;
   private lastQuoteDate?: string;
 
   private status: LiveStatus;
@@ -223,7 +228,11 @@ export class LiveProvider implements MarketDataProvider {
     void this.loadBaselines();
     void this.loop();
     if (this.mode === 'fugle') this.connectWs();
-    this.barTimer = setInterval(() => this.recordBar(), 15_000);
+    this.barTimer = setInterval(() => {
+      this.recordBar();
+      void this.pollFutures();
+    }, 15_000);
+    void this.pollFutures();
   }
 
   private stopAll(): void {
@@ -313,6 +322,40 @@ export class LiveProvider implements MarketDataProvider {
     // 上市、上櫃都查不到的代號就不再查
     if (seen.size > 0) for (const code of this.symbols) if (!seen.has(code)) this.missing.add(code);
     save(EX_KEY, this.exchange);
+  }
+
+  /** 台指期：每 30 秒最多查一次；失敗不影響股票行情。 */
+  private async pollFutures(): Promise<void> {
+    if (!this.client || this.futNote || Date.now() - this.futLastPoll < 30_000) return;
+    // 收盤後只需要查到一次收盤價
+    if (this.fut && sessionAt(Date.now()) !== 'open') return;
+    this.futLastPoll = Date.now();
+    const { symbol } = nearMonthContract(this.today);
+    try {
+      const q = await this.client.futQuote(symbol);
+      const price = q.price ?? this.fut?.price ?? q.prevClose;
+      if (!price) return;
+      const prev = this.fut;
+      const series = prev?.series ?? [];
+      const t = Date.now();
+      if (sessionAt(t) === 'open' && (!series.length || t - series[series.length - 1].t >= 30_000)) series.push({ t, v: price });
+      this.fut = {
+        symbol,
+        name: '台指期近月',
+        price,
+        prevClose: q.prevClose ?? prev?.prevClose ?? price,
+        high: Math.max(q.high ?? price, prev?.high ?? price),
+        low: Math.min(q.low ?? price, prev?.low ?? price),
+        volume: q.volume,
+        series,
+      };
+      this.scheduleEmit();
+    } catch (e) {
+      if (e instanceof FugleError && e.kind !== 'network' && e.kind !== 'rate') {
+        this.futNote = e.kind === 'auth' ? '富果方案沒有開放期貨行情' : `查不到 ${symbol}（${e.message}）`;
+        this.updateStatus();
+      }
+    }
   }
 
   private onError(e: unknown, code?: string): void {
@@ -582,6 +625,7 @@ export class LiveProvider implements MarketDataProvider {
       },
       quotes: { ...this.quotes },
       turnoverHistory: this.bars.slice(),
+      futures: this.fut ? { ...this.fut, series: this.fut.series.slice() } : undefined,
       partial: this.symbols.some((c) => !this.quotes[c] && !this.missing.has(c)),
     };
   }
@@ -609,6 +653,9 @@ export class LiveProvider implements MarketDataProvider {
     else lines.push('20 日常態：內建估計值（選單填富果金鑰可改用真實資料）');
     if (this.baseNote) lines.push(this.baseNote);
     if (this.mode === 'fugle') lines.push(`WebSocket：${this.wsReady ? `已連線，${this.wsChannels.size} 檔逐筆即時` : '未連線'}`);
+    lines.push(
+      `台指期：${this.fut ? `${this.fut.symbol} 每 30 秒更新` : this.futNote || (this.client ? '載入中' : '需要富果金鑰')}`,
+    );
     if (this.missing.size) lines.push(`${name}查無：${[...this.missing].join('、')}`);
     lines.push('基本面、籌碼、ETF 成分股仍為模擬資料');
     const s = this.session();

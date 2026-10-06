@@ -10,6 +10,8 @@
  */
 
 export const FUGLE_REST = 'https://api.fugle.tw/marketdata/v1.0/stock';
+/** 期貨選擇權的行情（台指期等）。 */
+export const FUGLE_FUTOPT = 'https://api.fugle.tw/marketdata/v1.0/futopt';
 export const FUGLE_WS = 'wss://api.fugle.tw/marketdata/v1.0/stock/streaming';
 /** 加權指數在富果的代號。 */
 export const TAIEX = 'IX0001';
@@ -140,9 +142,12 @@ export class RateQueue {
     return this.jobs.length;
   }
 
-  push<T>(task: () => Promise<T>): Promise<T> {
+  /** front = true 時插隊到最前面（例如台指期，不想排在上百檔股票後面）。 */
+  push<T>(task: () => Promise<T>, front = false): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      this.jobs.push(() => task().then(resolve, reject));
+      const job = () => task().then(resolve, reject);
+      if (front) this.jobs.unshift(job);
+      else this.jobs.push(job);
       void this.run();
     });
   }
@@ -192,6 +197,14 @@ export class FugleClient {
     return this.intraday.push(async () => parseQuote(await this.get<FugleQuoteRaw>(`/intraday/quote/${symbol}`, this.intraday), symbol));
   }
 
+  /** 期貨報價（例如台指期近月 TXFJ6）。 */
+  futQuote(symbol: string): Promise<ParsedQuote> {
+    return this.intraday.push(async () =>
+      parseQuote(await this.get<FugleQuoteRaw>(`/intraday/quote/${symbol}`, this.intraday, FUGLE_FUTOPT), symbol),
+      true,
+    );
+  }
+
   /** 當日 1 分 K（給大盤走勢線用）。 */
   async intradayCandles(symbol: string): Promise<FugleCandleRaw[]> {
     const res = await this.intraday.push(() => this.get<{ data?: FugleCandleRaw[] }>(`/intraday/candles/${symbol}?timeframe=1`, this.intraday));
@@ -210,10 +223,10 @@ export class FugleClient {
     this.historical.stop();
   }
 
-  private async get<T>(path: string, queue: RateQueue): Promise<T> {
+  private async get<T>(path: string, queue: RateQueue, base = FUGLE_REST): Promise<T> {
     let res: Response;
     try {
-      res = await fetch(`${FUGLE_REST}${path}`, { headers: { 'X-API-KEY': this.apiKey } });
+      res = await fetch(`${base}${path}`, { headers: { 'X-API-KEY': this.apiKey } });
     } catch {
       throw new FugleError('network', '無法連線到富果 API');
     }
