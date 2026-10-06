@@ -56,6 +56,12 @@ jobs:
         timeout-minutes: 8
         run: node scripts/candles.ts .data
 
+      # 法人連買賣（證交所、櫃買）與千張大戶（集保，每週）
+      - name: 整理籌碼資料
+        continue-on-error: true
+        timeout-minutes: 5
+        run: node scripts/chips.ts .data
+
       - name: 存回 data 分支
         working-directory: .data
         run: |
@@ -72,7 +78,7 @@ jobs:
       - name: 放進網站
         run: |
           mkdir -p web/public/data
-          for f in active-etf.json stocks.json; do
+          for f in active-etf.json stocks.json chips.json; do
             if [ -f ".data/$f" ]; then cp ".data/$f" web/public/data/; fi
           done
           if [ -d .data/candles ]; then cp -r .data/candles web/public/data/; fi

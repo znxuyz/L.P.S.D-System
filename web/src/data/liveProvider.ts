@@ -22,7 +22,7 @@ import type { EtfMeta, Fundamentals, IndexPoint, MarketSnapshot, Quote, SessionS
  * - 股票池、產業分類沿用內建清單；股價、成交額、昨收來自真實行情。
  * - 有富果金鑰時，20 日常態成交額、均線、一年高低點用 Historical API 計算，每天算一次並存在瀏覽器。
  *   證交所模式的富果金鑰是選填；沒有時沿用內建的常態估計值。
- * - 基本面（EPS、股利、籌碼、事件）目前仍是模擬資料，只依真實股價等比例換算。
+ * - 本益比、殖利率、法人、千張大戶由 main 套上官方資料（overlay）；EPS 成長、配息年數、事件等仍是模擬資料。
  *
  * 當天的報價與每分鐘紀錄也存在瀏覽器，重新整理頁面不會從零開始。
  */
@@ -107,6 +107,8 @@ function shiftDate(date: string, days: number): string {
 
 export class LiveProvider implements MarketDataProvider {
   readonly mode: 'fugle' | 'twse';
+  /** 換上真實基本面（官方本益比、殖利率、法人、大戶）；每次依股價重算示意基本面後都會再套一次。 */
+  overlay?: (code: string, f: Fundamentals) => void;
   private readonly sourceName: string;
   private readonly client?: FugleClient;
   private readonly mis?: MisClient;
@@ -517,6 +519,7 @@ export class LiveProvider implements MarketDataProvider {
       ma20: base?.ma20 ?? f.ma20 * r,
       ma60: base?.ma60 ?? f.ma60 * r,
     });
+    this.overlay?.(code, stock.fundamentals);
   }
 
   // ------------------------------------------------------------ 20 日常態（日 K）
@@ -691,7 +694,7 @@ export class LiveProvider implements MarketDataProvider {
       `台指期：${this.fut ? `${this.fut.symbol} 每 30 秒更新` : this.futNote || (this.client ? '載入中' : '需要富果金鑰')}`,
     );
     if (this.missing.size) lines.push(`${name}查無：${[...this.missing].join('、')}`);
-    lines.push('基本面、籌碼、ETF 成分股仍為模擬資料');
+    lines.push('本益比、殖利率、法人、千張大戶用官方資料；EPS 成長、配息年數、特殊事件、一般 ETF 成分股仍為模擬資料');
     const s = this.session();
     if (loaded === 0) {
       this.setStatus({ state: 'connecting', message: `${name}連線中`, detail: lines.join('\n') });

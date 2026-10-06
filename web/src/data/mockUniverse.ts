@@ -204,7 +204,7 @@ function fundamentalsFor(industryId: string, code: string, price: number, rng: (
  * 示意的 5 年本益比分布：每檔股票有自己的「常態本益比」，
  * 用獨立的亂數產生，不影響其他模擬數字。
  */
-function peBand(code: string, pe: number): Fundamentals['pe5y'] {
+export function peBand(code: string, pe: number): Fundamentals['pe5y'] {
   let seed = 0;
   for (const c of code) seed = (seed * 131 + c.charCodeAt(0)) >>> 0;
   const r = createRng(seed ^ 0x5eed);
