@@ -824,7 +824,8 @@ button.log-text:hover { color: var(--ink); }
 .kchart .level { stroke: rgba(255, 255, 255, 0.35); stroke-dasharray: 4 4; }
 .kchart .level-label { fill: var(--ink-2); }
 .kchart .cross { stroke: rgba(255, 255, 255, 0.45); stroke-dasharray: 2 3; }
-.kchart-empty { padding: 40px 0; text-align: center; }
+.kchart-empty { padding: 40px 16px; text-align: center; }
+.kchart-note { color: var(--warn, #c98500); font-size: 13px; word-break: break-all; }
 .k-tip { position: absolute; left: 0; top: 0; padding: 10px 12px; font-size: 12px; pointer-events: none; min-width: 170px; background: rgba(12, 16, 32, 0.94); }
 .k-tip b { display: block; margin-bottom: 4px; }
 .k-tip dl { display: grid; grid-template-columns: auto auto; gap: 2px 14px; margin: 0; }

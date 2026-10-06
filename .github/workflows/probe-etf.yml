@@ -2,7 +2,7 @@ name: Probe data sources (temporary)
 on:
   push:
     branches: [claude/charming-pasteur-mt3jzo]
-    paths: ['.github/probe/**', '.github/workflows/probe-etf.yml']
+    paths: ['.github/probe/**', '.github/workflows/probe-etf.yml', 'scripts/candles.ts']
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -10,4 +10,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node .github/probe/probe.mjs
+      - run: CANDLE_MAX_DATES=6 node scripts/candles.ts /tmp/d
+      - run: |
+          ls -la /tmp/d/candles | head; cat /tmp/d/candles-meta.json
+          node -e "const s=require('/tmp/d/candles/23.json');console.log(s.asOf, JSON.stringify(s.stocks['2330']));const t=require('/tmp/d/candles/82.json');console.log(JSON.stringify(t.stocks['8299']));const e=require('/tmp/d/candles/00.json');console.log(Object.keys(e.stocks).length, JSON.stringify(e.stocks['0050']))"
+          du -sh /tmp/d/candles

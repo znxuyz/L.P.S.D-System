@@ -25,7 +25,7 @@ import { renderStockPage, type ExternalStock } from './ui/stockPage';
 import { industryIdOf, loadStockDirectory, searchDirectory, type StockDirectory } from './data/stockDirectory';
 import { externalFundamentals } from './data/mockUniverse';
 import type { StockMetrics } from './domain/metrics';
-import type { DailySeries } from './data/candles';
+import { loadOfficialCandles, type DailySeries } from './data/candles';
 import { taipeiDate } from './data/liveProvider';
 
 const CONVENTION_KEY = 'lplc.convention';
@@ -197,7 +197,7 @@ class App {
         history: this.history,
         daily: this.daily.get(this.analyzed),
         dailyStartedAt: this.dailyLoading.get(this.analyzed),
-        dailySource: this.live && this.settings.fugleKey ? 'fugle' : 'mock',
+        dailySource: this.live && this.settings.fugleKey ? 'fugle' : !this.live && this.stockCodes.has(this.analyzed) ? 'mock' : 'official',
         live: this.live,
         today: taipeiDate(Date.now()),
       });
@@ -309,15 +309,31 @@ class App {
     return { stock, f, entry, asOf: this.directory?.asOf ?? '', live: !!q };
   }
 
+  /**
+   * 日 K 來源的優先順序：
+   * - 模擬模式的熱力圖股票：示意資料（和模擬股價一致）。
+   * - 其他情況（真實行情、或股票池以外的股票）：富果（有金鑰時）→ 證交所／櫃買每日收盤 → 沒有就不畫，
+   *   不再用亂數產生假的走勢。
+   */
   private ensureDaily(code: string, prevClose?: number): void {
-    if (this.daily.has(code) || this.dailyLoading.has(code) || !this.provider.dailyCandles) return;
-    // 股票池以外的股票要等目錄載入、知道收盤價才能產生示意日 K
-    if (!this.stockCodes.has(code) && !prevClose && !this.live) return;
+    if (this.daily.has(code) || this.dailyLoading.has(code)) return;
+    const simulated = !this.live && this.stockCodes.has(code);
     this.dailyLoading.set(code, Date.now());
-    this.provider
-      .dailyCandles(code, prevClose)
+    const load = async (): Promise<DailySeries> => {
+      if (simulated) return this.provider.dailyCandles?.(code, prevClose) ?? { candles: [], source: 'none' };
+      // 有富果金鑰時富果優先（一次就有完整一年），失敗再用官方每日收盤
+      let fugle: DailySeries | null = null;
+      if (this.live && this.settings.fugleKey && this.provider.dailyCandles) {
+        fugle = await this.provider.dailyCandles(code, prevClose);
+        if (fugle.source === 'fugle') return fugle;
+      }
+      const official = await loadOfficialCandles(code);
+      if (official && official.length >= 30) return { candles: official, source: 'official', note: fugle?.note };
+      return { candles: official ?? [], source: official?.length ? 'official' : 'none', note: fugle?.note };
+    };
+    load()
       .then((series) => this.daily.set(code, series))
-      .catch(() => this.daily.set(code, { candles: [], source: 'mock' }))
+      .catch(() => this.daily.set(code, { candles: [], source: 'none' }))
       .finally(() => {
         this.dailyLoading.delete(code);
         this.renderPanels();

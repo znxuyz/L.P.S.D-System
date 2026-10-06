@@ -40,8 +40,8 @@ export interface StockPageContext {
   daily: DailySeries | undefined;
   /** 日 K 開始下載的時間（載入中才有）。 */
   dailyStartedAt?: number;
-  /** 日 K 的來源：富果真實資料或示意資料。 */
-  dailySource?: 'fugle' | 'mock';
+  /** 預計的日 K 來源（載入動畫顯示用）。 */
+  dailySource?: 'fugle' | 'official' | 'mock';
   /** 是否為真實行情。 */
   live: boolean;
   today: string;
@@ -307,7 +307,13 @@ function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechRepor
     const v = arr?.[arr.length - 1];
     return v == null ? '—' : price(v);
   };
-  const src = ctx.daily === undefined ? '載入中…' : ctx.daily.source === 'fugle' ? '富果日 K' : ctx.live ? '示意資料（選單填富果金鑰可看真實日 K）' : '示意資料';
+  const SRC: Record<DailySeries['source'], string> = {
+    official: '證交所／櫃買每日收盤',
+    fugle: '富果日 K',
+    mock: '模擬行情（示意走勢）',
+    none: '沒有真實日 K',
+  };
+  const src = ctx.daily === undefined ? '載入中…' : `${SRC[ctx.daily.source]}${ctx.daily.source === 'official' && ctx.daily.note ? '（富果日 K 沒抓到）' : ''}`;
   // 勾選框只建立一次，之後只更新標題與圖例，避免每秒重畫打斷點擊
   if (!el.dataset.ready) {
     el.innerHTML = `<div class="kc-title"></div>
@@ -385,7 +391,7 @@ function renderLoader(el: HTMLElement, ctx: StockPageContext, compact = false): 
     </svg>`;
     const steps = [
       ['已排入優先查詢', 'done'],
-      [fugle ? '向富果下載一年日 K' : '產生示意日 K', 'active'],
+      [fugle ? '向富果下載一年日 K' : ctx.dailySource === 'official' ? '讀取證交所／櫃買每日收盤' : '產生示意日 K', 'active'],
       ['計算 MA・EMA・RSI・MACD・KD', 'wait'],
       ['推演綜合判斷', 'wait'],
     ]
@@ -413,7 +419,10 @@ function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechRe
   if (ctx.daily === undefined) return renderLoader(el, ctx);
   delete el.dataset.loader;
   if (all.length < 2) {
-    el.innerHTML = `<p class="muted kchart-empty">${ctx.daily === undefined ? '日 K 載入中…' : '沒有日 K 資料'}</p>`;
+    const note = ctx.daily.note ? `<p class="kchart-note">${esc(ctx.daily.note)}</p>` : '';
+    el.innerHTML = `<div class="kchart-empty"><p>還沒有這檔股票的真實日 K。</p>${note}
+      <p class="muted">證交所／櫃買的每日收盤資料由系統每天自動累積、回補一年；在選單填入富果 API 金鑰也可以直接看真實日 K。
+      為了不誤導判斷，這裡不用示意走勢代替。</p></div>`;
     return;
   }
   bindZoom(el);
