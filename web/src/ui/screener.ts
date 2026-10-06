@@ -90,5 +90,5 @@ export function renderScreen(
         }</tbody>
       </table>
     </div>
-    <p class="muted small">基本面、籌碼與事件資料為模擬資料；本益比、殖利率、股價位階會隨即時股價重新計算。</p>`;
+    ${note ? '' : '<p class="muted small">基本面、籌碼與事件資料為模擬資料；本益比、殖利率、股價位階會隨即時股價重新計算。</p>'}`;
 }
