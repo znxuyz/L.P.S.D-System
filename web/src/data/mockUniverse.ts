@@ -214,6 +214,23 @@ function peBand(code: string, pe: number): Fundamentals['pe5y'] {
   return [q(0.62), q(0.84), q(1), q(1.2), q(1.65)];
 }
 
+/**
+ * 股票池以外的股票（個股分析頁可以查全市場）的示意基本面：以代號為種子，結果固定。
+ * 有證交所的本益比、殖利率時，EPS 與股利會用真實數字換算。
+ */
+export function externalFundamentals(code: string, industryId: string, price: number, real?: { pe?: number; yieldPct?: number }): Fundamentals {
+  let seed = 0;
+  for (const c of code) seed = (seed * 131 + c.charCodeAt(0)) >>> 0;
+  const f = fundamentalsFor(industryId, code, price, createRng(seed ^ 0xbeef));
+  if (real?.pe && real.pe > 0) {
+    f.eps4q = price / real.pe;
+    f.pe5y = peBand(code, real.pe);
+  }
+  if (real?.yieldPct !== undefined && real.yieldPct >= 0) f.dividend = (price * real.yieldPct) / 100;
+  f.payoutRatio = f.eps4q > 0 ? Math.min(120, (f.dividend / f.eps4q) * 100) : 0;
+  return f;
+}
+
 /** 股票池 20 日平均成交額總和的目標值（億元），讓數字接近台股實際量級。 */
 const TARGET_AVG_TURNOVER = 3400;
 

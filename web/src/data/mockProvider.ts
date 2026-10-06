@@ -122,10 +122,11 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
     return this.universe;
   }
 
-  async dailyCandles(code: string): Promise<DailySeries> {
+  async dailyCandles(code: string, prevClose?: number): Promise<DailySeries> {
     const meta = this.universe.stocks.find((s) => s.code === code) ?? this.universe.etfs?.find((e) => e.code === code);
     const today = new Date(this.openMs).toISOString().slice(0, 10);
-    return { candles: meta ? mockDailyCandles(code, meta.prevClose, today) : [], source: 'mock' };
+    const prev = meta?.prevClose ?? prevClose;
+    return { candles: prev ? mockDailyCandles(code, prev, today) : [], source: 'mock' };
   }
 
   subscribe(listener: (snapshot: MarketSnapshot) => void): () => void {

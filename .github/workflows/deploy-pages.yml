@@ -46,6 +46,10 @@ jobs:
         continue-on-error: true
         run: node scripts/active-etf.ts .data
 
+      - name: 更新全市場股票目錄
+        continue-on-error: true
+        run: node scripts/stock-list.ts .data
+
       - name: 存回 data 分支
         working-directory: .data
         run: |
@@ -55,14 +59,16 @@ jobs:
           if git diff --cached --quiet; then
             echo "資料沒有變化"
           else
-            git commit -m "Update active ETF holdings $(date -u +%F)"
+            git commit -m "Update market data $(date -u +%F)"
             git push origin data
           fi
 
       - name: 放進網站
         run: |
           mkdir -p web/public/data
-          if [ -f .data/active-etf.json ]; then cp .data/active-etf.json web/public/data/; fi
+          for f in active-etf.json stocks.json; do
+            if [ -f ".data/$f" ]; then cp ".data/$f" web/public/data/; fi
+          done
 
       - run: npm ci
         working-directory: web

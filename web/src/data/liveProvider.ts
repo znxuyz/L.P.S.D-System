@@ -179,9 +179,29 @@ export class LiveProvider implements MarketDataProvider {
     return this.universe;
   }
 
+  /** 股票池以外的股票：富果或證交所 MIS 查一次即時報價。 */
+  async extraQuote(code: string, market?: 'tse' | 'otc'): Promise<(Quote & { prevClose?: number }) | null> {
+    try {
+      let q: ParsedQuote | undefined;
+      if (this.mis) {
+        const items = await this.mis.fetch(market ? [misChannel(market, code)] : [misChannel('tse', code), misChannel('otc', code)]);
+        const item = items.find((it) => it.c === code);
+        q = item ? parseMis(item) : undefined;
+      } else if (this.client) {
+        q = await this.client.quote(code, true);
+      }
+      if (!q) return null;
+      const price = q.price ?? q.prevClose;
+      if (!price) return null;
+      return { code, price, high: q.high ?? price, low: q.low ?? price, volume: q.volume, turnover: q.turnover, prevClose: q.prevClose };
+    } catch {
+      return null;
+    }
+  }
+
   /** 有富果金鑰時抓一年真實日 K，否則用示意資料。 */
-  async dailyCandles(code: string): Promise<DailySeries> {
-    const prev = this.prevOf(code) ?? 0;
+  async dailyCandles(code: string, prevClose?: number): Promise<DailySeries> {
+    const prev = this.prevOf(code) ?? prevClose ?? 0;
     if (this.client) {
       try {
         const rows = await this.client.dailyCandles(code, shiftDate(this.today, -365), this.today);

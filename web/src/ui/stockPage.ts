@@ -6,6 +6,7 @@ import type { MarketMetrics, StockMetrics } from '../domain/metrics';
 import { mockNews, newsLinks } from '../domain/news';
 import { industryPeMedians, stockView, type StockView } from '../domain/screens';
 import { MA_PERIODS, analyzeTechnicals, type Candle, type MaPeriod, type TechReport, type Tilt } from '../domain/technicals';
+import type { DirEntry, StockDirectory } from '../data/stockDirectory';
 import type { Palette } from './colors';
 import { direction, escapeHtml as esc, num, pct, price, signedYi, yi } from './format';
 
@@ -13,7 +14,22 @@ import { direction, escapeHtml as esc, num, pct, price, signedYi, yi } from './f
  * 個股分析頁：K 線、五大策略評分、技術指標、資金與籌碼、同業比較、新聞與綜合摘要。
  */
 
+/** 熱力圖股票池以外的股票（從全市場目錄查到的）。 */
+export interface ExternalStock {
+  stock: StockMetrics;
+  f: Fundamentals;
+  entry: DirEntry;
+  /** 目錄資料日期。 */
+  asOf: string;
+  /** 是否已拿到即時報價（否則是目錄的最近收盤）。 */
+  live: boolean;
+}
+
 export interface StockPageContext {
+  /** 查詢的股票不在股票池時才有。 */
+  external?: ExternalStock;
+  /** 全市場股票目錄（搜尋建議用）。 */
+  directory?: StockDirectory;
   metrics: MarketMetrics;
   universe: Universe;
   fundamentals: Map<string, Fundamentals>;
@@ -97,8 +113,8 @@ function withToday(candles: Candle[], s: StockMetrics, history: number[] | undef
 }
 
 export function renderStockPage(root: HTMLElement, code: string, ctx: StockPageContext): void {
-  const s = ctx.metrics.stockByCode.get(code);
-  const f = ctx.fundamentals.get(code);
+  const s = ctx.metrics.stockByCode.get(code) ?? ctx.external?.stock;
+  const f = ctx.fundamentals.get(code) ?? ctx.external?.f;
   if (!root.dataset.ready) {
     root.innerHTML = `
       <header class="sa-head glass" id="sa-head"></header>
@@ -114,14 +130,17 @@ export function renderStockPage(root: HTMLElement, code: string, ctx: StockPageC
   renderHead($('#sa-head'), code, s, ctx);
   if (!s || !f) {
     for (const id of ['#sa-chart-head', '#sa-kchart', '#sa-summary', '#sa-score', '#sa-tech', '#sa-fund', '#sa-news']) $(id).innerHTML = '';
-    $('#sa-summary').innerHTML = '<p class="muted">找不到這檔股票。請用上方的搜尋輸入代號或名稱。</p>';
+    $('#sa-summary').innerHTML =
+      ctx.directory === undefined && !ctx.metrics.stockByCode.has(code)
+        ? '<p class="muted">正在載入全市場股票目錄…（若一直沒有出現，代表目錄還沒產生，目前只能查熱力圖裡的股票）</p>'
+        : '<p class="muted">找不到這檔股票。請用上方的搜尋輸入代號或名稱。</p>';
     return;
   }
   const candles = ctx.daily ? withToday(ctx.daily.candles, s, ctx.history.get(code), ctx.today, ctx.metrics.session) : [];
   const tech = analyzeTechnicals(candles);
   const view = stockView(s, f, industryPeMedians(ctx.metrics, ctx.universe).get(s.industryId) ?? null);
   const scores = strategyScores(view);
-  const summary = buildSummary(view, scores, tech, ctx.metrics, ctx.universe);
+  const summary = buildSummary(view, scores, tech, ctx.metrics, ctx.universe, !ctx.external);
 
   redrawChart = () => {
     renderChartHead($('#sa-chart-head'), ctx, tech);
@@ -131,38 +150,51 @@ export function renderStockPage(root: HTMLElement, code: string, ctx: StockPageC
   renderSummary($('#sa-summary'), summary);
   renderScores($('#sa-score'), scores);
   renderTech($('#sa-tech'), tech, ctx.daily === undefined);
-  renderFund($('#sa-fund'), view, ctx);
+  renderFund($('#sa-fund'), view, ctx, f);
   renderNews($('#sa-news'), s, f, ctx);
 }
 
 // ---------------------------------------------------------------- 標頭與搜尋
 
 function renderHead(el: HTMLElement, code: string, s: StockMetrics | undefined, ctx: StockPageContext): void {
-  // 正在輸入時不要重畫，避免搜尋框被洗掉
-  if (el.contains(document.activeElement) && document.activeElement instanceof HTMLInputElement) {
-    const p = el.querySelector('.sa-quote');
-    if (p && s) p.innerHTML = quoteHtml(s);
-    return;
+  // 搜尋框只建立一次（避免每秒重畫洗掉輸入），之後只更新名稱與報價
+  if (!el.dataset.ready) {
+    el.innerHTML = `
+      <div class="sa-id"></div>
+      <div class="sa-quote"></div>
+      <form class="sa-search" id="sa-search" role="search">
+        <input type="search" id="sa-q" list="sa-stocks" placeholder="輸入代號或名稱，例如 2330、聯一光" aria-label="搜尋股票" autocomplete="off" />
+        <datalist id="sa-stocks"></datalist>
+        <button type="submit" class="btn btn-accent">分析</button>
+      </form>`;
+    el.dataset.ready = '1';
   }
-  const ind = s ? ctx.metrics.industryById.get(s.industryId) : undefined;
-  el.innerHTML = `
-    <div class="sa-id">
-      <p class="eyebrow">個股分析 · ${esc(code)}${ind ? ` · ${esc(ind.name)}` : ''}</p>
-      <h2 class="sa-name">${esc(s?.name ?? code)}</h2>
-    </div>
-    <div class="sa-quote">${s ? quoteHtml(s) : ''}</div>
-    <form class="sa-search" id="sa-search" role="search">
-      <input type="search" id="sa-q" list="sa-stocks" placeholder="輸入代號或名稱，例如 2330、鴻海" aria-label="搜尋股票" autocomplete="off" />
-      <datalist id="sa-stocks">${ctx.universe.stocks.map((x) => `<option value="${x.code} ${esc(x.name)}"></option>`).join('')}</datalist>
-      <button type="submit" class="btn btn-accent">分析</button>
-    </form>`;
+  const list = el.querySelector<HTMLDataListElement>('#sa-stocks')!;
+  const want = ctx.directory ? 'dir' : 'pool';
+  if (list.dataset.src !== want) {
+    const items = ctx.directory?.stocks ?? ctx.universe.stocks;
+    list.innerHTML = items.map((x) => `<option value="${x.code} ${esc(x.name)}"></option>`).join('');
+    list.dataset.src = want;
+  }
+  const ext = ctx.external;
+  const ind = s && !ext ? ctx.metrics.industryById.get(s.industryId)?.name : ext?.entry.industry;
+  const market = ext ? (ext.entry.market === 'otc' ? '上櫃' : '上市') : '';
+  setHtml(
+    el.querySelector<HTMLElement>('.sa-id')!,
+    `<p class="eyebrow">個股分析 · ${esc(code)}${market ? ` · ${market}` : ''}${ind ? ` · ${esc(ind)}` : ''}</p>
+     <h2 class="sa-name">${esc(s?.name ?? code)}</h2>`,
+  );
+  setHtml(el.querySelector<HTMLElement>('.sa-quote')!, s ? quoteHtml(s, ext) : '');
 }
 
-function quoteHtml(s: StockMetrics): string {
+function quoteHtml(s: StockMetrics, ext?: ExternalStock): string {
   const d = dirCls(s.change);
+  const meta = ext
+    ? `成交 ${yi(s.turnover, 2)}・${ext.live ? '即時報價' : `${ext.asOf.slice(5).replace('-', '/')} 收盤`}・不在熱力圖股票池，沒有資金流`
+    : `成交 ${yi(s.turnover, 1)}・資金流 <em class="${dirCls(s.flow)}">${signedYi(s.flow, 1)}</em>`;
   return `<b class="num">${price(s.price)}</b>
     <span class="num ${d}">${s.change >= 0 ? '▲' : '▼'} ${price(Math.abs(s.change))}（${pct(s.changePct)}）</span>
-    <span class="sa-meta num">成交 ${yi(s.turnover, 1)}・資金流 <em class="${dirCls(s.flow)}">${signedYi(s.flow, 1)}</em></span>`;
+    <span class="sa-meta num">${meta}</span>`;
 }
 
 // ---------------------------------------------------------------- K 線圖
@@ -512,12 +544,19 @@ function valuationBlock(v: StockView): string {
   return `<h3 class="d-sub">評價位置 <small>用這檔股票自己的歷史判斷，不用統一標準</small></h3>${parts.join('')}`;
 }
 
-function renderFund(el: HTMLElement, v: StockView, ctx: StockPageContext): void {
+function renderFund(el: HTMLElement, v: StockView, ctx: StockPageContext, fund: Fundamentals): void {
   const s = v.stock;
   const f = v.f;
-  const peers = peerStats(s, ctx.metrics, ctx.fundamentals);
+  const fundamentals = ctx.external ? new Map(ctx.fundamentals).set(s.code, fund) : ctx.fundamentals;
+  // 股票池以外的股票沒有資金流資料，不拿來比
+  const peers = peerStats(s, ctx.metrics, fundamentals).filter((p) => !(ctx.external && p.label === '今日資金流'));
   const rating = peerRating(peers);
-  setHtml(el, `<h2 class="panel-title">基本面與籌碼 <small>模擬資料</small></h2>
+  const ext = ctx.external;
+  const realRatios = ext && (ext.entry.pe || ext.entry.yieldPct !== undefined);
+  const src = realRatios
+    ? `本益比、殖利率為${ext!.entry.market === 'otc' ? '櫃買中心' : '證交所'} ${ext!.asOf.slice(5).replace('-', '/')} 資料，其餘模擬`
+    : '模擬資料';
+  setHtml(el, `<h2 class="panel-title">基本面與籌碼 <small>${src}</small></h2>
     <dl class="d-grid d-grid-4">
       ${kv('本益比', Number.isFinite(v.pe) && v.pe > 0 ? `${v.pe.toFixed(1)} 倍` : '—')}
       ${kv('殖利率', `${v.yieldPct.toFixed(2)}%`)}
