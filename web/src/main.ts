@@ -21,7 +21,10 @@ import { GlassMapView } from './ui/glassMapView';
 import { Toasts } from './ui/toasts';
 import { applyActiveEtfData, loadActiveEtfData } from './data/activeEtfData';
 import { MOCK_ETFS } from './data/mockEtfs';
-import { renderStockPage } from './ui/stockPage';
+import { renderStockPage, type ExternalStock } from './ui/stockPage';
+import { industryIdOf, loadStockDirectory, searchDirectory, type StockDirectory } from './data/stockDirectory';
+import { externalFundamentals } from './data/mockUniverse';
+import type { StockMetrics } from './domain/metrics';
 import type { DailySeries } from './data/candles';
 import { taipeiDate } from './data/liveProvider';
 
@@ -79,6 +82,11 @@ class App {
   private analyzed = stockFromHash() ?? '2330';
   private readonly daily = new Map<string, DailySeries>();
   private readonly dailyLoading = new Set<string>();
+  /** 全市場股票目錄（個股分析頁查詢股票池以外的股票用）；undefined = 還沒載入。 */
+  private directory: StockDirectory | null | undefined;
+  /** 股票池以外股票的即時報價（真實行情模式每 30 秒更新）。 */
+  private readonly extQuotes = new Map<string, { quote: Awaited<ReturnType<NonNullable<MarketDataProvider['extraQuote']>>>; at: number }>();
+  private readonly extFundamentals = new Map<string, Fundamentals>();
   /** 熱力圖上有的股票（ETF 持股可能包含股票池以外的股票）。 */
   private readonly stockCodes: Set<string>;
   private readonly detector = new EventDetector();
@@ -176,8 +184,11 @@ class App {
       renderEtfDetail($('#etf-detail'), etf, etf ? this.history.get(etf.meta.code) : undefined);
     }
     if (this.page === 'stock') {
-      this.ensureDaily(this.analyzed);
+      const external = this.externalStock(this.analyzed);
+      this.ensureDaily(this.analyzed, external?.stock.prevClose);
       renderStockPage($('#page-stock'), this.analyzed, {
+        external,
+        directory: this.directory ?? undefined,
         metrics: this.metrics,
         universe: this.universe,
         fundamentals: this.fundamentals,
@@ -237,11 +248,71 @@ class App {
     window.scrollTo({ top: 0 });
   }
 
-  private ensureDaily(code: string): void {
+  /** 第一次需要時才下載全市場股票目錄。 */
+  private ensureDirectory(): Promise<StockDirectory | null> {
+    if (this.directory !== undefined) return Promise.resolve(this.directory);
+    return loadStockDirectory().then((d) => {
+      this.directory = d;
+      this.renderPanels();
+      return d;
+    });
+  }
+
+  /** 股票池以外的股票：用目錄的收盤資料（真實行情時加上即時報價）組出個股分析需要的數字。 */
+  private externalStock(code: string): ExternalStock | undefined {
+    if (this.stockCodes.has(code)) return undefined;
+    if (this.directory === undefined) {
+      void this.ensureDirectory();
+      return undefined;
+    }
+    const entry = this.directory?.stocks.find((d) => d.code === code);
+    if (!entry?.close) return undefined;
+    const industryId = industryIdOf(entry.industry) ?? 'trad';
+    // 真實行情模式：每 30 秒查一次即時報價
+    const cached = this.extQuotes.get(code);
+    if (this.live && this.provider.extraQuote && (!cached || Date.now() - cached.at > 30_000)) {
+      this.extQuotes.set(code, { quote: cached?.quote ?? null, at: Date.now() });
+      void this.provider.extraQuote(code, entry.market).then((quote) => {
+        if (quote) this.extQuotes.set(code, { quote, at: Date.now() });
+        this.renderPanels();
+      });
+    }
+    const q = this.extQuotes.get(code)?.quote;
+    const prevClose = q?.prevClose ?? (q ? entry.close : entry.close - (entry.change ?? 0));
+    const price = q?.price ?? entry.close;
+    const stock: StockMetrics = {
+      code,
+      name: entry.name,
+      industryId,
+      price,
+      prevClose,
+      change: price - prevClose,
+      changePct: prevClose ? ((price - prevClose) / prevClose) * 100 : 0,
+      high: q?.high ?? price,
+      low: q?.low ?? price,
+      volume: q?.volume ?? entry.volume ?? 0,
+      turnover: q?.turnover ?? entry.turnover ?? 0,
+      marketCap: 0,
+      share: 0,
+      baseShare: 0,
+      flow: 0,
+    };
+    let f = this.extFundamentals.get(code);
+    if (!f) {
+      // 證交所 / 櫃買的本益比、殖利率是用收盤價算的，所以用收盤價換回 EPS 與股利
+      f = externalFundamentals(code, industryId, entry.close, { pe: entry.pe, yieldPct: entry.yieldPct });
+      this.extFundamentals.set(code, f);
+    }
+    return { stock, f, entry, asOf: this.directory?.asOf ?? '', live: !!q };
+  }
+
+  private ensureDaily(code: string, prevClose?: number): void {
     if (this.daily.has(code) || this.dailyLoading.has(code) || !this.provider.dailyCandles) return;
+    // 股票池以外的股票要等目錄載入、知道收盤價才能產生示意日 K
+    if (!this.stockCodes.has(code) && !prevClose && !this.live) return;
     this.dailyLoading.add(code);
     this.provider
-      .dailyCandles(code)
+      .dailyCandles(code, prevClose)
       .then((series) => this.daily.set(code, series))
       .catch(() => this.daily.set(code, { candles: [], source: 'mock' }))
       .finally(() => {
@@ -359,10 +430,18 @@ class App {
       const token = q.split(/\s+/)[0];
       const hit =
         this.universe.stocks.find((s) => s.code === token) ??
-        this.universe.stocks.find((s) => s.name === q || s.name === token) ??
-        this.universe.stocks.find((s) => s.name.includes(q) || q.includes(s.name));
-      if (hit) this.analyze(hit.code);
-      else form.querySelector<HTMLInputElement>('#sa-q')?.setCustomValidity('找不到這檔股票');
+        this.universe.stocks.find((s) => s.name === q || s.name === token);
+      if (hit) return this.analyze(hit.code);
+      // 不在熱力圖股票池：查全市場目錄
+      const input = form.querySelector<HTMLInputElement>('#sa-q');
+      void this.ensureDirectory().then((dir) => {
+        const found = dir ? searchDirectory(dir.stocks, q) : this.universe.stocks.find((s) => s.name.includes(q) || q.includes(s.name));
+        if (found) this.analyze(found.code);
+        else {
+          input?.setCustomValidity(dir ? '找不到這檔股票' : '全市場股票目錄還沒準備好，目前只能查熱力圖裡的股票');
+          input?.reportValidity();
+        }
+      });
     });
     document.addEventListener('input', (e) => {
       if ((e.target as HTMLElement).id === 'sa-q') (e.target as HTMLInputElement).setCustomValidity('');

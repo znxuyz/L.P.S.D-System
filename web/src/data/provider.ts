@@ -13,7 +13,12 @@ export interface MarketDataProvider {
   loadUniverse(): Promise<Universe>;
   subscribe(listener: (snapshot: MarketSnapshot) => void): () => void;
   /** 個股的日 K（個股分析頁用）；不支援時可省略。 */
-  dailyCandles?(code: string): Promise<DailySeries>;
+  dailyCandles?(code: string, prevClose?: number): Promise<DailySeries>;
+  /**
+   * 股票池以外的股票（個股分析頁查全市場時）的即時報價；不支援時省略。
+   * market 用來決定證交所 MIS 的查詢代號（上市 tse / 上櫃 otc）。
+   */
+  extraQuote?(code: string, market?: 'tse' | 'otc'): Promise<import('./types').Quote & { prevClose?: number } | null>;
 }
 
 /** 可重播的資料來源（mock）額外提供的播放控制。 */

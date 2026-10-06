@@ -193,8 +193,8 @@ export class FugleClient {
     this.historical = new RateQueue(interval);
   }
 
-  quote(symbol: string): Promise<ParsedQuote> {
-    return this.intraday.push(async () => parseQuote(await this.get<FugleQuoteRaw>(`/intraday/quote/${symbol}`, this.intraday), symbol));
+  quote(symbol: string, front = false): Promise<ParsedQuote> {
+    return this.intraday.push(async () => parseQuote(await this.get<FugleQuoteRaw>(`/intraday/quote/${symbol}`, this.intraday), symbol), front);
   }
 
   /** 期貨報價（例如台指期近月 TXFJ6）。 */

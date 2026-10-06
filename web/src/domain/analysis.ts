@@ -48,7 +48,9 @@ const median = (values: number[]) => {
 
 /** 和同產業比較本益比、殖利率、EPS 成長、今日漲跌、資金流。 */
 export function peerStats(stock: StockMetrics, metrics: MarketMetrics, fundamentals: Map<string, Fundamentals>): PeerStat[] {
-  const peers = metrics.industryById.get(stock.industryId)?.stocks ?? [stock];
+  const peers = [...(metrics.industryById.get(stock.industryId)?.stocks ?? [])];
+  // 股票池以外的股票也拿來和同產業比
+  if (!peers.some((p) => p.code === stock.code)) peers.push(stock);
   const views = peers.flatMap((p) => {
     const f = fundamentals.get(p.code);
     return f ? [stockView(p, f)] : [];
@@ -122,6 +124,8 @@ export function buildSummary(
   tech: TechReport | null,
   metrics: MarketMetrics,
   universe: Universe,
+  /** 在熱力圖股票池裡才有資金流資料。 */
+  inPool = true,
 ): Summary {
   const s = view.stock;
   const f = view.f;
@@ -148,13 +152,17 @@ export function buildSummary(
 
   // 資金面
   const ind = metrics.industryById.get(s.industryId);
-  const rank = ind ? [...ind.stocks].sort((a, b) => b.flow - a.flow).findIndex((x) => x.code === s.code) + 1 : 0;
-  const ratio = s.baseShare > 0 ? s.share / s.baseShare : 1;
-  add(
-    s.flow > 0 ? 'bull' : s.flow < 0 ? 'bear' : 'neutral',
-    `資金：今日成交是常態的 ${ratio.toFixed(2)} 倍，資金${s.flow >= 0 ? '流入' : '流出'} ${Math.abs(s.flow).toFixed(1)} 億${ind ? `（${ind.name}第 ${rank} / ${ind.stocks.length} 名）` : ''}`,
-    1.5,
-  );
+  if (inPool) {
+    const rank = ind ? [...ind.stocks].sort((a, b) => b.flow - a.flow).findIndex((x) => x.code === s.code) + 1 : 0;
+    const ratio = s.baseShare > 0 ? s.share / s.baseShare : 1;
+    add(
+      s.flow > 0 ? 'bull' : s.flow < 0 ? 'bear' : 'neutral',
+      `資金：今日成交是常態的 ${ratio.toFixed(2)} 倍，資金${s.flow >= 0 ? '流入' : '流出'} ${Math.abs(s.flow).toFixed(1)} 億${ind && rank > 0 ? `（${ind.name}第 ${rank} / ${ind.stocks.length} 名）` : ''}`,
+      1.5,
+    );
+  } else {
+    points.push({ tilt: 'neutral', text: '資金：不在熱力圖股票池，沒有資金流資料' });
+  }
 
   // 籌碼
   const inst = f.instBuyDays >= 3 ? 'bull' : f.instBuyDays <= -3 ? 'bear' : 'neutral';
