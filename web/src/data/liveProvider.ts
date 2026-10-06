@@ -1,6 +1,6 @@
 import { FUGLE_WS, FugleClient, FugleError, TAIEX, computeBaseline, parseQuote, type Baseline, type ParsedQuote } from './fugle';
 import { MIS_BATCH, MIS_TAIEX, MisClient, MisError, misChannel, parseMis, type MisExchange } from './twseMis';
-import { mockDailyCandles, type DailySeries } from './candles';
+import type { DailySeries } from './candles';
 import { nearMonthContract, type FuturesQuote } from './futures';
 import { buildMockUniverse } from './mockUniverse';
 import type { MarketDataProvider } from './provider';
@@ -199,23 +199,37 @@ export class LiveProvider implements MarketDataProvider {
     }
   }
 
-  /** 有富果金鑰時抓一年真實日 K，否則用示意資料。 */
-  async dailyCandles(code: string, prevClose?: number): Promise<DailySeries> {
-    const prev = this.prevOf(code) ?? prevClose ?? 0;
-    if (this.client) {
+  /**
+   * 富果真實日 K。抓不到時回傳 source = none 並附上原因，不再用亂數走勢代替。
+   * 富果單次查詢最長一年，這裡抓 360 天；失敗時再試 180 天、以及不指定欄位的寫法。
+   */
+  async dailyCandles(code: string): Promise<DailySeries> {
+    if (!this.client) return { candles: [], source: 'none', note: '沒有富果金鑰' };
+    const tries: Array<[number, boolean]> = [
+      [360, true],
+      [180, true],
+      [180, false],
+    ];
+    let note = '';
+    for (const [days, withFields] of tries) {
       try {
-        const rows = await this.client.dailyCandles(code, shiftDate(this.today, -365), this.today, true);
+        const rows = await this.client.dailyCandles(code, shiftDate(this.today, -days), this.today, true, withFields);
         const candles = rows
           .filter((c) => c.date < this.today && c.close && c.open && c.high && c.low)
           .sort((a, b) => (a.date < b.date ? -1 : 1))
           // 富果日 K 的成交量單位是股，換成張
           .map((c) => ({ date: c.date, open: c.open!, high: c.high!, low: c.low!, close: c.close!, volume: Math.round((c.volume ?? 0) / 1000) }));
         if (candles.length >= 30) return { candles, source: 'fugle' };
-      } catch {
-        /* 改用示意資料 */
+        note = `富果只回傳 ${candles.length} 根日 K`;
+        break;
+      } catch (e) {
+        note = `富果日 K 失敗：${e instanceof Error ? e.message : String(e)}`;
+        console.warn(`[富果日 K] ${code} ${days} 天`, e);
+        // 金鑰錯誤、查無代號時換參數也沒用
+        if (e instanceof FugleError && (e.kind === 'auth' || e.kind === 'not-found')) break;
       }
     }
-    return { candles: prev ? mockDailyCandles(code, prev, this.today) : [], source: 'mock' };
+    return { candles: [], source: 'none', note };
   }
 
   subscribe(listener: (snapshot: MarketSnapshot) => void): () => void {
@@ -519,7 +533,7 @@ export class LiveProvider implements MarketDataProvider {
     this.baseTotal = this.symbols.length;
     this.baseDone = this.baseTotal - codes.length;
     if (codes.length === 0) return;
-    const from = shiftDate(this.today, -365);
+    const from = shiftDate(this.today, -360);
     await Promise.all(
       codes.map((code) =>
         client

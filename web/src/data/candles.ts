@@ -4,8 +4,26 @@ import { createRng, gaussian } from './random';
 /** 個股分析用的日 K（不含今天；今天的 K 棒由即時報價補上）。 */
 export interface DailySeries {
   candles: Candle[];
-  /** fugle = 富果真實日 K；mock = 示意資料。 */
-  source: 'fugle' | 'mock';
+  /**
+   * official = 證交所／櫃買每日收盤（GitHub Actions 每天累積）；fugle = 富果日 K；
+   * mock = 模擬行情用的示意資料（只用在模擬模式的熱力圖股票）；none = 沒有真實日 K。
+   */
+  source: 'official' | 'fugle' | 'mock' | 'none';
+  /** 抓不到真實日 K 時的原因（例如富果回應的錯誤）。 */
+  note?: string;
+}
+
+/** 官方日 K：一檔一個檔案（data/candles/2330.json），由 GitHub Actions 每天累積。 */
+export async function loadOfficialCandles(code: string): Promise<Candle[] | null> {
+  try {
+    const res = await fetch(`data/candles/${encodeURIComponent(code)}.json`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    const rows = (await res.json()) as [string, number, number, number, number, number][];
+    if (!Array.isArray(rows) || !rows.length) return null;
+    return rows.map(([date, open, high, low, close, volume]) => ({ date, open, high, low, close, volume }));
+  } catch {
+    return null;
+  }
 }
 
 function hashCode(code: string): number {
@@ -39,6 +57,11 @@ export function mockDailyCandles(code: string, prevClose: number, today: string,
   const closes: number[] = new Array(days);
   closes[days - 1] = prevClose;
   for (let i = days - 1; i > 0; i--) closes[i - 1] = closes[i] / Math.exp(drift + vol * gaussian(rng));
+  // 示意走勢不要偏離太遠：一年內的高低點控制在現價的 ±35% 左右
+  const lo = Math.min(...closes);
+  const hi = Math.max(...closes);
+  const k = Math.min(1, Math.log(1.35) / Math.max(1e-9, Math.max(Math.log(hi / prevClose), Math.log(prevClose / lo))));
+  for (let i = 0; i < days; i++) closes[i] = prevClose * Math.exp(Math.log(closes[i] / prevClose) * k);
   const baseVol = 2000 + rng() * 30000;
   return dates.map((date, i) => {
     const close = closes[i];

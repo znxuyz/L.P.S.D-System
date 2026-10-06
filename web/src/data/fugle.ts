@@ -213,8 +213,8 @@ export class FugleClient {
 
   /** 日 K（富果單次最多查一年）。 */
   /** front = true：使用者正在看的股票，插隊到背景下載（20 日常態）的前面。 */
-  async dailyCandles(symbol: string, from: string, to: string, front = false): Promise<FugleCandleRaw[]> {
-    const q = `from=${from}&to=${to}&timeframe=D&fields=open,high,low,close,volume,turnover`;
+  async dailyCandles(symbol: string, from: string, to: string, front = false, withFields = true): Promise<FugleCandleRaw[]> {
+    const q = `from=${from}&to=${to}&timeframe=D${withFields ? '&fields=open,high,low,close,volume,turnover' : ''}`;
     const res = await this.historical.push(() => this.get<{ data?: FugleCandleRaw[] }>(`/historical/candles/${symbol}?${q}`, this.historical), front);
     return res.data ?? [];
   }
@@ -232,12 +232,17 @@ export class FugleClient {
       throw new FugleError('network', '無法連線到富果 API');
     }
     if (res.ok) return (await res.json()) as T;
+    // 把富果的錯誤訊息帶出來，方便看出是哪個參數有問題
+    const detail = await res
+      .text()
+      .then((t) => t.replace(/\s+/g, ' ').slice(0, 120))
+      .catch(() => '');
     if (res.status === 401 || res.status === 403) throw new FugleError('auth', 'API 金鑰無效或沒有權限', res.status);
     if (res.status === 429) {
       queue.pauseFor(30_000);
       throw new FugleError('rate', '超過每分鐘次數上限，暫停 30 秒', res.status);
     }
     if (res.status === 404) throw new FugleError('not-found', '查無此代號', res.status);
-    throw new FugleError('http', `富果 API 回應 ${res.status}`, res.status);
+    throw new FugleError('http', `富果 API 回應 ${res.status}${detail ? `（${detail}）` : ''}`, res.status);
   }
 }
