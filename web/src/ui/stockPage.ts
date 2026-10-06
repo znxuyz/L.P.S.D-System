@@ -63,6 +63,105 @@ const lineVis: { ma: boolean; ema: boolean } = (() => {
 /** 切換均線後立刻重畫圖例與 K 線圖（不用等下一次行情更新）。 */
 let redrawChart: (() => void) | null = null;
 
+/**
+ * K 線的縮放與平移：count = 顯示幾根，right = 最右邊往回推幾根（0 = 最新）。
+ * 滑鼠滾輪縮放、拖曳平移；手機用兩指縮放、單指左右滑動；雙擊還原。
+ */
+const DEFAULT_BARS = 120;
+const MIN_BARS = 20;
+const kView = { code: '', count: DEFAULT_BARS, right: 0 };
+/** 最近一次繪圖的版面，事件處理用來換算座標。 */
+let kLayout = { plotL: 0, plotW: 1, total: 0 };
+
+function clampView(total: number): void {
+  kView.count = Math.round(Math.min(Math.max(kView.count, Math.min(MIN_BARS, total)), total));
+  kView.right = Math.round(Math.min(Math.max(kView.right, 0), total - kView.count));
+}
+
+/** 以畫面上的某個位置（0–1）為中心縮放。 */
+function zoomAt(frac: number, factor: number): void {
+  const { total } = kLayout;
+  if (!total) return;
+  const off = total - kView.right - kView.count;
+  const anchor = off + frac * kView.count;
+  kView.count = kView.count * factor;
+  clampView(total);
+  const newOff = Math.round(anchor - frac * kView.count);
+  kView.right = total - newOff - kView.count;
+  clampView(total);
+}
+
+/** 只綁一次：滾輪、滑鼠拖曳、觸控縮放與滑動。 */
+function bindZoom(el: HTMLElement): void {
+  if (el.dataset.zoomBound) return;
+  el.dataset.zoomBound = '1';
+  const redraw = () => {
+    delete el.dataset.hover;
+    redrawChart?.();
+  };
+  const fracOf = (clientX: number) => {
+    const r = el.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (clientX - r.left - kLayout.plotL) / kLayout.plotW));
+  };
+  el.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault();
+      zoomAt(fracOf(e.clientX), Math.exp(e.deltaY * 0.0015));
+      redraw();
+    },
+    { passive: false },
+  );
+  const pts = new Map<number, number>();
+  let start = { count: 0, right: 0, x: 0, dist: 0, frac: 0 };
+  const snapshot = () => {
+    const xs = [...pts.values()];
+    start = {
+      count: kView.count,
+      right: kView.right,
+      x: xs[0] ?? 0,
+      dist: xs.length > 1 ? Math.abs(xs[0] - xs[1]) : 0,
+      frac: xs.length > 1 ? fracOf((xs[0] + xs[1]) / 2) : 0,
+    };
+  };
+  el.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    pts.set(e.pointerId, e.clientX);
+    el.setPointerCapture(e.pointerId);
+    snapshot();
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, e.clientX);
+    const xs = [...pts.values()];
+    if (xs.length >= 2 && start.dist > 10) {
+      // 兩指縮放：手指距離變大 = 放大（顯示的根數變少）
+      kView.count = start.count;
+      kView.right = start.right;
+      zoomAt(start.frac, start.dist / Math.max(10, Math.abs(xs[0] - xs[1])));
+    } else if (xs.length === 1) {
+      // 拖曳平移：往右拖看更早的資料
+      kView.right = start.right + ((xs[0] - start.x) / kLayout.plotW) * kView.count;
+      clampView(kLayout.total);
+    } else return;
+    el.classList.add('is-dragging');
+    redraw();
+  });
+  const end = (e: PointerEvent) => {
+    pts.delete(e.pointerId);
+    snapshot();
+    if (!pts.size) el.classList.remove('is-dragging');
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+  el.addEventListener('dblclick', () => {
+    kView.count = DEFAULT_BARS;
+    kView.right = 0;
+    clampView(kLayout.total);
+    redraw();
+  });
+}
+
 /** 圖例用的小圖示：虛線是 MA、實線是 EMA，只畫有勾選的。 */
 function lineIcon(color: string): string {
   const dashed = `<line x1="0" x2="18" y1="${lineVis.ema ? 2.5 : 5}" y2="${lineVis.ema ? 2.5 : 5}" stroke="${color}" stroke-width="1.6" stroke-dasharray="3 2"></line>`;
@@ -143,8 +242,8 @@ export function renderStockPage(root: HTMLElement, code: string, ctx: StockPageC
   const summary = buildSummary(view, scores, tech, ctx.metrics, ctx.universe, !ctx.external);
 
   redrawChart = () => {
-    renderChartHead($('#sa-chart-head'), ctx, tech);
-    renderKChart($('#sa-kchart'), candles, tech, ctx);
+    renderKChart($('#sa-kchart'), code, candles, tech, ctx);
+    renderChartHead($('#sa-chart-head'), ctx, tech, candles.length);
   };
   redrawChart();
   renderSummary($('#sa-summary'), summary);
@@ -199,7 +298,7 @@ function quoteHtml(s: StockMetrics, ext?: ExternalStock): string {
 
 // ---------------------------------------------------------------- K 線圖
 
-function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechReport | null): void {
+function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechReport | null, total = 0): void {
   const lastOf = (arr: (number | null)[] | undefined) => {
     const v = arr?.[arr.length - 1];
     return v == null ? '—' : price(v);
@@ -228,7 +327,11 @@ function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechRepor
     }
     el.dataset.ready = '1';
   }
-  setHtml(el.querySelector<HTMLElement>('.kc-title')!, `<h2 class="panel-title">日 K 線 <small>${src}</small></h2>`);
+  const range =
+    total > 1
+      ? `<span class="k-range" title="滑鼠滾輪或兩指縮放、拖曳平移、雙擊還原">${kView.count} / ${total} 根${kView.right > 0 ? `・往前 ${kView.right} 根` : ''}・滾輪縮放、拖曳平移、雙擊還原</span>`
+      : '';
+  setHtml(el.querySelector<HTMLElement>('.kc-title')!, `<h2 class="panel-title">日 K 線 <small>${src}</small></h2>${range}`);
   const vals = (n: MaPeriod) =>
     [lineVis.ma ? `MA <b>${lastOf(tech?.series.ma[n])}</b>` : '', lineVis.ema ? `EMA <b>${lastOf(tech?.series.ema[n])}</b>` : '']
       .filter(Boolean)
@@ -242,18 +345,27 @@ function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechRepor
   setHtml(el.querySelector<HTMLElement>('.ma-legend')!, legend);
 }
 
-function renderKChart(el: HTMLElement, all: Candle[], tech: TechReport | null, ctx: StockPageContext): void {
+function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechReport | null, ctx: StockPageContext): void {
   if (el.dataset.hover) return;
   if (all.length < 2) {
     el.innerHTML = `<p class="muted kchart-empty">${ctx.daily === undefined ? '日 K 載入中…' : '沒有日 K 資料'}</p>`;
     return;
   }
-  const N = Math.min(120, all.length);
-  const off = all.length - N;
-  const candles = all.slice(off);
+  bindZoom(el);
+  // 換股票時回到預設範圍
+  if (code !== kView.code) {
+    kView.code = code;
+    kView.count = DEFAULT_BARS;
+    kView.right = 0;
+  }
+  clampView(all.length);
+  const N = kView.count;
+  const off = all.length - kView.right - N;
+  const candles = all.slice(off, off + N);
   const w = Math.max(320, el.clientWidth);
   const h = Math.max(260, el.clientHeight);
   const pad = { l: 8, r: 56, t: 10, b: 22 };
+  kLayout = { plotL: pad.l, plotW: Math.max(1, w - pad.l - pad.r), total: all.length };
   const volH = Math.round((h - pad.t - pad.b) * 0.2);
   const gap = 10;
   const priceBottom = h - pad.b - volH - gap;
@@ -263,7 +375,7 @@ function renderKChart(el: HTMLElement, all: Candle[], tech: TechReport | null, c
   // 只把有顯示的均線算進縱軸範圍
   const maVals = ma
     ? MA_PERIODS.flatMap((n) => [...(lineVis.ma ? [ma.ma[n]] : []), ...(lineVis.ema ? [ma.ema[n]] : [])]).flatMap((arr) =>
-        arr.slice(off).filter((v): v is number => v != null),
+        arr.slice(off, off + N).filter((v): v is number => v != null),
       )
     : [];
   const lo = Math.min(...candles.map((c) => c.low), ...maVals);
@@ -280,7 +392,7 @@ function renderKChart(el: HTMLElement, all: Candle[], tech: TechReport | null, c
   const maPath = (arr: (number | null)[] | undefined) => {
     if (!arr) return '';
     let d = '';
-    arr.slice(off).forEach((v, i) => {
+    arr.slice(off, off + N).forEach((v, i) => {
       if (v == null) return;
       d += `${d ? 'L' : 'M'}${cx(i).toFixed(1)},${y(v).toFixed(1)}`;
     });
@@ -302,7 +414,7 @@ function renderKChart(el: HTMLElement, all: Candle[], tech: TechReport | null, c
   const step = ticks.length > 1 ? ticks[1] - ticks[0] : 1;
   const tickFmt = (t: number) => (step >= 1 ? num(t, 0) : step >= 0.1 ? num(t, 1) : num(t, 2));
   const last = candles[candles.length - 1];
-  el.innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="近 ${N} 日 K 線、均線與成交量">
+  el.innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${N} 根日 K 線、均線與成交量（滾輪或兩指縮放，拖曳平移）">
     ${ticks
       .map(
         (t) =>
