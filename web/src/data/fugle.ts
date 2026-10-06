@@ -212,9 +212,10 @@ export class FugleClient {
   }
 
   /** 日 K（富果單次最多查一年）。 */
-  async dailyCandles(symbol: string, from: string, to: string): Promise<FugleCandleRaw[]> {
+  /** front = true：使用者正在看的股票，插隊到背景下載（20 日常態）的前面。 */
+  async dailyCandles(symbol: string, from: string, to: string, front = false): Promise<FugleCandleRaw[]> {
     const q = `from=${from}&to=${to}&timeframe=D&fields=open,high,low,close,volume,turnover`;
-    const res = await this.historical.push(() => this.get<{ data?: FugleCandleRaw[] }>(`/historical/candles/${symbol}?${q}`, this.historical));
+    const res = await this.historical.push(() => this.get<{ data?: FugleCandleRaw[] }>(`/historical/candles/${symbol}?${q}`, this.historical), front);
     return res.data ?? [];
   }
 

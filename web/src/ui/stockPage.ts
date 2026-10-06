@@ -38,6 +38,10 @@ export interface StockPageContext {
   history: Map<string, number[]>;
   /** 日 K；undefined = 載入中。 */
   daily: DailySeries | undefined;
+  /** 日 K 開始下載的時間（載入中才有）。 */
+  dailyStartedAt?: number;
+  /** 日 K 的來源：富果真實資料或示意資料。 */
+  dailySource?: 'fugle' | 'mock';
   /** 是否為真實行情。 */
   live: boolean;
   today: string;
@@ -248,7 +252,7 @@ export function renderStockPage(root: HTMLElement, code: string, ctx: StockPageC
   redrawChart();
   renderSummary($('#sa-summary'), summary);
   renderScores($('#sa-score'), scores);
-  renderTech($('#sa-tech'), tech, ctx.daily === undefined);
+  renderTech($('#sa-tech'), tech, ctx.daily === undefined, ctx);
   renderFund($('#sa-fund'), view, ctx, f);
   renderNews($('#sa-news'), s, f, ctx);
 }
@@ -345,8 +349,69 @@ function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechRepor
   setHtml(el.querySelector<HTMLElement>('.ma-legend')!, legend);
 }
 
+// ---------------------------------------------------------------- 載入動畫
+
+/**
+ * 「拉普拉斯核心」載入動畫：中央的眼睛代表拉普拉斯之惡魔，外圈資料環旋轉，
+ * 下方 K 棒逐根長出，旁邊列出目前的步驟與已等待時間。
+ * 只建立一次 DOM，之後每秒只更新文字，動畫才不會被重畫打斷。
+ */
+function renderLoader(el: HTMLElement, ctx: StockPageContext, compact = false): void {
+  const kind = compact ? 'compact' : 'full';
+  const fugle = ctx.dailySource === 'fugle';
+  if (el.dataset.loader !== kind) {
+    delete el.dataset.html;
+    const candles = [0.55, 0.35, 0.7, 0.5, 0.85, 0.6, 0.95, 0.75]
+      .map((hgt, i) => {
+        const up = i % 3 !== 1;
+        const h = 8 + hgt * 26;
+        return `<rect class="lc-candle ${up ? 'up' : 'down'}" x="${20 + i * 15}" y="${150 - h}" width="8" height="${h}" rx="2" style="animation-delay:${i * 0.18}s"></rect>`;
+      })
+      .join('');
+    const svg = `<svg class="lc-svg" viewBox="0 0 160 160" aria-hidden="true">
+      <defs>
+        <linearGradient id="lc-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8ff0ff"></stop><stop offset="1" stop-color="#8b7bff"></stop></linearGradient>
+        <radialGradient id="lc-eye" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#e9fdff"></stop><stop offset="0.45" stop-color="#8ff0ff"></stop><stop offset="1" stop-color="#8b7bff" stop-opacity="0"></stop></radialGradient>
+      </defs>
+      <g class="lc-core">
+        <circle class="lc-ring lc-ring-1" cx="80" cy="64" r="52" stroke="url(#lc-g)"></circle>
+        <circle class="lc-ring lc-ring-2" cx="80" cy="64" r="40" stroke="url(#lc-g)"></circle>
+        <g class="lc-orbit"><circle cx="80" cy="12" r="3"></circle><circle cx="132" cy="64" r="2"></circle><circle cx="43" cy="101" r="2.4"></circle></g>
+        <circle class="lc-glow" cx="80" cy="64" r="24" fill="url(#lc-eye)"></circle>
+        <circle class="lc-pupil" cx="80" cy="64" r="6"></circle>
+        <line class="lc-scan" x1="22" x2="138" y1="64" y2="64"></line>
+      </g>
+      ${compact ? '' : candles}
+    </svg>`;
+    const steps = [
+      ['已排入優先查詢', 'done'],
+      [fugle ? '向富果下載一年日 K' : '產生示意日 K', 'active'],
+      ['計算 MA・EMA・RSI・MACD・KD', 'wait'],
+      ['推演綜合判斷', 'wait'],
+    ]
+      .map(([t, st]) => `<li class="lc-step is-${st}"><i aria-hidden="true"></i>${t}</li>`)
+      .join('');
+    el.innerHTML = `<div class="lc ${compact ? 'is-compact' : ''}" role="status" aria-live="polite">
+      ${svg}
+      <div class="lc-text">
+        <p class="lc-title">拉普拉斯核心<span>解析中</span></p>
+        ${compact ? '' : `<ol class="lc-steps">${steps}</ol>`}
+        <p class="lc-elapsed"></p>
+      </div>
+    </div>`;
+    el.dataset.loader = kind;
+  }
+  const sec = ctx.dailyStartedAt ? Math.max(0, Math.floor((Date.now() - ctx.dailyStartedAt) / 1000)) : 0;
+  const note =
+    fugle && sec >= 15 ? '・富果每分鐘最多 60 次查詢，背景還在下載熱力圖資料，請稍候' : '';
+  const t = el.querySelector('.lc-elapsed');
+  if (t) t.textContent = `已等待 ${sec} 秒${note}`;
+}
+
 function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechReport | null, ctx: StockPageContext): void {
   if (el.dataset.hover) return;
+  if (ctx.daily === undefined) return renderLoader(el, ctx);
+  delete el.dataset.loader;
   if (all.length < 2) {
     el.innerHTML = `<p class="muted kchart-empty">${ctx.daily === undefined ? '日 K 載入中…' : '沒有日 K 資料'}</p>`;
     return;
@@ -574,7 +639,16 @@ function renderScores(el: HTMLElement, scores: StrategyScore[]): void {
 
 // ---------------------------------------------------------------- 技術指標
 
-function renderTech(el: HTMLElement, tech: TechReport | null, loading: boolean): void {
+function renderTech(el: HTMLElement, tech: TechReport | null, loading: boolean, ctx?: StockPageContext): void {
+  if (!tech && loading && ctx) {
+    if (el.dataset.loader !== 'compact') {
+      el.innerHTML = '<h2 class="panel-title">技術指標</h2><div class="lc-slot"></div>';
+      el.dataset.loader = 'compact';
+    }
+    renderLoader(el.querySelector<HTMLElement>('.lc-slot')!, ctx, true);
+    return;
+  }
+  delete el.dataset.loader;
   if (!tech) {
     el.innerHTML = `<h2 class="panel-title">技術指標</h2><p class="muted">${loading ? '日 K 載入中…' : '日 K 資料不足，無法計算。'}</p>`;
     return;

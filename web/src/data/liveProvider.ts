@@ -204,7 +204,7 @@ export class LiveProvider implements MarketDataProvider {
     const prev = this.prevOf(code) ?? prevClose ?? 0;
     if (this.client) {
       try {
-        const rows = await this.client.dailyCandles(code, shiftDate(this.today, -365), this.today);
+        const rows = await this.client.dailyCandles(code, shiftDate(this.today, -365), this.today, true);
         const candles = rows
           .filter((c) => c.date < this.today && c.close && c.open && c.high && c.low)
           .sort((a, b) => (a.date < b.date ? -1 : 1))
