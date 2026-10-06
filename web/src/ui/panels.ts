@@ -210,7 +210,8 @@ function renderIndexChart(el: HTMLElement, m: MarketMetrics): void {
   const pad = { l: 18, r: 52, t: 8, b: 18 };
   const t0 = series[0]?.t ?? m.time;
   const x = scaleLinear().domain([t0, t0 + SESSION_MINUTES * 60_000]).range([pad.l, w - pad.r]);
-  const vals = series.map((p) => p.v).concat(m.index.prevClose);
+  const fut = m.futures?.series ?? [];
+  const vals = series.map((p) => p.v).concat(m.index.prevClose, fut.map((p) => p.v));
   const lo = Math.min(...vals);
   const hi = Math.max(...vals);
   const span = Math.max(hi - lo, m.index.prevClose * 0.004);
@@ -227,6 +228,16 @@ function renderIndexChart(el: HTMLElement, m: MarketMetrics): void {
     <text class="axis" x="${w - pad.r + 4}" y="${y(m.index.prevClose) + 3}">昨收</text>
     <path class="area ${d}" d="${areaGen(series) ?? ''}" fill="url(#idx-fill)"></path>
     <path class="line ${d}" d="${lineGen(series) ?? ''}"></path>
+    ${fut.length > 1 ? `<path class="fut-line" d="${d3line<{ t: number; v: number }>().x((p) => x(p.t)).y((p) => y(p.v)).curve(curveMonotoneX)(fut) ?? ''}"></path>` : ''}
+    ${(() => {
+      const lf = fut[fut.length - 1];
+      if (!lf || !last) return '';
+      // 台指期最新價標在右側；和加權的標籤太近時錯開
+      let ty = y(lf.v) + 3;
+      const iy = y(last.v) + 3;
+      if (Math.abs(ty - iy) < 12) ty = lf.v < last.v ? iy + 12 : iy - 12;
+      return `<text class="axis fut-label" x="${w - pad.r + 4}" y="${ty}">${num(lf.v, 0)}</text>`;
+    })()}
     ${last ? `<circle class="dot ${d}" cx="${x(last.t)}" cy="${y(last.v)}" r="3.5"></circle>
     <text class="axis strong" x="${w - pad.r + 4}" y="${y(last.v) + 3}">${num(last.v, 0)}</text>` : ''}
     ${ticks.map((t) => `<text class="axis" x="${x(t)}" y="${h - 4}" text-anchor="middle">${hm(t)}</text>`).join('')}
@@ -245,14 +256,35 @@ function renderIndexChart(el: HTMLElement, m: MarketMetrics): void {
       el.dataset.hover = '1';
       svg.select('line.cross').attr('x1', x(p.t)).attr('x2', x(p.t)).attr('visibility', 'visible');
       tip.hidden = false;
-      tip.textContent = `${hm(p.t)}　${num(p.v, 2)}（${pct((p.v / m.index.prevClose - 1) * 100)}）`;
-      tip.style.left = `${Math.min(x(p.t) + 8, w - 170)}px`;
+      const f = fut.length ? fut[find(fut, p.t)] : undefined;
+      tip.textContent =
+        `${hm(p.t)}　加權 ${num(p.v, 2)}（${pct((p.v / m.index.prevClose - 1) * 100)}）` +
+        (f && Math.abs(f.t - p.t) < 5 * 60_000 ? `　台指期 ${num(f.v, 0)}・價差 ${signed(f.v - p.v, 0)}` : '');
+      tip.style.left = `${Math.max(4, Math.min(x(p.t) + 8, w - tip.offsetWidth - 4))}px`;
     })
     .on('mouseleave', () => {
       delete el.dataset.hover;
       svg.select('line.cross').attr('visibility', 'hidden');
       tip.hidden = true;
     });
+}
+
+/** 台指期摘要：價格、漲跌、價差（期貨 − 現貨）、成交量。 */
+function renderFutures(el: HTMLElement, m: MarketMetrics): void {
+  const f = m.futures;
+  if (!f) {
+    el.innerHTML = '<p class="fut-empty">台指期需要富果 API 金鑰（模擬模式有示意行情）。</p>';
+    return;
+  }
+  const d = dirCls(f.change);
+  const basisLabel = f.basis > 0 ? '正價差' : f.basis < 0 ? '逆價差' : '平價';
+  el.innerHTML = `
+    <div class="fut-legend"><span><i class="lg-index ${dirCls(m.index.change)}"></i>加權指數</span><span><i class="lg-fut"></i>${esc(f.name)} ${esc(f.symbol)}</span></div>
+    <dl class="fut-kv">
+      <div><dt>台指期</dt><dd><b class="num">${num(f.price, 0)}</b><span class="num ${d}">${f.change >= 0 ? '▲' : '▼'} ${num(Math.abs(f.change), 0)} (${pct(f.changePct)})</span></dd></div>
+      <div><dt title="期貨 − 加權指數；正價差代表市場對後市較樂觀">${basisLabel}</dt><dd><b class="num ${f.basis >= 0 ? 'up' : 'down'}">${signed(f.basis, 0)}</b><span class="muted">點</span></dd></div>
+      <div><dt>成交量</dt><dd><b class="num">${num(f.volume)}</b><span class="muted">口</span></dd></div>
+    </dl>`;
 }
 
 function renderFlowRank(m: MarketMetrics): string {
@@ -282,12 +314,13 @@ export function renderDock(el: HTMLElement, ctx: PanelContext, renderRotationInt
   const { metrics: m } = ctx;
   if (!el.dataset.ready) {
     el.innerHTML = `
-      <section class="card glass card-index">${title('加權指數')}<div class="chart" id="index-chart"></div></section>
+      <section class="card glass card-index">${title('加權指數・台指期')}<div class="fut-strip" id="fut-strip"></div><div class="chart" id="index-chart"></div></section>
       <section class="card glass card-rotation">${title('資金輪動', ' <small>每格 5 分鐘・成交佔比偏離常態的百分點</small>')}<div class="rotation" id="rotation"></div></section>
       <section class="card glass card-flow">${title('產業資金流', ' <small>億元</small>')}<div class="flow-rank" id="flow-rank"></div></section>
       <section class="card glass card-movers">${title('個股資金流', ' <small>億元</small>')}<div class="movers" id="movers"></div></section>`;
     el.dataset.ready = '1';
   }
+  renderFutures(el.querySelector('#fut-strip')!, m);
   renderIndexChart(el.querySelector('#index-chart')!, m);
   renderRotationInto(el.querySelector('#rotation')!);
   el.querySelector('#flow-rank')!.innerHTML = renderFlowRank(m);

@@ -195,6 +195,8 @@ export interface MarketSnapshot {
   quotes: Record<string, Quote>;
   /** 盤中每分鐘的累計成交額，用來看資金輪動；資料來源不支援時可省略。 */
   turnoverHistory?: TurnoverBar[];
+  /** 台指期近月；資料來源不支援時省略。 */
+  futures?: import('./futures').FuturesQuote;
   /** 還有股票沒拿到報價（真實資料剛開始載入），這時不判斷盤中事件。 */
   partial?: boolean;
 }

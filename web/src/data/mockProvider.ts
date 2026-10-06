@@ -1,5 +1,6 @@
 import type { MarketDataProvider, PlaybackControl } from './provider';
 import { mockDailyCandles, type DailySeries } from './candles';
+import { nearMonthContract } from './futures';
 import { buildMockUniverse } from './mockUniverse';
 import { createRng, gaussian } from './random';
 import { SESSION_MINUTES, roundToTick, sessionOpenMs } from './twse';
@@ -95,6 +96,9 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
   /** ETF 用獨立亂數，加入 ETF 不會改變個股行情。 */
   private etfRng!: () => number;
   private series: IndexPoint[] = [];
+  /** 台指期：用獨立亂數，加入期貨不會改變現貨行情。 */
+  private futRng!: () => number;
+  private fut = { basis: 0, prevClose: 0, high: 0, low: 0, volume: 0, series: [] as IndexPoint[] };
   private turnoverHistory: TurnoverBar[] = [];
   private listeners = new Set<(s: MarketSnapshot) => void>();
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -171,6 +175,10 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
     this.turnoverHistory = [];
     this.states.clear();
     this.etfRng = createRng(this.seed + 500);
+    this.futRng = createRng(this.seed + 700);
+    // 台指期通常和現貨有幾十點的價差；昨收用昨天的價差估
+    const prevBasis = -12 - this.futRng() * 20;
+    this.fut = { basis: prevBasis + gaussian(this.futRng) * 6, prevClose: Math.round(this.universe.index.prevClose + prevBasis), high: 0, low: Infinity, volume: 0, series: [] };
     this.etfStates.clear();
     for (const e of this.universe.etfs ?? []) {
       this.etfStates.set(e.code, {
@@ -184,6 +192,7 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
       });
     }
     this.pushIndexPoint();
+    this.trackFutures(true);
     while (this.minute < this.startMinute) this.step(1);
   }
 
@@ -223,11 +232,15 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
     }
 
     this.stepEtfs(dt, sqrtDt, profile);
+    // 價差慢慢回到 −15 點附近；期貨成交量也有開收盤較多的 U 型
+    this.fut.basis += (-15 - this.fut.basis) * 0.03 * dt + gaussian(this.futRng) * 1.6 * sqrtDt;
+    this.fut.volume += Math.round(420 * dt * profile * (0.7 + this.futRng() * 0.6));
 
     const crossedMinute = Math.floor(to) !== Math.floor(from);
     this.minute = to;
     if (crossedMinute || to >= SESSION_MINUTES) this.pushIndexPoint();
     else this.series[this.series.length - 1] = this.indexPoint();
+    this.trackFutures(crossedMinute || to >= SESSION_MINUTES);
   }
 
   /** 股票型 ETF 淨值跟著成分股加權報酬；債券型獨立隨機漫步。市價 = 淨值 ×（1 + 折溢價）。 */
@@ -272,6 +285,19 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
     return this.universe.index.prevClose * (weighted / cap);
   }
 
+  private futPrice(): number {
+    return Math.round(this.indexValue() + this.fut.basis);
+  }
+
+  private trackFutures(push: boolean): void {
+    const p = this.futPrice();
+    this.fut.high = Math.max(this.fut.high, p);
+    this.fut.low = Math.min(this.fut.low, p);
+    const pt = { t: this.openMs + this.minute * 60_000, v: p };
+    if (push || !this.fut.series.length) this.fut.series.push(pt);
+    else this.fut.series[this.fut.series.length - 1] = pt;
+  }
+
   private indexPoint(): IndexPoint {
     return { t: this.openMs + this.minute * 60_000, v: this.indexValue() };
   }
@@ -308,6 +334,16 @@ export class MockMarketProvider implements MarketDataProvider, PlaybackControl {
       },
       quotes,
       turnoverHistory: this.turnoverHistory.slice(),
+      futures: {
+        symbol: nearMonthContract(new Date(this.openMs).toISOString().slice(0, 10)).symbol,
+        name: '台指期近月',
+        price: this.futPrice(),
+        prevClose: this.fut.prevClose,
+        high: this.fut.high,
+        low: Number.isFinite(this.fut.low) ? this.fut.low : this.futPrice(),
+        volume: this.fut.volume,
+        series: this.fut.series.slice(),
+      },
     };
   }
 
