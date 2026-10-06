@@ -5,14 +5,14 @@
  *
  * - 每個交易日只要兩次請求（上市一次、上櫃一次）就拿到全部股票的開高低收量。
  * - 第一次執行時會回補近一年；每次最多補 MAX_DATES 天（從最近的日期往回），幾次部署後就補齊。
- * - 輸出 candles/<代號前兩碼>.json：{ asOf, stocks: { 代號: [[日期, 開, 高, 低, 收, 張], …] } }
+ * - 輸出 candles/<代號>.json：[[日期, 開, 高, 低, 收, 張], …]（一檔一個檔案，網頁只下載正在看的那檔）
  * - candles-meta.json 記錄已抓過的日期與休市日，避免重抓。
  */
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 L.P.L.C.-System';
-const MAX_DATES = Number(process.env.CANDLE_MAX_DATES ?? 60);
+const MAX_DATES = Number(process.env.CANDLE_MAX_DATES ?? 40);
 const KEEP_DAYS = 380;
 const GAP_MS = 2500;
 
@@ -114,11 +114,11 @@ async function main(): Promise<void> {
   const done = { twse: new Set(meta.twse), tpex: new Set(meta.tpex) };
   const holidays = new Set(meta.holidays);
 
-  // 讀進現有的分檔
+  // 讀進現有的日 K
   const stocks = new Map<string, Map<string, Row>>();
   for (const f of readdirSync(shardDir).filter((f) => f.endsWith('.json'))) {
-    const j = readJson<{ stocks?: Record<string, Row[]> }>(join(shardDir, f), {});
-    for (const [code, rows] of Object.entries(j.stocks ?? {})) stocks.set(code, new Map(rows.map((r) => [r[0], r])));
+    const rows = readJson<Row[]>(join(shardDir, f), []);
+    if (Array.isArray(rows)) stocks.set(f.slice(0, -5), new Map(rows.map((r) => [r[0], r])));
   }
 
   // 收盤資料大約 14:30 後才公布；更早執行時不抓今天
@@ -165,18 +165,14 @@ async function main(): Promise<void> {
     await sleep(GAP_MS);
   }
 
-  // 依代號前兩碼分檔輸出，只留近一年多
+  // 一檔一個檔案，只留近一年多
   const cutoff = shift(today, -KEEP_DAYS);
-  const shards = new Map<string, Record<string, Row[]>>();
   for (const [code, rows] of stocks) {
     const list = [...rows.values()].filter((r) => r[0] >= cutoff).sort((x, y) => (x[0] < y[0] ? -1 : 1));
-    if (!list.length) continue;
-    const key = code.slice(0, 2);
-    if (!shards.has(key)) shards.set(key, {});
-    shards.get(key)![code] = list;
+    const path = join(shardDir, `${code}.json`);
+    if (list.length) writeFileSync(path, JSON.stringify(list));
+    else rmSync(path, { force: true });
   }
-  const asOf = [...done.twse].sort().at(-1) ?? '';
-  for (const [key, s] of shards) writeFileSync(join(shardDir, `${key}.json`), JSON.stringify({ asOf, stocks: s }));
   const keep = (set: Set<string>) => [...set].filter((d) => d >= cutoff).sort();
   writeFileSync(metaPath, JSON.stringify({ twse: keep(done.twse), tpex: keep(done.tpex), holidays: keep(holidays) } satisfies Meta));
   console.log(`完成：這次抓 ${fetched} 天，共 ${stocks.size} 檔、${done.twse.size} 個上市交易日、${done.tpex.size} 個上櫃交易日；剩 ${Math.max(0, todo.length - fetched)} 天待回補`);

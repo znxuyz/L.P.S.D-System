@@ -13,23 +13,17 @@ export interface DailySeries {
   note?: string;
 }
 
-/** 官方日 K 依代號前兩碼分檔（data/candles/23.json …），同一檔只下載一次。 */
-const shards = new Map<string, Promise<Record<string, [string, number, number, number, number, number][]> | null>>();
-
+/** 官方日 K：一檔一個檔案（data/candles/2330.json），由 GitHub Actions 每天累積。 */
 export async function loadOfficialCandles(code: string): Promise<Candle[] | null> {
-  const key = code.slice(0, 2);
-  if (!shards.has(key)) {
-    shards.set(
-      key,
-      fetch(`data/candles/${key}.json`, { cache: 'no-store' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => (j && typeof j.stocks === 'object' ? j.stocks : null))
-        .catch(() => null),
-    );
+  try {
+    const res = await fetch(`data/candles/${encodeURIComponent(code)}.json`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    const rows = (await res.json()) as [string, number, number, number, number, number][];
+    if (!Array.isArray(rows) || !rows.length) return null;
+    return rows.map(([date, open, high, low, close, volume]) => ({ date, open, high, low, close, volume }));
+  } catch {
+    return null;
   }
-  const rows = (await shards.get(key))?.[code];
-  if (!rows?.length) return null;
-  return rows.map(([date, open, high, low, close, volume]) => ({ date, open, high, low, close, volume }));
 }
 
 function hashCode(code: string): number {
