@@ -770,6 +770,11 @@ button.log-text:hover { color: var(--ink); }
 .ma-legend i, .k-tip i { display: inline-block; width: 12px; height: 2px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 .ma-legend b { color: var(--ink); font-weight: 500; margin-left: 2px; }
 .kchart { position: relative; flex: 1; min-height: 380px; }
+/* 縮放與平移：垂直方向仍交給瀏覽器捲動頁面，水平拖曳與兩指縮放由圖表處理 */
+.kchart { touch-action: pan-y; cursor: grab; user-select: none; -webkit-user-select: none; }
+.kchart.is-dragging { cursor: grabbing; }
+.kc-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.k-range { font-size: 11px; color: var(--muted); }
 .kchart svg { display: block; }
 .kchart .grid { stroke: rgba(255, 255, 255, 0.08); }
 .kchart .axis { fill: var(--muted); font: 11px var(--font); }
