@@ -2,7 +2,7 @@ name: Probe data sources (temporary)
 on:
   push:
     branches: [claude/charming-pasteur-mt3jzo]
-    paths: ['.github/probe/**', '.github/workflows/probe-etf.yml']
+    paths: ['.github/workflows/probe-etf.yml', 'scripts/chips.ts']
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -10,4 +10,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node .github/probe/probe.mjs
+      - run: node scripts/chips.ts /tmp/d
+      - run: |
+          node -e "const c=require('/tmp/d/chips.json');console.log(c.inst?.asOf,c.inst?.days,Object.keys(c.inst?.streak??{}).length,'2330',c.inst?.streak['2330'],'8299',c.inst?.streak['8299']);console.log(JSON.stringify(c.big))"
+          ls /tmp/d/inst /tmp/d/tdcc; du -sh /tmp/d/chips.json

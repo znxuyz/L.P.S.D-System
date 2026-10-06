@@ -26,6 +26,8 @@ export interface ExternalStock {
 }
 
 export interface StockPageContext {
+  /** 真實行情時，基本面哪些是官方資料的說明。 */
+  realSrc?: string;
   /** 查詢的股票不在股票池時才有。 */
   external?: ExternalStock;
   /** 全市場股票目錄（搜尋建議用）。 */
@@ -748,7 +750,9 @@ function renderFund(el: HTMLElement, v: StockView, ctx: StockPageContext, fund: 
   const rating = peerRating(peers);
   const ext = ctx.external;
   const realRatios = ext && (ext.entry.pe || ext.entry.yieldPct !== undefined);
-  const src = realRatios
+  const src = ctx.realSrc
+    ? ctx.realSrc
+    : realRatios
     ? `本益比、殖利率為${ext!.entry.market === 'otc' ? '櫃買中心' : '證交所'} ${ext!.asOf.slice(5).replace('-', '/')} 資料，其餘模擬`
     : '模擬資料';
   setHtml(el, `<h2 class="panel-title">基本面與籌碼 <small>${src}</small></h2>

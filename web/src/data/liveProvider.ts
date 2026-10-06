@@ -107,6 +107,8 @@ function shiftDate(date: string, days: number): string {
 
 export class LiveProvider implements MarketDataProvider {
   readonly mode: 'fugle' | 'twse';
+  /** 換上真實基本面（官方本益比、殖利率、法人、大戶）；每次依股價重算示意基本面後都會再套一次。 */
+  overlay?: (code: string, f: Fundamentals) => void;
   private readonly sourceName: string;
   private readonly client?: FugleClient;
   private readonly mis?: MisClient;
@@ -517,6 +519,7 @@ export class LiveProvider implements MarketDataProvider {
       ma20: base?.ma20 ?? f.ma20 * r,
       ma60: base?.ma60 ?? f.ma60 * r,
     });
+    this.overlay?.(code, stock.fundamentals);
   }
 
   // ------------------------------------------------------------ 20 日常態（日 K）

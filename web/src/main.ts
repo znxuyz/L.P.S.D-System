@@ -27,6 +27,16 @@ import { externalFundamentals } from './data/mockUniverse';
 import type { StockMetrics } from './domain/metrics';
 import { loadOfficialCandles, type DailySeries } from './data/candles';
 import { taipeiDate } from './data/liveProvider';
+import { coverageOf, indexDirectory, loadChips, overlayReal, realNote, type Chips } from './data/realFundamentals';
+
+interface RealState {
+  index: ReturnType<typeof indexDirectory>;
+  chips: Chips | null;
+  /** 選股頁的資料來源說明。 */
+  note: string;
+  /** 基本面面板標題旁的簡短說明。 */
+  label: string;
+}
 
 const CONVENTION_KEY = 'lplc.convention';
 
@@ -104,6 +114,7 @@ class App {
     private readonly universe: Universe,
     private readonly provider: MarketDataProvider & Partial<PlaybackControl>,
     private readonly settings: SourceSettings,
+    private readonly real: RealState | null = null,
   ) {
     this.stockCodes = new Set(universe.stocks.map((s) => s.code));
     this.fundamentals = new Map(
@@ -199,6 +210,7 @@ class App {
         dailyStartedAt: this.dailyLoading.get(this.analyzed),
         dailySource: this.live && this.settings.fugleKey ? 'fugle' : !this.live && this.stockCodes.has(this.analyzed) ? 'mock' : 'official',
         live: this.live,
+        realSrc: this.real?.label,
         today: taipeiDate(Date.now()),
       });
     }
@@ -210,7 +222,7 @@ class App {
         this.universe,
         this.strategy,
         this.focus?.kind === 'stock' ? this.focus.id : null,
-        this.live ? '股價為真實行情；EPS、股利、法人與大戶籌碼、特殊事件目前仍是模擬資料，篩選結果僅供介面測試。' : undefined,
+        this.live ? (this.real?.note ?? '股價為真實行情；EPS、股利、法人與大戶籌碼、特殊事件目前仍是模擬資料，篩選結果僅供介面測試。') : undefined,
       );
       renderDetail($('#screen-detail'), ctx);
     }
@@ -304,6 +316,7 @@ class App {
     if (!f) {
       // 證交所 / 櫃買的本益比、殖利率是用收盤價算的，所以用收盤價換回 EPS 與股利
       f = externalFundamentals(code, industryId, entry.close, { pe: entry.pe, yieldPct: entry.yieldPct });
+      if (this.real) overlayReal(code, f, this.real.index, this.real.chips);
       this.extFundamentals.set(code, f);
     }
     return { stock, f, entry, asOf: this.directory?.asOf ?? '', live: !!q };
@@ -583,7 +596,18 @@ async function main(): Promise<void> {
       ? new MockMarketProvider({ speed: 60 })
       : new LiveProvider({ fugleKey: settings.fugleKey, misProxy: settings.source === 'twse' ? settings.misProxy : undefined });
   const universe = await provider.loadUniverse();
-  new App(universe, provider, settings);
+  // 真實行情：股票池的本益比、殖利率、法人、大戶換成官方資料
+  let real: RealState | null = null;
+  if (provider instanceof LiveProvider) {
+    const [directory, chips] = await Promise.all([loadStockDirectory(), loadChips()]);
+    const index = indexDirectory(directory);
+    const cov = coverageOf({ directory, chips });
+    const parts = [cov.ratios && '本益比、殖利率', cov.inst && '法人', cov.big && '千張大戶'].filter(Boolean);
+    real = { index, chips, note: realNote(cov, chips), label: parts.length ? `${parts.join('、')}為官方資料，其餘模擬` : '模擬資料' };
+    provider.overlay = (code, f) => overlayReal(code, f, index, chips);
+    for (const s of universe.stocks) if (s.fundamentals) overlayReal(s.code, s.fundamentals, index, chips);
+  }
+  new App(universe, provider, settings, real);
 }
 
 void main();
