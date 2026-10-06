@@ -36,13 +36,31 @@ interface Entry {
   pb?: number;
 }
 
-async function getJson(url: string): Promise<any[]> {
-  const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(60_000) });
-  if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
-  const j = await res.json();
-  if (!Array.isArray(j)) throw new Error(`${url} → 不是陣列`);
-  return j;
+/** 抓 JSON 陣列；失敗會重試，最後仍失敗才丟出錯誤。 */
+async function getJson(url: string, tries = 3): Promise<any[]> {
+  let last: unknown;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(90_000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const j = await res.json();
+      if (!Array.isArray(j) || j.length === 0) throw new Error('不是陣列或沒有資料');
+      console.log(`  ${url}：${j.length} 筆`);
+      return j;
+    } catch (e) {
+      last = e;
+      await new Promise((r) => setTimeout(r, 3000 * (i + 1)));
+    }
+  }
+  throw new Error(`${url} → ${last}`);
 }
+
+/** 選用的資料：失敗時記下來、回傳空陣列，不讓整份目錄失敗。 */
+const optional = (url: string) =>
+  getJson(url).catch((e) => {
+    console.log(`  ✗ ${e}`);
+    return [] as any[];
+  });
 
 const num = (v: unknown): number | undefined => {
   const n = Number(String(v ?? '').replace(/[,+\s]/g, ''));
@@ -59,13 +77,18 @@ const wanted = (code: string) => /^\d{4}$/.test(code) || /^00\d{2,4}[A-Z]?$/.tes
 
 async function main(): Promise<void> {
   const dir = process.argv[2] ?? 'data';
-  const [twDay, twInfo, twPe, otDay, otInfo, otPe] = await Promise.all([
-    getJson('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL'),
-    getJson('https://openapi.twse.com.tw/v1/opendata/t187ap03_L').catch(() => []),
-    getJson('https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL').catch(() => []),
-    getJson('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes'),
-    getJson('https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O').catch(() => []),
-    getJson('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis').catch(() => []),
+  // 同一個網站的請求依序送出，避免同時打太多被拒絕
+  const [[twDay, twInfo, twPe], [otDay, otInfo, otPe]] = await Promise.all([
+    (async () => [
+      await getJson('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL'),
+      await optional('https://openapi.twse.com.tw/v1/opendata/t187ap03_L'),
+      await optional('https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL'),
+    ])(),
+    (async () => [
+      await getJson('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes'),
+      await optional('https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O'),
+      await optional('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis'),
+    ])(),
   ]);
 
   const industry = new Map<string, string>();
@@ -114,6 +137,8 @@ async function main(): Promise<void> {
   const clean = stocks.map((s) => Object.fromEntries(Object.entries(s).filter(([, v]) => v !== undefined && v !== '')));
   if (clean.length < 1000) throw new Error(`股票數量太少（${clean.length}），不覆蓋舊資料`);
   writeFileSync(join(dir, 'stocks.json'), JSON.stringify({ asOf, stocks: clean }));
+  const withInd = (m: string) => stocks.filter((s) => s.market === m && s.industry).length;
+  console.log(`產業別：上市 ${withInd('tse')} 檔、上櫃 ${withInd('otc')} 檔`);
   console.log(`完成：${asOf} 上市 ${stocks.filter((s) => s.market === 'tse').length} 檔、上櫃 ${stocks.filter((s) => s.market === 'otc').length} 檔`);
 }
 
