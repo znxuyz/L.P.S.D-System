@@ -775,6 +775,48 @@ button.log-text:hover { color: var(--ink); }
 .kchart.is-dragging { cursor: grabbing; }
 .kc-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .k-range { font-size: 11px; color: var(--muted); }
+
+/* ---------------- 拉普拉斯核心載入動畫 ---------------- */
+.lc { display: flex; align-items: center; justify-content: center; gap: 28px; height: 100%; min-height: 300px; padding: 20px; }
+.lc.is-compact { min-height: 0; gap: 14px; justify-content: flex-start; padding: 8px 0; }
+.lc-svg { width: 190px; height: 190px; flex: none; overflow: visible; }
+.lc.is-compact .lc-svg { width: 72px; height: 72px; }
+.lc-ring { fill: none; stroke-width: 1.6; transform-box: fill-box; transform-origin: center; }
+.lc-ring-1 { stroke-dasharray: 4 7 22 7; opacity: 0.85; animation: lc-spin 9s linear infinite; }
+.lc-ring-2 { stroke-dasharray: 60 20 6 20; opacity: 0.6; animation: lc-spin 5s linear infinite reverse; }
+.lc-orbit { transform-origin: 80px 64px; animation: lc-spin 4s linear infinite; }
+.lc-orbit circle { fill: #8ff0ff; filter: drop-shadow(0 0 4px #8ff0ff); }
+.lc-glow { transform-box: fill-box; transform-origin: center; animation: lc-breathe 2.4s ease-in-out infinite; }
+.lc-pupil { fill: #0b1020; stroke: #e9fdff; stroke-width: 1.2; animation: lc-blink 4.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.lc-scan { stroke: rgba(143, 240, 255, 0.55); stroke-width: 1; animation: lc-scan 2.6s ease-in-out infinite; }
+.lc-candle { transform-box: fill-box; transform-origin: bottom; animation: lc-grow 1.8s ease-out infinite; opacity: 0.9; }
+.lc-candle.up { fill: var(--up); }
+.lc-candle.down { fill: var(--down); }
+.lc-text { display: grid; gap: 10px; min-width: 0; }
+.lc-title { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: 0.12em; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.lc-title span { margin-left: 10px; font-size: 12px; letter-spacing: 0.2em; color: var(--muted); -webkit-text-fill-color: var(--muted); }
+.lc-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; font-size: 13px; }
+.lc-step { display: flex; align-items: center; gap: 9px; color: var(--muted); }
+.lc-step i { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid currentColor; flex: none; position: relative; }
+.lc-step.is-done { color: var(--ink-2); }
+.lc-step.is-done i { background: var(--accent); border-color: var(--accent); }
+.lc-step.is-done i::after { content: ''; position: absolute; left: 4px; top: 1px; width: 3px; height: 7px; border: solid #071022; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.lc-step.is-active { color: var(--ink); }
+.lc-step.is-active i { border-color: var(--accent); border-top-color: transparent; animation: lc-spin 0.9s linear infinite; }
+.lc-elapsed { margin: 0; font-size: 11.5px; color: var(--muted); }
+@keyframes lc-spin { to { transform: rotate(360deg); } }
+@keyframes lc-breathe { 0%, 100% { transform: scale(0.85); opacity: 0.75; } 50% { transform: scale(1.12); opacity: 1; } }
+@keyframes lc-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+@keyframes lc-scan { 0%, 100% { transform: translateY(-38px); opacity: 0; } 15%, 85% { opacity: 1; } 50% { transform: translateY(38px); } }
+@keyframes lc-grow { 0% { transform: scaleY(0); opacity: 0; } 35% { transform: scaleY(1); opacity: 0.95; } 80% { opacity: 0.95; } 100% { transform: scaleY(1); opacity: 0; } }
+@media (max-width: 720px) {
+  .lc { flex-direction: column; gap: 14px; min-height: 260px; }
+  .lc-svg { width: 150px; height: 150px; }
+  .lc.is-compact { flex-direction: row; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-ring-1, .lc-ring-2, .lc-orbit, .lc-glow, .lc-pupil, .lc-scan, .lc-candle, .lc-step.is-active i { animation: none; }
+}
 .kchart svg { display: block; }
 .kchart .grid { stroke: rgba(255, 255, 255, 0.08); }
 .kchart .axis { fill: var(--muted); font: 11px var(--font); }

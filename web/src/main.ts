@@ -81,7 +81,8 @@ class App {
   /** 個股分析頁目前的股票。 */
   private analyzed = stockFromHash() ?? '2330';
   private readonly daily = new Map<string, DailySeries>();
-  private readonly dailyLoading = new Set<string>();
+  /** 正在下載日 K 的股票與開始時間（載入動畫顯示已等待幾秒）。 */
+  private readonly dailyLoading = new Map<string, number>();
   /** 全市場股票目錄（個股分析頁查詢股票池以外的股票用）；undefined = 還沒載入。 */
   private directory: StockDirectory | null | undefined;
   /** 股票池以外股票的即時報價（真實行情模式每 30 秒更新）。 */
@@ -195,6 +196,8 @@ class App {
         pal: this.pal,
         history: this.history,
         daily: this.daily.get(this.analyzed),
+        dailyStartedAt: this.dailyLoading.get(this.analyzed),
+        dailySource: this.live && this.settings.fugleKey ? 'fugle' : 'mock',
         live: this.live,
         today: taipeiDate(Date.now()),
       });
@@ -310,7 +313,7 @@ class App {
     if (this.daily.has(code) || this.dailyLoading.has(code) || !this.provider.dailyCandles) return;
     // 股票池以外的股票要等目錄載入、知道收盤價才能產生示意日 K
     if (!this.stockCodes.has(code) && !prevClose && !this.live) return;
-    this.dailyLoading.add(code);
+    this.dailyLoading.set(code, Date.now());
     this.provider
       .dailyCandles(code, prevClose)
       .then((series) => this.daily.set(code, series))
