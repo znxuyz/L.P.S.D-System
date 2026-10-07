@@ -6,10 +6,10 @@
  * - EPS 年增、毛利率與營益率變化、現金流：公開資訊觀測站（海外版 mopsov）的彙總報表，
  *   最新一季與去年同季的「累計」數字相比。每季只抓一次，最新一季三天內重抓（有公司晚申報）。
  * - 連續配息年數：證交所除權息計算結果（TWT49U）、櫃買除權息結果，每年一份，過去的年份只抓一次。
- * - 特殊事件：證交所、櫃買每日重大訊息，依主旨關鍵字分類，保留 45 天。
+ * - 特殊事件：證交所、櫃買每日重大訊息，依主旨關鍵字分類；檔案全部保留，近 45 天的算進特殊事件。
  * - 輸出 fundamentals.json 給網頁讀。
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { classifyEvent, parseMopsTables, type Table } from '../web/src/data/mopsParse.ts';
 
@@ -135,7 +135,27 @@ async function financials(dir: string, out: Record<string, FinRow>): Promise<str
     }
     console.log(`  ${market}：${n} 家`);
   }
+  await archiveQuarters(finDir, y, q);
   return `${y + 1911}Q${q}`;
+}
+
+/** 回補 START 以後每一季的彙總報表（只存檔備查，每次最多 FIN_MAX 份）。 */
+async function archiveQuarters(finDir: string, y: number, q: number): Promise<void> {
+  const start = Number((process.env.ARCHIVE_START ?? '2025-01-01').slice(0, 4)) - 1911;
+  const max = Number(process.env.FIN_MAX ?? 6);
+  let n = 0;
+  for (let yy = y; yy >= start; yy--) {
+    for (let qq = yy === y ? q : 4; qq >= 1; qq--) {
+      for (const market of ['sii', 'otc'] as const) {
+        for (const kind of ['sb04', 'sb06', 'sb20'] as const) {
+          const path = join(finDir, `${yy}Q${qq}-${market}-${kind}.json`);
+          if (existsSync(path)) continue;
+          if (n++ >= max) return console.log('  財報回補：這次額度用完，下次繼續');
+          await cached(path, Infinity, () => mopsReport(kind, market, yy, qq));
+        }
+      }
+    }
+  }
 }
 
 /** 某一年有配現金股利的股票。 */
@@ -188,11 +208,12 @@ async function events(dir: string, out: Record<string, FinRow>): Promise<void> {
         const code = String(r[key('公司代號')] ?? '').trim();
         const subject = String(r[key('主旨')] ?? '').replace(/\s+/g, ' ').trim();
         const roc = String(r[key('發言日期')] ?? '').trim();
-        const type = classifyEvent(subject);
-        if (!wanted(code) || !type || roc.length < 7) continue;
+        // 所有重大訊息都存（主旨全文），分類規則之後改了也能重新判斷
+        const type = classifyEvent(subject) ?? '';
+        if (!wanted(code) || !subject || roc.length < 7) continue;
         const date = `${Number(roc.slice(0, -4)) + 1911}-${roc.slice(-4, -2)}-${roc.slice(-2)}`;
         if (!byDate.has(date)) byDate.set(date, []);
-        byDate.get(date)!.push([code, type, subject.slice(0, 80)]);
+        byDate.get(date)!.push([code, type, subject]);
       }
       for (const [date, list] of byDate) {
         const path = join(evDir, `${date}.json`);
@@ -208,10 +229,8 @@ async function events(dir: string, out: Record<string, FinRow>): Promise<void> {
   const cutoff = new Date(Date.now() - EVENT_DAYS * 86400_000).toISOString().slice(0, 10);
   let n = 0;
   for (const f of readdirSync(evDir).sort()) {
-    if (f.slice(0, 10) < cutoff) {
-      rmSync(join(evDir, f));
-      continue;
-    }
+    // 檔案全部保留，只有近 EVENT_DAYS 天算進「特殊事件」
+    if (f.slice(0, 10) < cutoff) continue;
     for (const [code, , subject] of readJson<Array<[string, string, string]>>(join(evDir, f), [])) {
       // 讀取時用最新的規則重新分類，規則修正後舊紀錄也會跟著更正
       const type = classifyEvent(subject);
