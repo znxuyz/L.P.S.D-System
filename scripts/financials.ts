@@ -128,7 +128,9 @@ async function financials(dir: string, out: Record<string, FinRow>): Promise<str
       // 自由現金流（近似）= 營業活動現金流 + 投資活動現金流
       const ocf = pick(cf?.[code], '營業活動之淨現金流入');
       const icf = pick(cf?.[code], '投資活動之淨現金流入');
-      if (Number.isFinite(ocf) && Number.isFinite(icf)) r.fcfPositive = ocf + icf > 0;
+      // 金融業（28 開頭）的現金流以存放款為主，這個近似沒有意義，視為不適用（通過）
+      if (code.startsWith('28')) r.fcfPositive = true;
+      else if (Number.isFinite(ocf) && Number.isFinite(icf)) r.fcfPositive = ocf + icf > 0;
       n++;
     }
     console.log(`  ${market}：${n} 家`);

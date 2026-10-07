@@ -22,5 +22,6 @@ describe('classifyEvent', () => {
     expect(classifyEvent('公告本公司上修115年財測')).toBe('guidance-up');
     expect(classifyEvent('獲經濟部科專計畫補助')).toBe('subsidy');
     expect(classifyEvent('公告本公司9月營收')).toBeNull();
+    expect(classifyEvent('公告本公司115年9月合併營業收入')).toBeNull();
   });
 });
