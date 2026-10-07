@@ -6,6 +6,8 @@
  * - 5 年本益比區間：證交所 BWIBBU_d、櫃買本益比查詢（某一天全市場），每月取月底一天，共 60 個月。
  *   存在 pe/<年-月>.json，過去的月份只抓一次；輸出 pe5y.json：{ 代號: [最低, 25%, 中位數, 75%, 最高] }。
  * - 每日本益比、殖利率、淨值比：同上的來源，START（預設 2025-01-01）以後每天一份，存在 ratios/<日期>.json。
+ * - 除權息明細：證交所 TWT49U、櫃買除權息結果，START 以後每年一份 exrights/<年>.json（回測還原股價用）。
+ * - 加權指數日 K：證交所 MI_5MINS_HIST（每月一次請求），index/TAIEX.json（回測比較基準）。
  * - 重大訊息：公開資訊觀測站「歷史重大訊息」（某一天全市場），START 以後全部回補，主旨全文存在 events/<日期>.json。
  * - 千張大戶 4 週前的持股比率：集保「股權分散表查詢」（可查過去一年，但一次一檔）。
  *   先補「最新一週往前 4 週」那一週（chips.ts 算 4 週變化用），再由新到舊補其他週，存進 tdcc/<日期>.json。
@@ -23,6 +25,12 @@ const TDCC_MAX = Number(process.env.TDCC_MAX ?? 500);
 const START = process.env.ARCHIVE_START ?? '2025-01-01';
 const EVENT_MAX = Number(process.env.EVENT_MAX ?? 25);
 const RATIO_MAX = Number(process.env.RATIO_MAX ?? 60);
+/** 這次執行的截止時間（毫秒）；到了就不再發新請求，已抓到的照常存檔。 */
+const DEADLINE = Number(process.env.DEADLINE ?? Infinity);
+const timeUp = () => Date.now() > DEADLINE;
+/** 這次要跑哪些部分（逗號分隔）；預設全部。讓不同網站的部分可以分開平行執行。 */
+const PARTS = new Set((process.env.HISTORY_PARTS ?? 'pe,ratios,div,index,events,tdcc').split(','));
+
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const num = (v: unknown) => {
@@ -209,13 +217,14 @@ async function tdccHistory(dir: string): Promise<void> {
   let ok = 0;
   let fail = 0;
   for (const target of targets) {
-    if (budget <= 0 || fail > 30) break;
+    if (budget <= 0 || fail > 30 || timeUp()) break;
     const path = join(tdccDir, `${target}.json`);
     const have = readJson<Record<string, number>>(path, {});
     const todo = codes.filter((c) => have[c] === undefined);
     if (!todo.length) continue;
     console.log(`集保 ${target}：已有 ${Object.keys(have).length} 檔，還缺 ${todo.length} 檔`);
     for (const code of todo.slice(0, budget)) {
+      if (timeUp()) break;
       budget--;
       try {
         const v = await tdccBig(s, code, target.replace(/-/g, ''));
@@ -271,6 +280,7 @@ async function eventHistory(dir: string): Promise<void> {
   const todo = weekdaysSince(START).filter((d) => !done.has(d));
   console.log(`重大訊息：還缺 ${todo.length} 天，這次最多 ${EVENT_MAX} 天`);
   for (const date of todo.slice(0, EVENT_MAX)) {
+    if (timeUp()) break;
     try {
       const rows = await eventsOn(date);
       let n = 0;
@@ -324,6 +334,7 @@ async function ratioHistory(dir: string): Promise<void> {
   console.log(`每日本益比：還缺 ${todo.length} 天，這次最多 ${RATIO_MAX} 天`);
   let n = 0;
   for (const date of todo.slice(0, RATIO_MAX)) {
+    if (timeUp()) break;
     try {
       const r = await ratiosOn(date);
       if (r && Object.keys(r).length > 500) {
@@ -339,9 +350,93 @@ async function ratioHistory(dir: string): Promise<void> {
   console.log(`每日本益比：這次補 ${n} 天`);
 }
 
+
+// ------------------------------------------------------------ 除權息明細（回測還原股價用）
+
+type ExRow = [string, string, number, number, number, string];
+
+/** 某一年的除權息明細：[日期, 代號, 除權息前收盤, 參考價, 權值+息值, 權/息]。 */
+async function exRightsYear(year: number): Promise<ExRow[]> {
+  const out: ExRow[] = [];
+  const tw = await getJson(`https://www.twse.com.tw/rwd/zh/exRight/TWT49U?startDate=${year}0101&endDate=${year}1231&response=json`);
+  if (tw?.stat !== 'OK') throw new Error(`TWT49U ${year}：${tw?.stat}`);
+  const f = (name: string) => tw.fields.findIndex((x: string) => x.startsWith(name));
+  for (const r of tw.data ?? []) {
+    const date = String(r[f('資料日期')]).match(/(\d+)年(\d+)月(\d+)日/);
+    const code = String(r[f('股票代號')]).trim();
+    if (!date || !wanted(code)) continue;
+    out.push([`${Number(date[1]) + 1911}-${date[2]}-${date[3]}`, code, num(r[f('除權息前收盤價')]), num(r[f('除權息參考價')]), num(r[f('權值+息值')]), String(r[f('權/息')]).trim()]);
+  }
+  await sleep(2500);
+  const tp = await getJson(`https://www.tpex.org.tw/www/zh-tw/bulletin/exDailyQ?startDate=${year}%2F01%2F01&endDate=${year}%2F12%2F31&response=json`);
+  const table = (tp?.tables ?? []).find((t: any) => Array.isArray(t.fields) && t.fields.includes('代號'));
+  if (table) {
+    const g = (name: string) => table.fields.indexOf(name);
+    for (const r of table.data ?? []) {
+      const date = rocToIso(String(r[g('除權息日期')]));
+      const code = String(r[g('代號')]).trim();
+      if (!date || !wanted(code)) continue;
+      out.push([date, code, num(r[g('除權息前收盤價')]), num(r[g('除權息參考價')]), num(r[g('權值+息值')]), String(r[g('權/息')]).trim()]);
+    }
+  }
+  return out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : 1));
+}
+
+async function exRightsHistory(dir: string): Promise<void> {
+  const exDir = join(dir, 'exrights');
+  mkdirSync(exDir, { recursive: true });
+  const thisYear = new Date(Date.now() + 8 * 3600_000).getUTCFullYear();
+  for (let y = Number(START.slice(0, 4)); y <= thisYear; y++) {
+    const path = join(exDir, `${y}.json`);
+    // 過去的年份只抓一次；今年每次更新
+    if (y < thisYear && existsSync(path)) continue;
+    if (timeUp()) break;
+    try {
+      const rows = await exRightsYear(y);
+      writeFileSync(path, JSON.stringify(rows));
+      console.log(`除權息 ${y}：${rows.length} 筆`);
+    } catch (e) {
+      console.log(`除權息 ${y} ✗ ${e}`);
+    }
+    await sleep(2500);
+  }
+}
+
+// ------------------------------------------------------------ 加權指數日 K（回測比較基準）
+
+async function taiexHistory(dir: string): Promise<void> {
+  const idxDir = join(dir, 'index');
+  mkdirSync(idxDir, { recursive: true });
+  const path = join(idxDir, 'TAIEX.json');
+  const rows = new Map(readJson<Array<[string, number, number, number, number]>>(path, []).map((r) => [r[0], r]));
+  const now = new Date(Date.now() + 8 * 3600_000);
+  const months: string[] = [];
+  for (let d = new Date(`${START.slice(0, 7)}-01T00:00:00Z`); d <= now; d.setUTCMonth(d.getUTCMonth() + 1)) months.push(iso(d).slice(0, 7));
+  const have = new Set([...rows.keys()].map((d) => d.slice(0, 7)));
+  // 沒抓過的月份，加上這個月與上個月（可能還沒收完）
+  const todo = months.filter((m, i) => !have.has(m) || i >= months.length - 2);
+  for (const m of todo) {
+    if (timeUp()) break;
+    try {
+      const j = await getJson(`https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST?date=${m.replace('-', '')}01&response=json`);
+      for (const r of j?.data ?? []) {
+        const date = rocToIso(String(r[0]));
+        if (date) rows.set(date, [date, num(r[1]), num(r[2]), num(r[3]), num(r[4])]);
+      }
+    } catch (e) {
+      console.log(`加權指數 ${m} ✗ ${e}`);
+    }
+    await sleep(2500);
+  }
+  writeFileSync(path, JSON.stringify([...rows.values()].sort((a, b) => (a[0] < b[0] ? -1 : 1))));
+  console.log(`加權指數：${rows.size} 天`);
+}
+
 const dir = process.argv[2] ?? 'data';
 mkdirSync(dir, { recursive: true });
-await peHistory(dir);
-await ratioHistory(dir);
-await eventHistory(dir);
-await tdccHistory(dir);
+if (PARTS.has('pe')) await peHistory(dir);
+if (PARTS.has('index')) await taiexHistory(dir);
+if (PARTS.has('div')) await exRightsHistory(dir);
+if (PARTS.has('ratios')) await ratioHistory(dir);
+if (PARTS.has('events')) await eventHistory(dir);
+if (PARTS.has('tdcc')) await tdccHistory(dir);

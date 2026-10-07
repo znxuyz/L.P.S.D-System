@@ -2,7 +2,7 @@ name: Update market data
 
 # 抓官方資料存進 data 分支；跑完會觸發「Deploy to GitHub Pages」把新資料放上網站。
 # - 收盤後（台北 18:37、22:07）：每日資料（主動式 ETF、股票目錄、日 K、籌碼、財報、重大訊息）。
-# - 每小時：回補 2025-01-01 以後的歷史資料，每次有額度上限，補完之後幾乎不會再發請求。
+# - 每小時：回補 2025-01-01 以後的歷史資料（留作之後模擬交易回測用），每次跑 50 分鐘，補完之後幾乎不會再發請求。
 # - 抓資料的程式有改動時：馬上跑一次。
 on:
   push:
@@ -46,39 +46,35 @@ jobs:
             git -C .data remote add origin "$DATA_REMOTE"
           fi
 
-      - name: 抓主動式 ETF 持股
-        if: env.HOURLY != 'true'
-        continue-on-error: true
-        run: node scripts/active-etf.ts .data
-
-      - name: 更新全市場股票目錄
-        if: env.HOURLY != 'true'
-        continue-on-error: true
-        run: node scripts/stock-list.ts .data
-
-      # 證交所、櫃買每日收盤行情累積成日 K（2025-01-01 起，每次最多回補 80 天）
-      - name: 日 K
-        continue-on-error: true
-        timeout-minutes: 15
-        run: node scripts/candles.ts .data
-
-      # 回補歷史：5 年本益比、每日本益比、重大訊息、集保千張大戶（每次有額度上限）
-      - name: 回補歷史資料
-        continue-on-error: true
-        timeout-minutes: 45
-        run: node scripts/history.ts .data
-
-      # 法人買賣超（2025-01-01 起）與千張大戶 4 週變化
-      - name: 籌碼
-        continue-on-error: true
-        timeout-minutes: 10
-        run: node scripts/chips.ts .data
-
-      # 財報（每季，有快取並回補 2025 年起各季）、連續配息年數、特殊事件
-      - name: 財報、股利與重大訊息
-        continue-on-error: true
-        timeout-minutes: 25
-        run: node scripts/financials.ts .data
+      # 三個網站各一組、同時進行（每組只對自己的網站發請求，間隔不變，不會加重單一網站的負擔）。
+      # 每次最多跑 50 分鐘，時間到就停下來存檔，下一次從斷點繼續。
+      - name: 抓資料（證交所／櫃買、公開資訊觀測站、集保 平行）
+        timeout-minutes: 60
+        env:
+          CANDLE_MAX_DATES: '1000'
+          INST_MAX: '1000'
+          RATIO_MAX: '1000'
+          EVENT_MAX: '1000'
+          FIN_MAX: '100'
+          TDCC_MAX: '1000000'
+        run: |
+          set +e
+          export DEADLINE=$(( $(date +%s) * 1000 + 50 * 60 * 1000 ))
+          (
+            if [ "$HOURLY" != true ]; then node scripts/active-etf.ts .data; node scripts/stock-list.ts .data; fi
+            node scripts/candles.ts .data
+            node scripts/chips.ts .data
+            HISTORY_PARTS=pe,index,div,ratios node scripts/history.ts .data
+          ) > twse.log 2>&1 &
+          (
+            HISTORY_PARTS=events node scripts/history.ts .data
+            node scripts/financials.ts .data
+          ) > mops.log 2>&1 &
+          ( HISTORY_PARTS=tdcc node scripts/history.ts .data ) > tdcc.log 2>&1 &
+          wait
+          # 集保補完之後重算一次千張大戶變化（不發請求的部分很快）
+          INST_MAX=0 HOURLY=true node scripts/chips.ts .data > chips2.log 2>&1
+          for f in twse mops tdcc chips2; do echo "::group::$f"; tail -n 80 $f.log; echo "::endgroup::"; done
 
       # data 分支只留一個版本（舊版本沒有用，避免儲存庫越來越大）
       - name: 存回 data 分支

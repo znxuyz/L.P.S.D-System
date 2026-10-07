@@ -17,6 +17,10 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const MOPS = 'https://mopsov.twse.com.tw/mops/web';
 const DIV_YEARS = 11;
 const EVENT_DAYS = 45;
+/** 這次執行的截止時間（毫秒）；到了就不再發新請求，已抓到的照常存檔。 */
+const DEADLINE = Number(process.env.DEADLINE ?? Infinity);
+const timeUp = () => Date.now() > DEADLINE;
+
 
 type Market = 'sii' | 'otc';
 
@@ -150,7 +154,7 @@ async function archiveQuarters(finDir: string, y: number, q: number): Promise<vo
         for (const kind of ['sb04', 'sb06', 'sb20'] as const) {
           const path = join(finDir, `${yy}Q${qq}-${market}-${kind}.json`);
           if (existsSync(path)) continue;
-          if (n++ >= max) return console.log('  財報回補：這次額度用完，下次繼續');
+          if (n++ >= max || timeUp()) return console.log('  財報回補：這次額度或時間用完，下次繼續');
           await cached(path, Infinity, () => mopsReport(kind, market, yy, qq));
         }
       }

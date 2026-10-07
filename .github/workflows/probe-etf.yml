@@ -1,0 +1,21 @@
+name: Probe data sources (temporary)
+on:
+  push:
+    branches: [claude/charming-pasteur-mt3jzo]
+    paths: ['.github/workflows/probe-etf.yml', 'scripts/**']
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      ARCHIVE_START: '2025-01-01'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: git clone --depth 1 --branch data https://github.com/${{ github.repository }}.git .data
+      - run: |
+          export DEADLINE=$(( $(date +%s) * 1000 + 3 * 60 * 1000 ))
+          ( HISTORY_PARTS=index,div node scripts/history.ts .data ) > a.log 2>&1 &
+          ( HISTORY_PARTS=tdcc node scripts/history.ts .data ) > b.log 2>&1 &
+          wait; cat a.log; tail -5 b.log
+          node -e "const t=require('./.data/index/TAIEX.json');console.log(t.length,JSON.stringify(t.slice(0,2)),JSON.stringify(t.slice(-2)));const e=require('./.data/exrights/2025.json');console.log(e.length,JSON.stringify(e.filter(r=>r[1]==='2330')),JSON.stringify(e.find(r=>r[1]==='8299')))"
