@@ -158,14 +158,20 @@ function main(dir: string): void {
   if (weeks.length >= 2) {
     const latest = weeks[weeks.length - 1];
     const asOf = latest.replace(/\.json$/, '');
-    // 和 4 週前比；還沒累積到 4 週時用最舊的一週
+    // 每檔各自和 4 週前比（history.ts 會回補那一週）；那一週沒有這檔時，用最接近的較新一週
     const target = shift(asOf, -28);
-    const from = weeks.find((w) => w.replace(/\.json$/, '') >= target) ?? weeks[0];
-    const a = readJson<Record<string, number>>(join(dir, 'tdcc', from), {});
+    const older = weeks.slice(0, -1).map((w) => ({ date: w.replace(/\.json$/, ''), data: readJson<Record<string, number>>(join(dir, 'tdcc', w), {}) }));
     const b = readJson<Record<string, number>>(join(dir, 'tdcc', latest), {});
     const chg: Record<string, number> = {};
-    for (const [code, v] of Object.entries(b)) if (a[code] !== undefined) chg[code] = Math.round((v - a[code]) * 100) / 100;
-    out.big = { asOf, from: from.replace(/\.json$/, ''), chg };
+    const used = new Map<string, number>();
+    for (const [code, v] of Object.entries(b)) {
+      const base = older.find((w) => w.date >= target && w.data[code] !== undefined) ?? older.find((w) => w.data[code] !== undefined);
+      if (!base) continue;
+      chg[code] = Math.round((v - base.data[code]) * 100) / 100;
+      used.set(base.date, (used.get(base.date) ?? 0) + 1);
+    }
+    const from = [...used].sort((x, y) => y[1] - x[1])[0]?.[0] ?? asOf;
+    out.big = { asOf, from, chg };
   }
   writeFileSync(join(dir, 'chips.json'), JSON.stringify(out));
   console.log(`完成：法人 ${instFiles.length} 天、集保 ${weeks.length} 週`);

@@ -12,7 +12,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 L.P.L.C.-System';
-const MAX_DATES = Number(process.env.CANDLE_MAX_DATES ?? 40);
+const MAX_DATES = Number(process.env.CANDLE_MAX_DATES ?? 80);
 const KEEP_DAYS = 380;
 const GAP_MS = 2500;
 

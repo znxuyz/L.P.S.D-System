@@ -27,12 +27,13 @@ import { externalFundamentals } from './data/mockUniverse';
 import type { StockMetrics } from './domain/metrics';
 import { loadOfficialCandles, type DailySeries } from './data/candles';
 import { taipeiDate } from './data/liveProvider';
-import { coverageOf, indexDirectory, loadChips, loadFinancials, overlayReal, realNote, type Chips, type FinData } from './data/realFundamentals';
+import { coverageOf, indexDirectory, loadChips, loadFinancials, loadPeBands, overlayReal, realNote, type Chips, type FinData, type PeBands } from './data/realFundamentals';
 
 interface RealState {
   index: ReturnType<typeof indexDirectory>;
   chips: Chips | null;
   fin: FinData | null;
+  pe: PeBands | null;
   /** 選股頁的資料來源說明。 */
   note: string;
   /** 基本面面板標題旁的簡短說明。 */
@@ -317,7 +318,7 @@ class App {
     if (!f) {
       // 證交所 / 櫃買的本益比、殖利率是用收盤價算的，所以用收盤價換回 EPS 與股利
       f = externalFundamentals(code, industryId, entry.close, { pe: entry.pe, yieldPct: entry.yieldPct });
-      if (this.real) overlayReal(code, f, this.real.index, this.real.chips, this.real.fin);
+      if (this.real) overlayReal(code, f, this.real.index, this.real.chips, this.real.fin, this.real.pe);
       this.extFundamentals.set(code, f);
     }
     return { stock, f, entry, asOf: this.directory?.asOf ?? '', live: !!q };
@@ -600,20 +601,21 @@ async function main(): Promise<void> {
   // 真實行情：股票池的本益比、殖利率、法人、大戶換成官方資料
   let real: RealState | null = null;
   if (provider instanceof LiveProvider) {
-    const [directory, chips, fin] = await Promise.all([loadStockDirectory(), loadChips(), loadFinancials()]);
+    const [directory, chips, fin, pe] = await Promise.all([loadStockDirectory(), loadChips(), loadFinancials(), loadPeBands()]);
     const index = indexDirectory(directory);
-    const cov = coverageOf({ directory, chips, fin });
-    const parts = [cov.ratios && '本益比、殖利率', cov.inst && '法人', cov.big && '千張大戶', cov.quarter && '財報', cov.dividends && '配息', cov.events && '事件'].filter(Boolean);
-    const allReal = cov.ratios && cov.inst && cov.big && cov.quarter && cov.dividends && cov.events;
+    const cov = coverageOf({ directory, chips, fin, pe });
+    const parts = [cov.ratios && '本益比、殖利率', cov.inst && '法人', cov.big && '千張大戶', cov.quarter && '財報', cov.dividends && '配息', cov.events && '事件', cov.pe5y && '本益比區間'].filter(Boolean);
+    const allReal = cov.ratios && cov.inst && cov.big && cov.quarter && cov.dividends && cov.events && cov.pe5y;
     real = {
       index,
       chips,
       fin,
-      note: realNote(cov, chips, fin),
-      label: allReal ? '官方資料（5 年本益比區間為示意）' : parts.length ? `${parts.join('、')}為官方資料，其餘模擬` : '模擬資料',
+      pe,
+      note: realNote(cov, chips, fin, pe),
+      label: allReal ? '官方資料' : parts.length ? `${parts.join('、')}為官方資料，其餘模擬` : '模擬資料',
     };
-    provider.overlay = (code, f) => overlayReal(code, f, index, chips, fin);
-    for (const s of universe.stocks) if (s.fundamentals) overlayReal(s.code, s.fundamentals, index, chips, fin);
+    provider.overlay = (code, f) => overlayReal(code, f, index, chips, fin, pe);
+    for (const s of universe.stocks) if (s.fundamentals) overlayReal(s.code, s.fundamentals, index, chips, fin, pe);
   }
   new App(universe, provider, settings, real);
 }
