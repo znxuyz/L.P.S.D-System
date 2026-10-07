@@ -3,7 +3,11 @@ name: Update market data
 # 抓官方資料存進 data 分支；跑完會觸發「Deploy to GitHub Pages」把新資料放上網站。
 # - 收盤後（台北 18:37、22:07）：每日資料（主動式 ETF、股票目錄、日 K、籌碼、財報、重大訊息）。
 # - 每小時：回補 2025-01-01 以後的歷史資料，每次有額度上限，補完之後幾乎不會再發請求。
+# - 抓資料的程式有改動時：馬上跑一次。
 on:
+  push:
+    branches: [main]
+    paths: ['scripts/**', 'web/src/data/mopsParse.ts', '.github/workflows/update-data.yml']
   schedule:
     - cron: '37 10 * * 1-5'
     - cron: '7 14 * * 1-5'
