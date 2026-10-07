@@ -22,7 +22,7 @@ import type { EtfMeta, Fundamentals, IndexPoint, MarketSnapshot, Quote, SessionS
  * - 股票池、產業分類沿用內建清單；股價、成交額、昨收來自真實行情。
  * - 有富果金鑰時，20 日常態成交額、均線、一年高低點用 Historical API 計算，每天算一次並存在瀏覽器。
  *   證交所模式的富果金鑰是選填；沒有時沿用內建的常態估計值。
- * - 本益比、殖利率、法人、千張大戶由 main 套上官方資料（overlay）；EPS 成長、配息年數、事件等仍是模擬資料。
+ * - 基本面、籌碼、配息與事件由 main 套上官方資料（overlay）；5 年本益比區間仍是示意值。
  *
  * 當天的報價與每分鐘紀錄也存在瀏覽器，重新整理頁面不會從零開始。
  */
@@ -694,7 +694,7 @@ export class LiveProvider implements MarketDataProvider {
       `台指期：${this.fut ? `${this.fut.symbol} 每 30 秒更新` : this.futNote || (this.client ? '載入中' : '需要富果金鑰')}`,
     );
     if (this.missing.size) lines.push(`${name}查無：${[...this.missing].join('、')}`);
-    lines.push('本益比、殖利率、法人、千張大戶用官方資料；EPS 成長、配息年數、特殊事件、一般 ETF 成分股仍為模擬資料');
+    lines.push('基本面、籌碼、配息與事件用官方資料；5 年本益比區間與一般 ETF 成分股仍為模擬資料');
     const s = this.session();
     if (loaded === 0) {
       this.setStatus({ state: 'connecting', message: `${name}連線中`, detail: lines.join('\n') });

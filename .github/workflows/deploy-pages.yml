@@ -62,6 +62,12 @@ jobs:
         timeout-minutes: 5
         run: node scripts/chips.ts .data
 
+      # 財報（每季，有快取）、連續配息年數、重大訊息分類的特殊事件
+      - name: 整理財報、股利與重大訊息
+        continue-on-error: true
+        timeout-minutes: 25
+        run: node scripts/financials.ts .data
+
       - name: 存回 data 分支
         working-directory: .data
         run: |
@@ -78,7 +84,7 @@ jobs:
       - name: 放進網站
         run: |
           mkdir -p web/public/data
-          for f in active-etf.json stocks.json chips.json; do
+          for f in active-etf.json stocks.json chips.json fundamentals.json; do
             if [ -f ".data/$f" ]; then cp ".data/$f" web/public/data/; fi
           done
           if [ -d .data/candles ]; then cp -r .data/candles web/public/data/; fi

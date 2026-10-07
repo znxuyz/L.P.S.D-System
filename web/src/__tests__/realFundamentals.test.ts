@@ -34,6 +34,25 @@ describe('overlayReal', () => {
     expect(f.eps4q).toBeLessThan(0);
   });
 
+  it('套用財報、配息與事件；不在清單上代表沒有', () => {
+    const fin = {
+      generatedAt: '',
+      quarter: '2026Q2',
+      dividends: true,
+      events: 45,
+      stocks: { '2330': { epsYoY: 39.6, grossMarginChg: 8.1, opMarginChg: 9.9, fcfPositive: true, dividendYears: 10, events: ['merger', 'bogus'] } },
+    };
+    const f = externalFundamentals('2330', 'semi', 1000);
+    overlayReal('2330', f, indexDirectory(dir), null, fin);
+    expect([f.epsYoY, f.grossMarginChg, f.opMarginChg, f.fcfPositive, f.dividendYears]).toEqual([39.6, 8.1, 9.9, true, 10]);
+    expect(f.events).toEqual(['merger']);
+    const g = externalFundamentals('9999', 'trad', 50);
+    overlayReal('9999', g, indexDirectory(dir), null, fin);
+    expect(g.dividendYears).toBe(0);
+    expect(g.events).toEqual([]);
+    expect(realNote(coverageOf({ directory: dir, chips, fin }), chips, fin)).toContain('仍為模擬資料：5 年本益比區間，');
+  });
+
   it('資料來源說明列出真實與模擬欄位', () => {
     const note = realNote(coverageOf({ directory: dir, chips }), chips);
     expect(note).toContain('法人連買賣（2026-10-06）');
