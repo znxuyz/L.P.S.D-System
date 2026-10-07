@@ -39,3 +39,28 @@ export function classifyEvent(subject: string): string | null {
   return null;
 }
 
+
+/** 把公開資訊觀測站的 HTML 表格逐列轉成物件（同一家公司可能有好幾列，例如重大訊息）。 */
+export function parseMopsRows(html: string, key = '公司代號'): Array<Record<string, string>> {
+  const out: Array<Record<string, string>> = [];
+  const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').trim();
+  for (const table of html.split(/<table/i).slice(1)) {
+    let header: string[] | null = null;
+    for (const row of table.split(/<tr/i).slice(1)) {
+      const cells = [...row.matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi)].map((m) => strip(m[1]));
+      if (!cells.length) continue;
+      if (cells.some((c) => clean(c) === key)) {
+        header = cells.map(clean);
+        continue;
+      }
+      if (header && cells.length === header.length) out.push(Object.fromEntries(header.map((h, i) => [h, cells[i]])));
+    }
+  }
+  return out;
+}
+
+/** 民國日期（115/09/14 或 1150914）轉成 2026-09-14。 */
+export function rocToIso(roc: string): string | null {
+  const m = roc.trim().match(/^(\d{2,3})\/?(\d{2})\/?(\d{2})$/);
+  return m ? `${Number(m[1]) + 1911}-${m[2]}-${m[3]}` : null;
+}

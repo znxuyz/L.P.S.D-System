@@ -5,17 +5,21 @@
  *
  * - 5 年本益比區間：證交所 BWIBBU_d、櫃買本益比查詢（某一天全市場），每月取月底一天，共 60 個月。
  *   存在 pe/<年-月>.json，過去的月份只抓一次；輸出 pe5y.json：{ 代號: [最低, 25%, 中位數, 75%, 最高] }。
+ * - 特殊事件：公開資訊觀測站「歷史重大訊息」（某一天全市場），回補近 45 天，每次最多 EVENT_MAX 天。
  * - 千張大戶 4 週前的持股比率：集保「股權分散表查詢」（可查過去一年，但一次一檔）。
  *   只補「最新一週往前 4 週」那一天，存進 tdcc/<日期>.json，chips.ts 就能直接算 4 週變化。
  *   每次最多查 TDCC_MAX 檔，每秒一次，分幾次部署補完。
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { classifyEvent, parseMopsRows, rocToIso } from '../web/src/data/mopsParse.ts';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 L.P.L.C.-System';
-const PE_MONTHS = 60;
+const PE_MONTHS = Number(process.env.PE_MONTHS ?? 60);
 const PE_MIN_SAMPLES = 24;
 const TDCC_MAX = Number(process.env.TDCC_MAX ?? 500);
+const EVENT_DAYS = 45;
+const EVENT_MAX = Number(process.env.EVENT_MAX ?? 15);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const num = (v: unknown) => {
@@ -71,10 +75,10 @@ async function peOn(date: string): Promise<Record<string, number> | null> {
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
-/** 每個月最後一個有開盤的日子（往前找最多 7 天）。 */
+/** 每個月最後一個有開盤的日子（往前找最多 12 天，避開農曆年長假）。 */
 async function monthEnd(year: number, month: number): Promise<Record<string, number> | null> {
   const d = new Date(Date.UTC(year, month, 0));
-  for (let i = 0; i < 7; i++, d.setUTCDate(d.getUTCDate() - 1)) {
+  for (let i = 0; i < 12; i++, d.setUTCDate(d.getUTCDate() - 1)) {
     const wd = d.getUTCDay();
     if (wd === 0 || wd === 6) continue;
     const r = await peOn(iso(d));
@@ -102,7 +106,7 @@ async function peHistory(dir: string): Promise<void> {
   let fetched = 0;
   // 由近到遠：從上個月開始（這個月還沒結束）
   for (let k = 1; k <= PE_MONTHS; k++) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - k + 1, 1));
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - k, 1));
     const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
     const path = join(peDir, `${key}.json`);
     if (existsSync(path)) continue;
@@ -209,7 +213,79 @@ async function tdccHistory(dir: string): Promise<void> {
   console.log(`集保 4 週前：這次補 ${ok} 檔，失敗 ${fail} 檔`);
 }
 
+// ------------------------------------------------------------ 歷史重大訊息
+
+/** 某一天全市場的重大訊息（含前一日 17:30 以後）。 */
+async function eventsOn(date: string): Promise<Array<Record<string, string>>> {
+  const [y, m, d] = date.split('-');
+  const body = new URLSearchParams({ encodeURIComponent: '1', step: '0', firstin: 'true', off: '1', TYPEK: 'all', year: String(Number(y) - 1911), month: m, day: d, queryName: 'co_id', inpuType: 'co_id' });
+  let last: unknown;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const res = await fetch('https://mopsov.twse.com.tw/mops/web/ajax_t05st02', {
+        method: 'POST',
+        headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+        signal: AbortSignal.timeout(120_000),
+      });
+      const html = await res.text();
+      if (html.includes('查無需求資料')) return [];
+      if (html.includes('FOR SECURITY REASONS') || html.includes('查詢過於頻繁')) throw new Error('被擋下');
+      return parseMopsRows(html);
+    } catch (e) {
+      last = e;
+      await sleep(8000 * (i + 1));
+    }
+  }
+  throw new Error(`重大訊息 ${date} → ${last}`);
+}
+
+async function eventHistory(dir: string): Promise<void> {
+  const evDir = join(dir, 'events');
+  mkdirSync(evDir, { recursive: true });
+  const donePath = join(dir, 'events-backfill.json');
+  const done = new Set(readJson<string[]>(donePath, []));
+  const today = new Date(Date.now() + 8 * 3600_000);
+  const todo: string[] = [];
+  for (let k = 1; k <= EVENT_DAYS; k++) {
+    const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - k));
+    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6 && !done.has(iso(d))) todo.push(iso(d));
+  }
+  console.log(`重大訊息：還缺 ${todo.length} 天，這次最多 ${EVENT_MAX} 天`);
+  for (const date of todo.slice(0, EVENT_MAX)) {
+    try {
+      const rows = await eventsOn(date);
+      let n = 0;
+      const byDate = new Map<string, Array<[string, string, string]>>();
+      for (const r of rows) {
+        const code = String(r['公司代號'] ?? '').trim();
+        const subject = String(r['主旨'] ?? '').replace(/\s+/g, ' ').trim();
+        const day = rocToIso(String(r['發言日期'] ?? ''));
+        const type = classifyEvent(subject);
+        if (!wanted(code) || !type || !day) continue;
+        if (!byDate.has(day)) byDate.set(day, []);
+        byDate.get(day)!.push([code, type, subject.slice(0, 80)]);
+        n++;
+      }
+      for (const [day, list] of byDate) {
+        const path = join(evDir, `${day}.json`);
+        const prev = readJson<Array<[string, string, string]>>(path, []);
+        const seen = new Set(prev.map((e) => e.join('|')));
+        writeFileSync(path, JSON.stringify([...prev, ...list.filter((e) => !seen.has(e.join('|')))]));
+      }
+      done.add(date);
+      console.log(`重大訊息 ${date}：${rows.length} 則，特殊事件 ${n} 則`);
+    } catch (e) {
+      console.log(`${e}`);
+    }
+    await sleep(5000);
+  }
+  const cutoff = iso(new Date(Date.now() - (EVENT_DAYS + 5) * 86400_000));
+  writeFileSync(donePath, JSON.stringify([...done].filter((d) => d >= cutoff).sort()));
+}
+
 const dir = process.argv[2] ?? 'data';
 mkdirSync(dir, { recursive: true });
 await peHistory(dir);
+await eventHistory(dir);
 await tdccHistory(dir);
