@@ -6,6 +6,7 @@ import type { MarketMetrics, StockMetrics } from '../domain/metrics';
 import { mockNews, newsLinks } from '../domain/news';
 import { industryPeMedians, stockView, type StockView } from '../domain/screens';
 import { MA_PERIODS, analyzeTechnicals, type Candle, type MaPeriod, type TechReport, type Tilt } from '../domain/technicals';
+import { PATTERN_COLORS, PATTERN_GUIDE, detectPatterns, type Bias, type Pattern } from '../domain/patterns';
 import type { DirEntry, StockDirectory } from '../data/stockDirectory';
 import type { Palette } from './colors';
 import { direction, escapeHtml as esc, num, pct, price, signedYi, yi } from './format';
@@ -58,12 +59,21 @@ const MA_NAME: Record<MaPeriod, string> = { 20: '月線', 60: '季線', 120: '�
 
 /** K 線圖上要顯示哪些均線，記在這台裝置的瀏覽器。 */
 const LINES_KEY = 'lplc.kchart.lines';
-const lineVis: { ma: boolean; ema: boolean } = (() => {
+const lineVis: { ma: boolean; ema: boolean; pat: boolean } = (() => {
   try {
     const v = JSON.parse(localStorage.getItem(LINES_KEY) ?? '{}');
-    return { ma: v.ma !== false, ema: v.ema !== false };
+    return { ma: v.ma !== false, ema: v.ema !== false, pat: v.pat !== false };
   } catch {
-    return { ma: true, ema: true };
+    return { ma: true, ema: true, pat: true };
+  }
+})();
+/** 型態面板裡取消勾選「畫在圖上」的型態，記在這台裝置。 */
+const PAT_HIDDEN_KEY = 'lplc.kchart.hiddenPatterns';
+const hiddenPatterns: Set<string> = (() => {
+  try {
+    return new Set<string>(JSON.parse(localStorage.getItem(PAT_HIDDEN_KEY) ?? '[]'));
+  } catch {
+    return new Set<string>();
   }
 })();
 /** 切換均線後立刻重畫圖例與 K 線圖（不用等下一次行情更新）。 */
@@ -224,6 +234,7 @@ export function renderStockPage(root: HTMLElement, code: string, ctx: StockPageC
     root.innerHTML = `
       <header class="sa-head glass" id="sa-head"></header>
       <section class="sa-chart glass" aria-label="K 線圖"><div class="sa-chart-head" id="sa-chart-head"></div><div class="kchart" id="sa-kchart"></div></section>
+      <section class="sa-pattern glass" id="sa-pattern" aria-label="型態辨識"></section>
       <section class="sa-summary glass" id="sa-summary" aria-label="綜合摘要"></section>
       <section class="sa-score glass" id="sa-score" aria-label="五大策略評分"></section>
       <section class="sa-tech glass" id="sa-tech" aria-label="技術指標"></section>
@@ -234,7 +245,7 @@ export function renderStockPage(root: HTMLElement, code: string, ctx: StockPageC
   const $ = (id: string) => root.querySelector<HTMLElement>(id)!;
   renderHead($('#sa-head'), code, s, ctx);
   if (!s || !f) {
-    for (const id of ['#sa-chart-head', '#sa-kchart', '#sa-summary', '#sa-score', '#sa-tech', '#sa-fund', '#sa-news']) $(id).innerHTML = '';
+    for (const id of ['#sa-chart-head', '#sa-kchart', '#sa-pattern', '#sa-summary', '#sa-score', '#sa-tech', '#sa-fund', '#sa-news']) $(id).innerHTML = '';
     $('#sa-summary').innerHTML =
       ctx.directory === undefined && !ctx.metrics.stockByCode.has(code)
         ? '<p class="muted">正在載入全市場股票目錄…（若一直沒有出現，代表目錄還沒產生，目前只能查熱力圖裡的股票）</p>'
@@ -243,15 +254,17 @@ export function renderStockPage(root: HTMLElement, code: string, ctx: StockPageC
   }
   const candles = ctx.daily ? withToday(ctx.daily.candles, s, ctx.history.get(code), ctx.today, ctx.metrics.session) : [];
   const tech = analyzeTechnicals(candles);
+  const { patterns } = detectPatterns(candles);
   const view = stockView(s, f, industryPeMedians(ctx.metrics, ctx.universe).get(s.industryId) ?? null);
   const scores = strategyScores(view);
   const summary = buildSummary(view, scores, tech, ctx.metrics, ctx.universe, !ctx.external);
 
   redrawChart = () => {
-    renderKChart($('#sa-kchart'), code, candles, tech, ctx);
+    renderKChart($('#sa-kchart'), code, candles, tech, ctx, patterns);
     renderChartHead($('#sa-chart-head'), ctx, tech, candles.length);
   };
   redrawChart();
+  renderPatterns($('#sa-pattern'), patterns, ctx, candles.length);
   renderSummary($('#sa-summary'), summary);
   renderScores($('#sa-score'), scores);
   renderTech($('#sa-tech'), tech, ctx.daily === undefined, ctx);
@@ -319,13 +332,14 @@ function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechRepor
   // 勾選框只建立一次，之後只更新標題與圖例，避免每秒重畫打斷點擊
   if (!el.dataset.ready) {
     el.innerHTML = `<div class="kc-title"></div>
-      <div class="kc-toggles" role="group" aria-label="顯示的均線">
+      <div class="kc-toggles" role="group" aria-label="圖上顯示的線">
         <label class="kc-toggle"><input type="checkbox" data-line="ma" /><svg width="16" height="6" aria-hidden="true"><line x1="0" x2="16" y1="3" y2="3" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2"></line></svg>MA</label>
         <label class="kc-toggle"><input type="checkbox" data-line="ema" /><svg width="16" height="6" aria-hidden="true"><line x1="0" x2="16" y1="3" y2="3" stroke="currentColor" stroke-width="1.8"></line></svg>EMA</label>
+        <label class="kc-toggle" title="自動畫出通道、W 底 / M 頭、頭肩、三角形、波浪"><input type="checkbox" data-line="pat" /><svg width="16" height="8" aria-hidden="true"><polyline points="0,7 5,1 9,5 16,0" fill="none" stroke="currentColor" stroke-width="1.6"></polyline></svg>型態</label>
       </div>
       <ul class="ma-legend" aria-label="均線：虛線為 MA，實線為 EMA"></ul>`;
     for (const box of el.querySelectorAll<HTMLInputElement>('[data-line]')) {
-      const key = box.dataset.line as 'ma' | 'ema';
+      const key = box.dataset.line as 'ma' | 'ema' | 'pat';
       box.checked = lineVis[key];
       box.addEventListener('change', () => {
         lineVis[key] = box.checked;
@@ -364,6 +378,60 @@ function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechRepor
  * 下方 K 棒逐根長出，旁邊列出目前的步驟與已等待時間。
  * 只建立一次 DOM，之後每秒只更新文字，動畫才不會被重畫打斷。
  */
+const BIAS_WORD: Record<Bias, string> = { bull: '偏多', bear: '偏空', neutral: '中性' };
+
+/** 型態面板：偵測到的型態、後續情境（什麼條件會怎麼走），以及型態辭典。 */
+function renderPatterns(el: HTMLElement, patterns: Pattern[], ctx: StockPageContext, total: number): void {
+  if (!el.dataset.ready) {
+    el.innerHTML = `<h2 class="panel-title">型態辨識 <small>依近一年日 K 自動判斷，僅供參考</small></h2>
+      <div class="pat-list"></div>
+      <details class="pat-guide"><summary>型態辭典：什麼條件會形成什麼圖、之後常見的走法</summary>
+        <div class="pat-guide-grid">${PATTERN_GUIDE.map(
+          (g) => `<div class="pg-item"><b class="tilt-text-${g.bias}">${esc(g.name)}</b>
+            <p><span>形狀</span>${esc(g.shape)}</p><p><span>關鍵</span>${esc(g.when)}</p><p><span>走法</span>${esc(g.then)}</p></div>`,
+        ).join('')}</div>
+        <p class="disclaimer">型態是用固定規則從歷史價格找出來的，同一段走勢可能有不同解讀；假突破、假跌破也很常見，請搭配量能與基本面判斷。</p>
+      </details>`;
+    el.addEventListener('change', (e) => {
+      const box = (e.target as HTMLElement).closest<HTMLInputElement>('input[data-pat]');
+      if (!box) return;
+      if (box.checked) hiddenPatterns.delete(box.dataset.pat!);
+      else hiddenPatterns.add(box.dataset.pat!);
+      try {
+        localStorage.setItem(PAT_HIDDEN_KEY, JSON.stringify([...hiddenPatterns]));
+      } catch {
+        /* 無法儲存時只在這次有效 */
+      }
+      redrawChart?.();
+    });
+    el.dataset.ready = '1';
+  }
+  const list = el.querySelector<HTMLElement>('.pat-list')!;
+  if (ctx.daily === undefined) return setHtml(list, '<p class="muted">日 K 載入後自動辨識型態。</p>');
+  if (total < 30) return setHtml(list, '<p class="muted">日 K 不足 30 根，還無法辨識型態。</p>');
+  if (!patterns.length) return setHtml(list, '<p class="muted">近期沒有明確的型態（走勢沒有形成可辨識的轉折組合）。</p>');
+  const icon: Record<Bias, string> = { bull: '▲', bear: '▼', neutral: '●' };
+  setHtml(
+    list,
+    patterns
+      .map(
+        (p) => `<article class="pat-card">
+          <header>
+            <span class="pat-swatch" style="background:${PATTERN_COLORS[p.id]}"></span>
+            <b>${esc(p.name)}</b>
+            <span class="tilt tilt-${p.bias}">${esc(p.status)}・${BIAS_WORD[p.bias]}</span>
+            <label class="pat-show"><input type="checkbox" data-pat="${p.id}" ${hiddenPatterns.has(p.id) ? '' : 'checked'} />畫在圖上</label>
+          </header>
+          <p class="pat-summary">${esc(p.summary)}</p>
+          <ul class="pat-scen">${p.scenarios
+            .map((sc) => `<li class="pt-${sc.bias}"><i>${icon[sc.bias]}</i><span><b>若</b>${esc(sc.when)}</span><span class="pat-then">→ ${esc(sc.then)}</span></li>`)
+            .join('')}</ul>
+        </article>`,
+      )
+      .join(''),
+  );
+}
+
 function renderLoader(el: HTMLElement, ctx: StockPageContext, compact = false): void {
   const kind = compact ? 'compact' : 'full';
   const fugle = ctx.dailySource === 'fugle';
@@ -416,7 +484,7 @@ function renderLoader(el: HTMLElement, ctx: StockPageContext, compact = false): 
   if (t) t.textContent = `已等待 ${sec} 秒${note}`;
 }
 
-function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechReport | null, ctx: StockPageContext): void {
+function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechReport | null, ctx: StockPageContext, patterns: Pattern[] = []): void {
   if (el.dataset.hover) return;
   if (ctx.daily === undefined) return renderLoader(el, ctx);
   delete el.dataset.loader;
@@ -517,13 +585,55 @@ function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechRe
           (lineVis.ema ? `<path d="${maPath(ma?.ema[n])}" fill="none" stroke="${MA_COLORS[n]}" stroke-width="1.8"></path>` : ''),
       )
       .join('')}
-    ${tech ? levelLine(tech.resistance, '壓力') + levelLine(tech.support, '支撐') : ''}
+    ${tech && !(lineVis.pat && patterns.length) ? levelLine(tech.resistance, '壓力') + levelLine(tech.support, '支撐') : ''}
+    ${lineVis.pat ? patternLayer() : ''}
     <text class="axis strong" x="${w - pad.r + 6}" y="${y(last.close) + 4}">${price(last.close)}</text>
     <text class="axis" x="${pad.l}" y="${h - pad.b - volH - 2}">成交量</text>
     ${months.map((m) => `<text class="axis" x="${cx(m.i)}" y="${h - 6}" text-anchor="middle">${m.label}</text>`).join('')}
     <line class="cross" y1="${pad.t}" y2="${h - pad.b}" visibility="hidden"></line>
     <rect class="hit" x="${pad.l}" y="0" width="${w - pad.l - pad.r}" height="${h}" fill="transparent"></rect>
   </svg><div class="k-tip glass" hidden></div>`;
+
+  /** 型態疊圖：只畫在價格區，超出範圍的部分裁掉。 */
+  function patternLayer(): string {
+    const step = x.step();
+    const xAt = (gi: number) => cx(0) + (gi - off) * step;
+    const right = off + N - 1 + 2;
+    const shown = patterns.filter((p) => !hiddenPatterns.has(p.id));
+    if (!shown.length) return '';
+    const body = shown
+      .map((p) => {
+        const col = PATTERN_COLORS[p.id];
+        const lines = p.lines
+          .map((l) => {
+            let [i2, v2] = l.b;
+            if (l.extend && right > i2) {
+              const slope = (l.b[1] - l.a[1]) / Math.max(1, l.b[0] - l.a[0]);
+              v2 = l.b[1] + slope * (right - l.b[0]);
+              i2 = right;
+            }
+            // 手機寬度太窄時不標線名，避免和價格標籤擠在一起
+            const lab =
+              l.label && w >= 520 && l.b[0] >= off && l.b[0] < off + N
+                ? `<text class="pat-label" x="${xAt(i2) - 4}" y="${y(v2) - 5}" text-anchor="end" fill="${col}">${esc(l.label)}</text>`
+                : '';
+            return `<line x1="${xAt(l.a[0])}" y1="${y(l.a[1])}" x2="${xAt(i2)}" y2="${y(v2)}" stroke="${col}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? 'stroke-dasharray="6 4"' : ''} opacity="0.9"></line>${lab}`;
+          })
+          .join('');
+        const pts = p.points
+          .filter((pt) => pt.i >= off && pt.i < off + N)
+          .map((pt) => {
+            const px = xAt(pt.i);
+            const py = y(pt.p) + (pt.pos === 'above' ? -14 : 16);
+            return `<circle cx="${px}" cy="${y(pt.p)}" r="3" fill="${col}"></circle>
+              <text class="pat-point" x="${px}" y="${py}" text-anchor="middle" fill="${col}">${esc(pt.label)}</text>`;
+          })
+          .join('');
+        return `<g class="pat pat-${p.id}">${lines}${pts}</g>`;
+      })
+      .join('');
+    return `<defs><clipPath id="kclip"><rect x="${pad.l}" y="${pad.t}" width="${w - pad.l - pad.r}" height="${priceBottom - pad.t}"></rect></clipPath></defs><g clip-path="url(#kclip)">${body}</g>`;
+  }
 
   function levelLine(v: number, label: string): string {
     if (v < y.domain()[0] || v > y.domain()[1]) return '';

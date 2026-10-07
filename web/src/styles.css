@@ -731,6 +731,7 @@ button.log-text:hover { color: var(--ink); }
     'head head head'
     'chart chart summary'
     'chart chart score'
+    'pattern pattern score'
     'tech fund score'
     'news news news';
 }
@@ -834,6 +835,29 @@ button.log-text:hover { color: var(--ink); }
 .sa-summary { grid-area: summary; }
 .sa-score { grid-area: score; }
 .sa-tech { grid-area: tech; }
+.sa-pattern { grid-area: pattern; }
+.pat-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.pat-card { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--row); border: 1px solid var(--glass-line); display: grid; gap: 8px; align-content: start; }
+.pat-card header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pat-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.pat-show { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-2); cursor: pointer; }
+.pat-show input { margin: 0; accent-color: var(--accent); }
+.pat-summary { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
+.pat-scen { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 12.5px; line-height: 1.5; }
+.pat-scen li { display: grid; grid-template-columns: 14px 1fr; column-gap: 6px; }
+.pat-scen i { font-style: normal; font-size: 9px; padding-top: 4px; }
+.pat-scen b { font-weight: 600; margin-right: 4px; color: var(--muted); }
+.pat-scen .pat-then { grid-column: 2; color: var(--ink-2); }
+.pat-scen .pt-bull i { color: var(--up); }
+.pat-scen .pt-bear i { color: var(--down); }
+.pat-scen .pt-neutral i { color: var(--muted); }
+.pat-guide { margin-top: 12px; font-size: 13px; }
+.pat-guide summary { cursor: pointer; color: var(--ink-2); padding: 6px 0; }
+.pat-guide-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-top: 8px; }
+.pg-item { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--row); }
+.pg-item p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.pg-item p span { display: inline-block; min-width: 32px; margin-right: 6px; font-size: 11px; color: var(--muted); }
+.kchart .pat-label, .kchart .pat-point { font-size: 11px; font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
 .sa-fund { grid-area: fund; }
 .sa-news { grid-area: news; }
 .gauge { margin: 6px 0 14px; }
@@ -935,7 +959,7 @@ button.log-text:hover { color: var(--ink); }
 
 /* ---------------- 響應式 ---------------- */
 @media (max-width: 1240px) {
-  .analysis { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'head head' 'chart chart' 'summary score' 'tech score' 'fund fund' 'news news'; }
+  .analysis { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'head head' 'chart chart' 'pattern pattern' 'summary score' 'tech score' 'fund fund' 'news news'; }
   .app.page-intel { grid-template-columns: 200px minmax(0, 1fr) 300px; }
   .screener { grid-template-columns: 220px minmax(0, 1fr) 290px; }
   .ticker { gap: 18px; }
@@ -951,7 +975,7 @@ button.log-text:hover { color: var(--ink); }
   .scr-detail { max-height: none; }
 }
 @media (max-width: 720px) {
-  .analysis { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'head' 'chart' 'summary' 'score' 'tech' 'fund' 'news'; }
+  .analysis { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'head' 'chart' 'pattern' 'summary' 'score' 'tech' 'fund' 'news'; }
   .sa-chart { min-height: 380px; }
   .kchart { min-height: 300px; }
   .sa-search { margin-left: 0; width: 100%; }
