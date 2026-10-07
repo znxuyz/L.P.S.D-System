@@ -53,8 +53,14 @@ jobs:
       # 證交所、櫃買每日收盤行情累積成日 K（第一次會分幾次回補近一年）
       - name: 累積官方日 K
         continue-on-error: true
-        timeout-minutes: 8
+        timeout-minutes: 12
         run: node scripts/candles.ts .data
+
+      # 回補歷史：5 年本益比（每月月底）、集保 4 週前的千張大戶比率（分幾次補完）
+      - name: 回補歷史資料
+        continue-on-error: true
+        timeout-minutes: 30
+        run: node scripts/history.ts .data
 
       # 法人連買賣（證交所、櫃買）與千張大戶（集保，每週）
       - name: 整理籌碼資料
@@ -84,7 +90,7 @@ jobs:
       - name: 放進網站
         run: |
           mkdir -p web/public/data
-          for f in active-etf.json stocks.json chips.json fundamentals.json; do
+          for f in active-etf.json stocks.json chips.json fundamentals.json pe5y.json; do
             if [ -f ".data/$f" ]; then cp ".data/$f" web/public/data/; fi
           done
           if [ -d .data/candles ]; then cp -r .data/candles web/public/data/; fi

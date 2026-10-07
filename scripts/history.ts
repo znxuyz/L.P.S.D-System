@@ -15,7 +15,7 @@ import { join } from 'node:path';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 L.P.L.C.-System';
 const PE_MONTHS = 60;
 const PE_MIN_SAMPLES = 24;
-const TDCC_MAX = Number(process.env.TDCC_MAX ?? 700);
+const TDCC_MAX = Number(process.env.TDCC_MAX ?? 500);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const num = (v: unknown) => {
