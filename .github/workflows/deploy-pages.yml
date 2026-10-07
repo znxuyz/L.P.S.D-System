@@ -1,16 +1,17 @@
 name: Deploy to GitHub Pages
 
+# 網站部署：程式碼推到 main，或「Update market data」更新完資料之後。
+# 這裡只讀 data 分支，不抓資料。
 on:
   push:
     branches: [main]
   workflow_dispatch:
-  schedule:
-    # 主動式 ETF 持股、每日收盤行情：台北時間 18:37 抓一次，22:07 再補抓一次（週一到週五）
-    - cron: '37 10 * * 1-5'
-    - cron: '7 14 * * 1-5'
+  workflow_run:
+    workflows: ['Update market data']
+    types: [completed]
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -31,60 +32,13 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      # 每日資料存在獨立的 data 分支，不會弄亂 main 的紀錄
+      # 資料存在獨立的 data 分支（由 update-data.yml 更新）
       - name: 取出 data 分支
         run: |
           if git ls-remote --exit-code --heads "$DATA_REMOTE" data >/dev/null; then
             git clone --depth 1 --branch data "$DATA_REMOTE" .data
           else
-            git init -b data .data
-            git -C .data remote add origin "$DATA_REMOTE"
-          fi
-
-      # 每次部署（包含推送到 main）都更新一次，網站上的持股永遠是最新的
-      - name: 抓主動式 ETF 持股
-        continue-on-error: true
-        run: node scripts/active-etf.ts .data
-
-      - name: 更新全市場股票目錄
-        continue-on-error: true
-        run: node scripts/stock-list.ts .data
-
-      # 證交所、櫃買每日收盤行情累積成日 K（第一次會分幾次回補近一年）
-      - name: 累積官方日 K
-        continue-on-error: true
-        timeout-minutes: 12
-        run: node scripts/candles.ts .data
-
-      # 回補歷史：5 年本益比（每月月底）、集保 4 週前的千張大戶比率（分幾次補完）
-      - name: 回補歷史資料
-        continue-on-error: true
-        timeout-minutes: 30
-        run: node scripts/history.ts .data
-
-      # 法人連買賣（證交所、櫃買）與千張大戶（集保，每週）
-      - name: 整理籌碼資料
-        continue-on-error: true
-        timeout-minutes: 5
-        run: node scripts/chips.ts .data
-
-      # 財報（每季，有快取）、連續配息年數、重大訊息分類的特殊事件
-      - name: 整理財報、股利與重大訊息
-        continue-on-error: true
-        timeout-minutes: 25
-        run: node scripts/financials.ts .data
-
-      - name: 存回 data 分支
-        working-directory: .data
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "資料沒有變化"
-          else
-            git commit -m "Update market data $(date -u +%F)"
-            git push origin data
+            mkdir .data
           fi
 
       - name: 放進網站

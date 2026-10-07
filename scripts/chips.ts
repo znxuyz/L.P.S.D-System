@@ -4,16 +4,18 @@
  *   node scripts/chips.ts <資料資料夾>
  *
  * - 法人買賣超：證交所 T86、櫃買三大法人，每個交易日各一次請求，存在 inst/<日期>.json（外資＋投信買賣超股數）。
- *   回補最近 20 個交易日，用來算「法人連買 / 連賣幾天」。
+ *   從 2025-01-01 開始全部保留（每次回補 INST_MAX 天），用來算「法人連買 / 連賣幾天」。
  * - 千張大戶：集保股權分散表（每週更新，只提供最新一週），存在 tdcc/<日期>.json（持股 1,000 張以上的比率）。
- *   累積幾週後就能算 4 週變化。
+ *   每週一份全部保留；history.ts 會回補過去的週。
  * - 輸出 chips.json 給網頁讀。
  */
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 L.P.L.C.-System';
-const INST_DAYS = 20;
+/** 法人買賣超從這一天開始全部保留；每次最多回補 INST_MAX 天。 */
+const START = process.env.ARCHIVE_START ?? '2025-01-01';
+const INST_MAX = Number(process.env.INST_MAX ?? 60);
 const GAP_MS = 2500;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -100,8 +102,8 @@ async function updateInst(dir: string, tradingDays: string[]): Promise<void> {
   mkdirSync(instDir, { recursive: true });
   const have = new Set(readdirSync(instDir).map((f) => f.replace(/\.json$/, '')));
   const todo = tradingDays.filter((d) => !have.has(d));
-  console.log(`法人：最近 ${tradingDays.length} 個交易日，缺 ${todo.length} 天`);
-  for (const date of todo) {
+  console.log(`法人：${tradingDays.length} 個交易日，缺 ${todo.length} 天，這次最多 ${INST_MAX} 天`);
+  for (const date of todo.slice(0, INST_MAX)) {
     const [a, b] = await Promise.allSettled([twseInst(date), tpexInst(date)]);
     if (a.status === 'fulfilled' && a.value) {
       // 檔案以日期為單位，上市、上櫃都成功才存，否則下次整天重抓
@@ -112,8 +114,6 @@ async function updateInst(dir: string, tradingDays: string[]): Promise<void> {
     } else console.log(`  ${date}：上市 ✗ ${a.status === 'rejected' ? a.reason : '無資料'}`);
     await sleep(GAP_MS);
   }
-  // 只留最近的檔案
-  for (const f of readdirSync(instDir)) if (f.replace(/\.json$/, '') < (tradingDays[tradingDays.length - 1] ?? '')) rmSync(join(instDir, f));
 }
 
 /** 集保股權分散表：持股分級 15 = 1,000,001 股以上（千張大戶）。 */
@@ -137,9 +137,6 @@ async function updateTdcc(dir: string): Promise<void> {
   } catch (e) {
     console.log(`集保 ✗ ${e}`);
   }
-  // 保留約 10 週
-  const files = readdirSync(tdccDir).sort();
-  for (const f of files.slice(0, Math.max(0, files.length - 10))) rmSync(join(tdccDir, f));
 }
 
 function main(dir: string): void {
@@ -179,21 +176,16 @@ function main(dir: string): void {
 
 const dir = process.argv[2] ?? 'data';
 mkdirSync(dir, { recursive: true });
-// 交易日：用日 K 已經確認過的上市交易日；沒有時用平日
-const meta = readJson<{ twse?: string[]; holidays?: string[] }>(join(dir, 'candles-meta.json'), {});
-let days = (meta.twse ?? []).slice(-INST_DAYS);
-if (days.length < INST_DAYS) {
-  const holidays = new Set(meta.holidays ?? []);
-  const now = new Date(Date.now() + 8 * 3600_000);
-  let d = now.getUTCHours() >= 16 ? now.toISOString().slice(0, 10) : shift(now.toISOString().slice(0, 10), -1);
-  const list: string[] = [];
-  while (list.length < INST_DAYS) {
-    const wd = new Date(`${d}T00:00:00Z`).getUTCDay();
-    if (wd !== 0 && wd !== 6 && !holidays.has(d)) list.push(d);
-    d = shift(d, -1);
-  }
-  days = list.reverse();
+// 交易日：START 以後的平日（扣掉日 K 確認過的休市日），由新到舊
+const meta = readJson<{ holidays?: string[] }>(join(dir, 'candles-meta.json'), {});
+const holidays = new Set(meta.holidays ?? []);
+const now = new Date(Date.now() + 8 * 3600_000);
+const days: string[] = [];
+for (let d = now.getUTCHours() >= 16 ? now.toISOString().slice(0, 10) : shift(now.toISOString().slice(0, 10), -1); d >= START; d = shift(d, -1)) {
+  const wd = new Date(`${d}T00:00:00Z`).getUTCDay();
+  if (wd !== 0 && wd !== 6 && !holidays.has(d)) days.push(d);
 }
-await updateInst(dir, days.slice().reverse());
-await updateTdcc(dir);
+await updateInst(dir, days);
+// 集保每週才更新一次，每小時的回補不用重抓
+if (process.env.HOURLY !== 'true') await updateTdcc(dir);
 main(dir);

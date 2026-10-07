@@ -4,7 +4,7 @@
  *   node scripts/candles.ts <資料資料夾>
  *
  * - 每個交易日只要兩次請求（上市一次、上櫃一次）就拿到全部股票的開高低收量。
- * - 第一次執行時會回補近一年；每次最多補 MAX_DATES 天（從最近的日期往回），幾次部署後就補齊。
+ * - 從 START（預設 2025-01-01）開始全部保留；每次最多回補 MAX_DATES 天（從最近的日期往回），幾次執行後就補齊。
  * - 輸出 candles/<代號>.json：[[日期, 開, 高, 低, 收, 張], …]（一檔一個檔案，網頁只下載正在看的那檔）
  * - candles-meta.json 記錄已抓過的日期與休市日，避免重抓。
  */
@@ -13,7 +13,8 @@ import { join } from 'node:path';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 L.P.L.C.-System';
 const MAX_DATES = Number(process.env.CANDLE_MAX_DATES ?? 80);
-const KEEP_DAYS = 380;
+/** 資料從這一天開始全部保留（不再只留一年）。 */
+const START = process.env.ARCHIVE_START ?? '2025-01-01';
 const GAP_MS = 2500;
 
 type Row = [string, number, number, number, number, number];
@@ -125,7 +126,7 @@ async function main(): Promise<void> {
   const now = new Date(Date.now() + 8 * 3600_000);
   const today = taipeiToday();
   const last = now.getUTCHours() * 60 + now.getUTCMinutes() >= 14 * 60 + 40 ? today : shift(today, -1);
-  const oldest = shift(today, -365);
+  const oldest = START;
   const todo: string[] = [];
   for (let d = last; d >= oldest; d = shift(d, -1)) {
     const wd = new Date(`${d}T00:00:00Z`).getUTCDay();
@@ -165,8 +166,8 @@ async function main(): Promise<void> {
     await sleep(GAP_MS);
   }
 
-  // 一檔一個檔案，只留近一年多
-  const cutoff = shift(today, -KEEP_DAYS);
+  // 一檔一個檔案，START 以後的資料全部保留
+  const cutoff = START;
   for (const [code, rows] of stocks) {
     const list = [...rows.values()].filter((r) => r[0] >= cutoff).sort((x, y) => (x[0] < y[0] ? -1 : 1));
     const path = join(shardDir, `${code}.json`);

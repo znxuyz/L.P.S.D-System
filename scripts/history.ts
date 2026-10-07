@@ -5,10 +5,11 @@
  *
  * - 5 年本益比區間：證交所 BWIBBU_d、櫃買本益比查詢（某一天全市場），每月取月底一天，共 60 個月。
  *   存在 pe/<年-月>.json，過去的月份只抓一次；輸出 pe5y.json：{ 代號: [最低, 25%, 中位數, 75%, 最高] }。
- * - 特殊事件：公開資訊觀測站「歷史重大訊息」（某一天全市場），回補近 45 天，每次最多 EVENT_MAX 天。
+ * - 每日本益比、殖利率、淨值比：同上的來源，START（預設 2025-01-01）以後每天一份，存在 ratios/<日期>.json。
+ * - 重大訊息：公開資訊觀測站「歷史重大訊息」（某一天全市場），START 以後全部回補，主旨全文存在 events/<日期>.json。
  * - 千張大戶 4 週前的持股比率：集保「股權分散表查詢」（可查過去一年，但一次一檔）。
- *   只補「最新一週往前 4 週」那一天，存進 tdcc/<日期>.json，chips.ts 就能直接算 4 週變化。
- *   每次最多查 TDCC_MAX 檔，每秒一次，分幾次部署補完。
+ *   先補「最新一週往前 4 週」那一週（chips.ts 算 4 週變化用），再由新到舊補其他週，存進 tdcc/<日期>.json。
+ *   集保只保留一年，所以最早只能補到一年前；每次最多查 TDCC_MAX 筆，每秒一次。
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,8 +19,10 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const PE_MONTHS = Number(process.env.PE_MONTHS ?? 60);
 const PE_MIN_SAMPLES = 24;
 const TDCC_MAX = Number(process.env.TDCC_MAX ?? 500);
-const EVENT_DAYS = 45;
-const EVENT_MAX = Number(process.env.EVENT_MAX ?? 15);
+/** 每日資料從這一天開始全部回補保留。 */
+const START = process.env.ARCHIVE_START ?? '2025-01-01';
+const EVENT_MAX = Number(process.env.EVENT_MAX ?? 25);
+const RATIO_MAX = Number(process.env.RATIO_MAX ?? 60);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const num = (v: unknown) => {
@@ -54,23 +57,37 @@ async function getJson(url: string): Promise<any> {
 
 // ------------------------------------------------------------ 5 年本益比
 
-/** 某一天全市場本益比；null = 那天沒開盤。 */
-async function peOn(date: string): Promise<Record<string, number> | null> {
-  const out: Record<string, number> = {};
+type Ratio = [number | null, number | null, number | null];
+
+/** 某一天全市場的 [本益比, 殖利率, 股價淨值比]；null = 那天沒開盤。 */
+async function ratiosOn(date: string): Promise<Record<string, Ratio> | null> {
+  const out: Record<string, Ratio> = {};
+  const v = (x: unknown) => (num(x) > 0 ? num(x) : null);
   const tw = await getJson(`https://www.twse.com.tw/rwd/zh/afterTrading/BWIBBU_d?date=${date.replace(/-/g, '')}&selectType=ALL&response=json`);
   if (tw?.stat !== 'OK' || !Array.isArray(tw.data) || !tw.data.length) return null;
-  const code = tw.fields.indexOf('證券代號');
-  const pe = tw.fields.indexOf('本益比');
-  for (const r of tw.data) if (wanted(String(r[code]).trim()) && num(r[pe]) > 0) out[String(r[code]).trim()] = num(r[pe]);
+  const f = (name: string) => tw.fields.indexOf(name);
+  for (const r of tw.data) {
+    const code = String(r[f('證券代號')]).trim();
+    if (wanted(code)) out[code] = [v(r[f('本益比')]), num(r[f('殖利率(%)')]) >= 0 ? num(r[f('殖利率(%)')]) : null, v(r[f('股價淨值比')])];
+  }
   await sleep(2500);
   const tp = await getJson(`https://www.tpex.org.tw/www/zh-tw/afterTrading/peQryDate?date=${encodeURIComponent(date.replace(/-/g, '/'))}&response=json`);
   const table = (tp?.tables ?? []).find((t: any) => Array.isArray(t.fields) && t.fields.includes('股票代號'));
   if (table) {
-    const c = table.fields.indexOf('股票代號');
-    const p = table.fields.indexOf('本益比');
-    for (const r of table.data) if (wanted(String(r[c]).trim()) && num(r[p]) > 0) out[String(r[c]).trim()] = num(r[p]);
+    const g = (name: string) => table.fields.indexOf(name);
+    for (const r of table.data) {
+      const code = String(r[g('股票代號')]).trim();
+      if (wanted(code)) out[code] = [v(r[g('本益比')]), num(r[g('殖利率(%)')]) >= 0 ? num(r[g('殖利率(%)')]) : null, v(r[g('股價淨值比')])];
+    }
   }
   return out;
+}
+
+/** 某一天全市場本益比（只取有獲利的）。 */
+async function peOn(date: string): Promise<Record<string, number> | null> {
+  const r = await ratiosOn(date);
+  if (!r) return null;
+  return Object.fromEntries(Object.entries(r).flatMap(([code, [pe]]) => (pe ? [[code, pe]] : [])));
 }
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -184,33 +201,39 @@ async function tdccHistory(dir: string): Promise<void> {
   } catch (e) {
     return console.log(`集保 ✗ ${e}`);
   }
-  // 4 週前：最新一週往前數第 4 個可查詢的日期
-  const all = s.dates.map((d) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`).filter((d) => d <= latest);
-  const target = all[4];
-  if (!target) return console.log('集保：查詢日期不足');
-  const path = join(tdccDir, `${target}.json`);
-  const have = readJson<Record<string, number>>(path, {});
-  const todo = codes.filter((c) => have[c] === undefined);
-  console.log(`集保 4 週前（${target}）：已有 ${Object.keys(have).length} 檔，還缺 ${todo.length} 檔，這次最多 ${TDCC_MAX} 檔`);
+  // 先補 4 週前（算 4 週變化要用），再由新到舊補其他週；集保只提供近一年
+  const all = s.dates.map((d) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`).filter((d) => d < latest && d >= START);
+  if (!all.length) return console.log('集保：查詢日期不足');
+  const targets = [all[3], ...all.filter((_, i) => i !== 3)].filter(Boolean);
+  let budget = TDCC_MAX;
   let ok = 0;
   let fail = 0;
-  for (const code of todo.slice(0, TDCC_MAX)) {
-    try {
-      const v = await tdccBig(s, code, target.replace(/-/g, ''));
-      if (v !== null) {
-        have[code] = v;
-        ok++;
-      } else if (++fail > 30 && ok === 0) throw new Error('連續查不到資料，停止');
-    } catch (e) {
-      console.log(`集保 ${code} ✗ ${e}`);
-      if (++fail > 30) break;
-      s = await tdccSession().catch(() => s);
+  for (const target of targets) {
+    if (budget <= 0 || fail > 30) break;
+    const path = join(tdccDir, `${target}.json`);
+    const have = readJson<Record<string, number>>(path, {});
+    const todo = codes.filter((c) => have[c] === undefined);
+    if (!todo.length) continue;
+    console.log(`集保 ${target}：已有 ${Object.keys(have).length} 檔，還缺 ${todo.length} 檔`);
+    for (const code of todo.slice(0, budget)) {
+      budget--;
+      try {
+        const v = await tdccBig(s, code, target.replace(/-/g, ''));
+        if (v !== null) {
+          have[code] = v;
+          ok++;
+        } else if (++fail > 30 && ok === 0) throw new Error('連續查不到資料，停止');
+      } catch (e) {
+        console.log(`集保 ${code} ✗ ${e}`);
+        if (++fail > 30) break;
+        s = await tdccSession().catch(() => s);
+      }
+      if ((ok + fail) % 100 === 0) writeFileSync(path, JSON.stringify(have));
+      await sleep(1000);
     }
-    if ((ok + fail) % 100 === 0) writeFileSync(path, JSON.stringify(have));
-    await sleep(1000);
+    writeFileSync(path, JSON.stringify(have));
   }
-  writeFileSync(path, JSON.stringify(have));
-  console.log(`集保 4 週前：這次補 ${ok} 檔，失敗 ${fail} 檔`);
+  console.log(`集保：這次補 ${ok} 筆，失敗 ${fail} 筆`);
 }
 
 // ------------------------------------------------------------ 歷史重大訊息
@@ -245,12 +268,7 @@ async function eventHistory(dir: string): Promise<void> {
   mkdirSync(evDir, { recursive: true });
   const donePath = join(dir, 'events-backfill.json');
   const done = new Set(readJson<string[]>(donePath, []));
-  const today = new Date(Date.now() + 8 * 3600_000);
-  const todo: string[] = [];
-  for (let k = 1; k <= EVENT_DAYS; k++) {
-    const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - k));
-    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6 && !done.has(iso(d))) todo.push(iso(d));
-  }
+  const todo = weekdaysSince(START).filter((d) => !done.has(d));
   console.log(`重大訊息：還缺 ${todo.length} 天，這次最多 ${EVENT_MAX} 天`);
   for (const date of todo.slice(0, EVENT_MAX)) {
     try {
@@ -261,11 +279,12 @@ async function eventHistory(dir: string): Promise<void> {
         const code = String(r['公司代號'] ?? '').trim();
         const subject = String(r['主旨'] ?? '').replace(/\s+/g, ' ').trim();
         const day = rocToIso(String(r['發言日期'] ?? ''));
-        const type = classifyEvent(subject);
-        if (!wanted(code) || !type || !day) continue;
+        if (!wanted(code) || !day || !subject) continue;
+        // 所有重大訊息都存（主旨全文），分類規則之後改了也能重新判斷
+        const type = classifyEvent(subject) ?? '';
         if (!byDate.has(day)) byDate.set(day, []);
-        byDate.get(day)!.push([code, type, subject.slice(0, 80)]);
-        n++;
+        byDate.get(day)!.push([code, type, subject]);
+        if (type) n++;
       }
       for (const [day, list] of byDate) {
         const path = join(evDir, `${day}.json`);
@@ -280,12 +299,49 @@ async function eventHistory(dir: string): Promise<void> {
     }
     await sleep(5000);
   }
-  const cutoff = iso(new Date(Date.now() - (EVENT_DAYS + 5) * 86400_000));
-  writeFileSync(donePath, JSON.stringify([...done].filter((d) => d >= cutoff).sort()));
+  writeFileSync(donePath, JSON.stringify([...done].sort()));
+}
+
+/** START 以後到昨天的平日，由新到舊。 */
+function weekdaysSince(start: string): string[] {
+  const out: string[] = [];
+  const now = new Date(Date.now() + 8 * 3600_000);
+  for (let d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1)); iso(d) >= start; d.setUTCDate(d.getUTCDate() - 1)) {
+    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) out.push(iso(d));
+  }
+  return out;
+}
+
+// ------------------------------------------------------------ 每日本益比、殖利率、淨值比
+
+async function ratioHistory(dir: string): Promise<void> {
+  const rDir = join(dir, 'ratios');
+  mkdirSync(rDir, { recursive: true });
+  const holidays = new Set(readJson<{ holidays?: string[] }>(join(dir, 'candles-meta.json'), {}).holidays ?? []);
+  const emptyPath = join(dir, 'ratios-empty.json');
+  const empty = new Set(readJson<string[]>(emptyPath, []));
+  const todo = weekdaysSince(START).filter((d) => !holidays.has(d) && !empty.has(d) && !existsSync(join(rDir, `${d}.json`)));
+  console.log(`每日本益比：還缺 ${todo.length} 天，這次最多 ${RATIO_MAX} 天`);
+  let n = 0;
+  for (const date of todo.slice(0, RATIO_MAX)) {
+    try {
+      const r = await ratiosOn(date);
+      if (r && Object.keys(r).length > 500) {
+        writeFileSync(join(rDir, `${date}.json`), JSON.stringify(r));
+        n++;
+      } else if (!r) empty.add(date);
+    } catch (e) {
+      console.log(`每日本益比 ${date} ✗ ${e}`);
+    }
+    await sleep(2500);
+  }
+  writeFileSync(emptyPath, JSON.stringify([...empty].sort()));
+  console.log(`每日本益比：這次補 ${n} 天`);
 }
 
 const dir = process.argv[2] ?? 'data';
 mkdirSync(dir, { recursive: true });
 await peHistory(dir);
+await ratioHistory(dir);
 await eventHistory(dir);
 await tdccHistory(dir);
