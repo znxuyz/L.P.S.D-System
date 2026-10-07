@@ -30,9 +30,10 @@ export function parseMopsTables(html: string): Table {
 
 /** 依主旨關鍵字分類重大訊息（對應網頁的三種特殊事件）。 */
 export function classifyEvent(subject: string): string | null {
-  const s = clean(subject);
+  // 公司名稱裡的「股份有限公司」不算取得股份
+  const s = clean(subject).replace(/股份有限公司/g, '公司');
   // 「合併財務報告」「合併營收」之類是例行公告，不是併購
-  const routine = /財務報告|財報|報表|營收|營業收入|自結|損益|股東會|法說會簡報|更正|背書保證|資金貸與/.test(s);
+  const routine = /財務報告|財報|報表|營收|營業收入|營運情形|自結|債券|損益|股東會|法說會簡報|更正|背書保證|資金貸與/.test(s);
   if (/(上修|調升|調高).*(財測|財務預測|展望|營運目標)|(財測|財務預測|展望).*(上修|調升|調高)/.test(s)) return 'guidance-up';
   if (!routine && /合併|併購|收購|公開收購|股份轉換|分割|取得.*(股權|股份)|處分.*(土地|廠房|不動產|使用權資產)|資產活化|都更|都市更新/.test(s)) return 'merger';
   if (/補助|補貼|獎勵|政府.*計畫|科專/.test(s)) return 'subsidy';

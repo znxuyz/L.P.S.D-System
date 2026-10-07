@@ -23,6 +23,9 @@ describe('classifyEvent', () => {
     expect(classifyEvent('獲經濟部科專計畫補助')).toBe('subsidy');
     expect(classifyEvent('公告本公司9月營收')).toBeNull();
     expect(classifyEvent('公告本公司115年9月合併營業收入')).toBeNull();
+    expect(classifyEvent('公告本公司一一五年九月份合併營運情形')).toBeNull();
+    expect(classifyEvent('代子公司元大證券公告取得 上海商業儲蓄銀行股份有限公司一百一十五年度第一期次順位金融債券')).toBeNull();
+    expect(classifyEvent('代子公司公告取得AmpUp, Inc. 100%股權')).toBe('merger');
   });
 });
 

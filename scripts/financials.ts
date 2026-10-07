@@ -212,7 +212,10 @@ async function events(dir: string, out: Record<string, FinRow>): Promise<void> {
       rmSync(join(evDir, f));
       continue;
     }
-    for (const [code, type] of readJson<Array<[string, string, string]>>(join(evDir, f), [])) {
+    for (const [code, , subject] of readJson<Array<[string, string, string]>>(join(evDir, f), [])) {
+      // 讀取時用最新的規則重新分類，規則修正後舊紀錄也會跟著更正
+      const type = classifyEvent(subject);
+      if (!type) continue;
       const r = (out[code] ??= {});
       r.events = [...new Set([...(r.events ?? []), type])];
       n++;
