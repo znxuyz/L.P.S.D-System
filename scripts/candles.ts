@@ -16,6 +16,10 @@ const MAX_DATES = Number(process.env.CANDLE_MAX_DATES ?? 80);
 /** 資料從這一天開始全部保留（不再只留一年）。 */
 const START = process.env.ARCHIVE_START ?? '2025-01-01';
 const GAP_MS = 2500;
+/** 這次執行的截止時間（毫秒）；到了就不再發新請求，已抓到的照常存檔。 */
+const DEADLINE = Number(process.env.DEADLINE ?? Infinity);
+const timeUp = () => Date.now() > DEADLINE;
+
 
 type Row = [string, number, number, number, number, number];
 interface Meta {
@@ -138,6 +142,7 @@ async function main(): Promise<void> {
 
   let fetched = 0;
   for (const date of todo.slice(0, MAX_DATES)) {
+    if (timeUp()) break;
     const [a, b] = await Promise.allSettled([done.twse.has(date) ? Promise.resolve(undefined) : twse(date), done.tpex.has(date) ? Promise.resolve(undefined) : tpex(date)]);
     const parts: string[] = [];
     let empty = 0;

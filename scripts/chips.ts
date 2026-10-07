@@ -17,6 +17,10 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const START = process.env.ARCHIVE_START ?? '2025-01-01';
 const INST_MAX = Number(process.env.INST_MAX ?? 60);
 const GAP_MS = 2500;
+/** 這次執行的截止時間（毫秒）；到了就不再發新請求，已抓到的照常存檔。 */
+const DEADLINE = Number(process.env.DEADLINE ?? Infinity);
+const timeUp = () => Date.now() > DEADLINE;
+
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const num = (v: unknown) => {
@@ -104,6 +108,7 @@ async function updateInst(dir: string, tradingDays: string[]): Promise<void> {
   const todo = tradingDays.filter((d) => !have.has(d));
   console.log(`法人：${tradingDays.length} 個交易日，缺 ${todo.length} 天，這次最多 ${INST_MAX} 天`);
   for (const date of todo.slice(0, INST_MAX)) {
+    if (timeUp()) break;
     const [a, b] = await Promise.allSettled([twseInst(date), tpexInst(date)]);
     if (a.status === 'fulfilled' && a.value) {
       // 檔案以日期為單位，上市、上櫃都成功才存，否則下次整天重抓
