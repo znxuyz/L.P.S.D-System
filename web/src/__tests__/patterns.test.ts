@@ -63,3 +63,24 @@ describe('detectPatterns', () => {
     expect(w!.status).toBe('可能在第 5 浪');
   });
 });
+
+describe('缺口與量價', () => {
+  it('找出未回補與已回補的缺口', () => {
+    const c = candles(legs([[0, 100], [20, 102]]));
+    // 第 21 天向上跳空到 110，之後一路在 110 以上 → 未回補
+    for (let k = 0; k < 10; k++) c.push({ ...c[c.length - 1], date: `2026-03-${String(k + 1).padStart(2, '0')}`, open: 110 + k, high: 111 + k, low: 109.5 + k, close: 110.5 + k, volume: k === 0 ? 4000 : 1000 });
+    const p = detectPatterns(c).patterns.find((x) => x.id === 'gap');
+    expect(p?.zones?.length).toBe(1);
+    expect(p!.zones![0].lo).toBeCloseTo(102 * 1.005, 1);
+    expect(p!.status).toBe('1 個未回補');
+  });
+
+  it('爆量長紅標記', () => {
+    const c = candles(Array.from({ length: 60 }, (_, i) => 100 + (i % 5)));
+    const lastC = c[c.length - 1];
+    c.push({ date: '2026-03-20', open: lastC.close, high: lastC.close * 1.07, low: lastC.close * 0.99, close: lastC.close * 1.06, volume: 5000 });
+    const v = detectPatterns(c).patterns.find((x) => x.id === 'volume');
+    expect(v?.points.some((pt) => pt.label === '長紅')).toBe(true);
+    expect(v?.summary).toContain('爆量長紅');
+  });
+});
