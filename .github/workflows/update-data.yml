@@ -16,6 +16,8 @@ on:
 
 permissions:
   contents: write
+  # 回補還沒完成時，自己觸發下一輪
+  actions: write
 
 # data 分支一次只讓一個工作寫入
 concurrency:
@@ -29,8 +31,8 @@ jobs:
     env:
       DATA_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
       ARCHIVE_START: '2025-01-01'
-      # 每小時的回補不用重抓每天只更新一次的資料
-      HOURLY: ${{ github.event.schedule == '23 * * * *' }}
+      # 每小時的回補（含自動接續的下一輪）不用重抓每天只更新一次的資料
+      HOURLY: ${{ github.event.schedule == '23 * * * *' || github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -59,7 +61,8 @@ jobs:
           TDCC_MAX: '1000000'
         run: |
           set +e
-          export DEADLINE=$(( $(date +%s) * 1000 + 50 * 60 * 1000 ))
+          START_S=$(date +%s)
+          export DEADLINE=$(( START_S * 1000 + 50 * 60 * 1000 ))
           (
             if [ "$HOURLY" != true ]; then node scripts/active-etf.ts .data; node scripts/stock-list.ts .data; fi
             node scripts/candles.ts .data
@@ -75,6 +78,8 @@ jobs:
           # 集保補完之後重算一次千張大戶變化（不發請求的部分很快）
           INST_MAX=0 HOURLY=true node scripts/chips.ts .data > chips2.log 2>&1
           for f in twse mops tdcc chips2; do echo "::group::$f"; tail -n 80 $f.log; echo "::endgroup::"; done
+          # 跑滿時間代表還有沒補完的資料
+          if [ $(( $(date +%s) - START_S )) -ge $(( 45 * 60 )) ]; then echo "MORE=true" >> "$GITHUB_ENV"; fi
 
       # data 分支只留一個版本（舊版本沒有用，避免儲存庫越來越大）
       - name: 存回 data 分支
@@ -87,3 +92,10 @@ jobs:
           git commit -q -m "Market data $(date -u +'%F %H:%M')"
           git push -f origin snapshot:data
           du -sh --exclude=.git .
+
+      # 每小時排程有時會延遲很久才開始；回補還沒完成就直接接著跑下一輪
+      - name: 接著跑下一輪
+        if: env.MORE == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run update-data.yml --repo "${{ github.repository }}" --ref main
