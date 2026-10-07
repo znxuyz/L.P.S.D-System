@@ -45,6 +45,24 @@ export interface FinData {
   >;
 }
 
+/** data/pe5y.json（scripts/history.ts 由每月月底的官方本益比算出）。 */
+export interface PeBands {
+  from: string;
+  to: string;
+  months: number;
+  stocks: Record<string, [number, number, number, number, number]>;
+}
+
+let pePending: Promise<PeBands | null> | null = null;
+
+export function loadPeBands(url = 'data/pe5y.json'): Promise<PeBands | null> {
+  pePending ??= fetch(url, { cache: 'no-store' })
+    .then((r) => (r.ok ? (r.json() as Promise<PeBands>) : null))
+    .then((j) => (j && typeof j.stocks === 'object' && Object.keys(j.stocks).length ? j : null))
+    .catch(() => null);
+  return pePending;
+}
+
 let finPending: Promise<FinData | null> | null = null;
 
 export function loadFinancials(url = 'data/fundamentals.json'): Promise<FinData | null> {
@@ -68,6 +86,7 @@ export interface RealData {
   directory: StockDirectory | null;
   chips: Chips | null;
   fin?: FinData | null;
+  pe?: PeBands | null;
 }
 
 /** 哪些欄位換成了真實資料（給頁面上的資料來源說明用）。 */
@@ -79,6 +98,7 @@ export interface RealCoverage {
   quarter: boolean;
   dividends: boolean;
   events: boolean;
+  pe5y: boolean;
 }
 
 export function coverageOf(real: RealData): RealCoverage {
@@ -89,6 +109,7 @@ export function coverageOf(real: RealData): RealCoverage {
     quarter: !!real.fin?.quarter,
     dividends: !!real.fin?.dividends,
     events: !!real.fin?.events,
+    pe5y: !!real.pe,
   };
 }
 
@@ -107,13 +128,14 @@ export function overlayReal(
   index: ReturnType<typeof indexDirectory>,
   chips: Chips | null,
   fin: FinData | null = null,
+  pe: PeBands | null = null,
 ): void {
   const d = index.get(code);
   if (d?.close) {
     if (d.pe && d.pe > 0) {
       f.eps4q = d.close / d.pe;
-      // 5 年本益比區間還是示意值，但要以真實本益比為中心，否則分位會失真
-      f.pe5y = peBand(code, d.pe);
+      // 有官方歷史本益比就用真實區間；沒有（上市不滿 2 年等）時用以真實本益比為中心的示意區間
+      f.pe5y = pe?.stocks[code] ?? peBand(code, d.pe);
     }
     // 證交所對虧損的公司不公布本益比（但有殖利率等其他欄位）
     else if (d.yieldPct !== undefined || d.pb !== undefined) f.eps4q = -Math.abs(f.eps4q || 1);
@@ -140,7 +162,7 @@ export function overlayReal(
 }
 
 /** 頁面上的資料來源說明。 */
-export function realNote(cov: RealCoverage, chips: Chips | null, fin: FinData | null = null): string {
+export function realNote(cov: RealCoverage, chips: Chips | null, fin: FinData | null = null, pe: PeBands | null = null): string {
   const real = ['股價'];
   if (cov.ratios) real.push('本益比', '殖利率');
   if (cov.inst) real.push(`法人連買賣（${chips!.inst!.asOf}）`);
@@ -148,11 +170,14 @@ export function realNote(cov: RealCoverage, chips: Chips | null, fin: FinData | 
   if (cov.quarter) real.push(`EPS 年增、毛利率、現金流（${fin!.quarter} 財報）`);
   if (cov.dividends) real.push('連續配息年數');
   if (cov.events) real.push(`特殊事件（近 ${fin!.events} 天重大訊息）`);
-  const mock = ['5 年本益比區間'];
+  if (cov.pe5y) real.push(`本益比區間（${pe!.from} ～ ${pe!.to}，${pe!.months} 個月）`);
+  const mock: string[] = [];
+  if (!cov.pe5y) mock.push('5 年本益比區間');
   if (!cov.quarter) mock.push('EPS 年增', '毛利率', '現金流');
   if (!cov.dividends) mock.push('配息年數');
   if (!cov.events) mock.push('特殊事件');
   if (!cov.inst) mock.push('法人籌碼');
   if (!cov.big) mock.push('千張大戶');
+  if (!mock.length) return `全部為官方資料：${real.join('、')}。`;
   return `真實資料：${real.join('、')}；仍為模擬資料：${mock.join('、')}，相關條件僅供參考。`;
 }
