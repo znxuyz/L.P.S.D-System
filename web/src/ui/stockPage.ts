@@ -335,7 +335,7 @@ function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechRepor
       <div class="kc-toggles" role="group" aria-label="圖上顯示的線">
         <label class="kc-toggle"><input type="checkbox" data-line="ma" /><svg width="16" height="6" aria-hidden="true"><line x1="0" x2="16" y1="3" y2="3" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2"></line></svg>MA</label>
         <label class="kc-toggle"><input type="checkbox" data-line="ema" /><svg width="16" height="6" aria-hidden="true"><line x1="0" x2="16" y1="3" y2="3" stroke="currentColor" stroke-width="1.8"></line></svg>EMA</label>
-        <label class="kc-toggle" title="自動畫出通道、W 底 / M 頭、頭肩、三角形、波浪"><input type="checkbox" data-line="pat" /><svg width="16" height="8" aria-hidden="true"><polyline points="0,7 5,1 9,5 16,0" fill="none" stroke="currentColor" stroke-width="1.6"></polyline></svg>型態</label>
+        <label class="kc-toggle" title="自動畫出通道、W 底 / M 頭、頭肩、三角形、波浪、跳空缺口、爆量"><input type="checkbox" data-line="pat" /><svg width="16" height="8" aria-hidden="true"><polyline points="0,7 5,1 9,5 16,0" fill="none" stroke="currentColor" stroke-width="1.6"></polyline></svg>型態</label>
       </div>
       <ul class="ma-legend" aria-label="均線：虛線為 MA，實線為 EMA"></ul>`;
     for (const box of el.querySelectorAll<HTMLInputElement>('[data-line]')) {
@@ -601,6 +601,7 @@ function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechRe
     const right = off + N - 1 + 2;
     const shown = patterns.filter((p) => !hiddenPatterns.has(p.id));
     if (!shown.length) return '';
+    let volMarks = '';
     const body = shown
       .map((p) => {
         const col = PATTERN_COLORS[p.id];
@@ -620,6 +621,24 @@ function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechRe
             return `<line x1="${xAt(l.a[0])}" y1="${y(l.a[1])}" x2="${xAt(i2)}" y2="${y(v2)}" stroke="${col}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? 'stroke-dasharray="6 4"' : ''} opacity="0.9"></line>${lab}`;
           })
           .join('');
+        // 量價的爆量標記畫在成交量柱上（不在價格區，避免和 K 線、缺口標籤擠在一起）
+        if (p.id === 'volume') {
+          let lastLabel = -Infinity;
+          volMarks += p.points
+            .filter((pt) => pt.i >= off && pt.i < off + N)
+            .map((pt) => {
+              const px = xAt(pt.i);
+              const top = yv(all[pt.i].volume);
+              // 相鄰的爆量只標一次文字，避免重疊
+              const label = px - lastLabel > 40;
+              if (label) lastLabel = px;
+              return `<path d="M${px - 4},${top - 9} L${px + 4},${top - 9} L${px},${top - 3} Z" fill="${col}"></path>${
+                label ? `<text class="pat-point" x="${px}" y="${top - 12}" text-anchor="middle" fill="${col}">爆量${esc(pt.label === '爆量' ? '' : pt.label)}</text>` : ''
+              }`;
+            })
+            .join('');
+          return '';
+        }
         const pts = p.points
           .filter((pt) => pt.i >= off && pt.i < off + N)
           .map((pt) => {
@@ -629,10 +648,21 @@ function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechRe
               <text class="pat-point" x="${px}" y="${py}" text-anchor="middle" fill="${col}">${esc(pt.label)}</text>`;
           })
           .join('');
-        return `<g class="pat pat-${p.id}">${lines}${pts}</g>`;
+        const zones = (p.zones ?? [])
+          .filter((z) => z.i < off + N)
+          .map((z) => {
+            const x1 = Math.max(xAt(z.i) - step / 2, pad.l);
+            const x2 = xAt(right);
+            const top = y(z.hi);
+            const hgt = Math.max(1.5, y(z.lo) - y(z.hi));
+            const lab = w >= 520 && z.i >= off ? `<text class="pat-label" x="${x1 + 3}" y="${top - 3}" fill="${col}">${esc(z.label)}</text>` : '';
+            return `<rect x="${x1}" y="${top}" width="${Math.max(0, x2 - x1)}" height="${hgt}" fill="${col}" fill-opacity="0.12" stroke="${col}" stroke-opacity="0.5" stroke-dasharray="3 3"></rect>${lab}`;
+          })
+          .join('');
+        return `<g class="pat pat-${p.id}">${zones}${lines}${pts}</g>`;
       })
       .join('');
-    return `<defs><clipPath id="kclip"><rect x="${pad.l}" y="${pad.t}" width="${w - pad.l - pad.r}" height="${priceBottom - pad.t}"></rect></clipPath></defs><g clip-path="url(#kclip)">${body}</g>`;
+    return `<defs><clipPath id="kclip"><rect x="${pad.l}" y="${pad.t}" width="${w - pad.l - pad.r}" height="${priceBottom - pad.t}"></rect></clipPath></defs><g clip-path="url(#kclip)">${body}</g>${volMarks}`;
   }
 
   function levelLine(v: number, label: string): string {

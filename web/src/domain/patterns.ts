@@ -40,13 +40,22 @@ export interface Scenario {
   bias: Bias;
 }
 
+/** 價格區間（例如尚未回補的缺口），從 i 畫到圖的右邊。 */
+export interface PatternZone {
+  i: number;
+  lo: number;
+  hi: number;
+  label: string;
+}
+
 export interface Pattern {
-  id: 'channel' | 'double-bottom' | 'double-top' | 'hs-top' | 'hs-bottom' | 'triangle' | 'wave';
+  id: 'channel' | 'double-bottom' | 'double-top' | 'hs-top' | 'hs-bottom' | 'triangle' | 'wave' | 'gap' | 'volume';
   name: string;
   bias: Bias;
   status: string;
   lines: PatternLine[];
   points: PatternPoint[];
+  zones?: PatternZone[];
   /** 一句話說明目前的狀況。 */
   summary: string;
   scenarios: Scenario[];
@@ -405,6 +414,205 @@ function waves(piv: Pivot[]): Pattern | null {
   return null;
 }
 
+
+// ------------------------------------------------------------ 跳空缺口
+
+export interface Gap {
+  i: number;
+  dir: 'up' | 'down';
+  /** 缺口原本的上下緣。 */
+  lo: number;
+  hi: number;
+  /** 還沒被回補的部分（完全回補時 lo ≥ hi）。 */
+  openLo: number;
+  openHi: number;
+  filled: boolean;
+  /** 回補的那一天。 */
+  filledAt?: number;
+  kind: '突破缺口' | '中繼缺口' | '竭盡缺口' | '普通缺口';
+  volRatio: number;
+}
+
+const avg = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / Math.max(1, arr.length);
+
+/** 找出跳空缺口與回補狀態。缺口太小（< 0.3%）忽略。 */
+export function findGaps(c: Candle[], lookback = 120): Gap[] {
+  const out: Gap[] = [];
+  for (let i = Math.max(1, c.length - lookback); i < c.length; i++) {
+    const prev = c[i - 1];
+    const cur = c[i];
+    const up = cur.low > prev.high * 1.003;
+    const down = cur.high < prev.low * 0.997;
+    if (!up && !down) continue;
+    const lo = up ? prev.high : cur.high;
+    const hi = up ? cur.low : prev.low;
+    let openLo = lo;
+    let openHi = hi;
+    let filledAt: number | undefined;
+    for (let j = i + 1; j < c.length; j++) {
+      // 往上的缺口被往下的價格回補；往下的缺口被往上的價格回補
+      if (up) openHi = Math.min(openHi, c[j].low);
+      else openLo = Math.max(openLo, c[j].high);
+      if (openLo >= openHi) {
+        filledAt = j;
+        break;
+      }
+    }
+    const vol20 = avg(c.slice(Math.max(0, i - 20), i).map((x) => x.volume));
+    const volRatio = vol20 > 0 ? cur.volume / vol20 : 1;
+    const win = c.slice(Math.max(0, i - 20), i);
+    const rangeHi = Math.max(...win.map((x) => x.high));
+    const rangeLo = Math.min(...win.map((x) => x.low));
+    // 缺口前一段的漲跌幅，用來分辨中繼（趨勢中途）與竭盡（走了一大段之後）
+    const before = c[Math.max(0, i - 30)].close;
+    const run = (prev.close - before) / before;
+    let kind: Gap['kind'] = '普通缺口';
+    const breaks = up ? cur.low > rangeHi : cur.high < rangeLo;
+    const prior = up ? run : -run;
+    if (filledAt !== undefined && filledAt - i <= 5 && prior > 0.2) kind = '竭盡缺口';
+    else if (breaks && prior < 0.1 && volRatio >= 1.3) kind = '突破缺口';
+    else if (prior >= 0.1) kind = '中繼缺口';
+    out.push({ i, dir: up ? 'up' : 'down', lo, hi, openLo, openHi, filled: filledAt !== undefined, filledAt, kind, volRatio });
+  }
+  return out;
+}
+
+function gaps(c: Candle[]): Pattern | null {
+  const all = findGaps(c);
+  if (!all.length) return null;
+  const last = c.length - 1;
+  const close = c[last].close;
+  const open = all.filter((g) => !g.filled);
+  const recentFilled = all.filter((g) => g.filled && g.filledAt! >= last - 20);
+  // 圖上只畫還沒回補、離現價最近的 3 個缺口（30% 以內）
+  const dist = (g: Gap) => Math.min(Math.abs(g.openLo - close), Math.abs(g.openHi - close)) / close;
+  const shown = open
+    .filter((g) => dist(g) < 0.3)
+    .sort((a, b) => dist(a) - dist(b))
+    .slice(0, 3);
+  const below = shown.filter((g) => g.openHi <= close).sort((a, b) => b.openHi - a.openHi)[0];
+  const above = shown.filter((g) => g.openLo >= close).sort((a, b) => a.openLo - b.openLo)[0];
+  const newest = all[all.length - 1];
+  const fresh = newest.i >= last - 3 ? newest : null;
+  let bias: Bias = 'neutral';
+  if (fresh && !fresh.filled) bias = fresh.dir === 'up' ? 'bull' : 'bear';
+  else if (below && !above) bias = 'bull';
+  else if (above && !below) bias = 'bear';
+  const word = (g: Gap) => `${g.dir === 'up' ? '向上' : '向下'}${g.kind}（${c[g.i].date.slice(5).replace('-', '/')}，${f2(g.openLo)}～${f2(g.openHi)}）`;
+  const parts: string[] = [];
+  if (fresh) parts.push(`最近出現${word(fresh)}，當天量為均量 ${fresh.volRatio.toFixed(1)} 倍${fresh.filled ? '，已回補' : ''}`);
+  parts.push(`近半年共 ${all.length} 個缺口，${open.length} 個還沒回補`);
+  if (recentFilled.length) parts.push(`近 20 日回補了 ${recentFilled.length} 個`);
+  const scen: Scenario[] = [];
+  if (below)
+    scen.push(
+      { when: `回測下方缺口 ${f2(below.openLo)}～${f2(below.openHi)} 不補`, then: '缺口成為支撐，多方仍強', bias: 'bull' },
+      { when: `跌破 ${f2(below.openLo)}（缺口完全回補）`, then: below.kind === '突破缺口' ? '突破失敗，常見回到原本的整理區間' : '支撐失守，短線轉弱', bias: 'bear' },
+    );
+  if (above)
+    scen.push(
+      { when: `反彈到上方缺口 ${f2(above.openLo)}～${f2(above.openHi)} 過不去`, then: '缺口成為壓力，反彈有限', bias: 'bear' },
+      { when: `站上 ${f2(above.openHi)}（缺口完全回補）`, then: '套牢區被消化，壓力減輕', bias: 'bull' },
+    );
+  if (fresh && !fresh.filled && fresh.kind === '突破缺口')
+    scen.push({ when: '三天內不回補', then: '突破缺口成立，常是一段行情的起點', bias: fresh.dir === 'up' ? 'bull' : 'bear' });
+  if (!scen.length) scen.push({ when: '出現新的跳空', then: '帶量且三天內不回補較可信；缺口很快被回補常是假突破', bias: 'neutral' });
+  return {
+    id: 'gap',
+    name: '跳空缺口',
+    bias,
+    status: open.length ? `${open.length} 個未回補` : '都已回補',
+    lines: [],
+    points: [],
+    zones: shown.map((g) => ({ i: g.i, lo: g.openLo, hi: g.openHi, label: `${g.dir === 'up' ? '↑' : '↓'}缺口` })),
+    summary: parts.join('；') + '。',
+    scenarios: scen,
+  };
+}
+
+// ------------------------------------------------------------ 量價關係
+
+/** OBV（能量潮）：收漲加量、收跌減量。 */
+export function obv(c: Candle[]): number[] {
+  const out: number[] = [0];
+  for (let i = 1; i < c.length; i++) out.push(out[i - 1] + Math.sign(c[i].close - c[i - 1].close) * c[i].volume);
+  return out;
+}
+
+function volumePrice(c: Candle[]): Pattern | null {
+  if (c.length < 40) return null;
+  const last = c.length - 1;
+  const vol20 = avg(c.slice(-21, -1).map((x) => x.volume));
+  if (!(vol20 > 0)) return null;
+  const v5 = avg(c.slice(-5).map((x) => x.volume));
+  const vPrev = avg(c.slice(-10, -5).map((x) => x.volume));
+  const p5 = (c[last].close - c[last - 5].close) / c[last - 5].close;
+  const volUp = v5 > vPrev * 1.15;
+  const volDown = v5 < vPrev * 0.85;
+  const priceUp = p5 > 0.01;
+  const priceDown = p5 < -0.01;
+  let rel = '價量持平';
+  let bias: Bias = 'neutral';
+  let relNote = '價格與成交量都沒有明顯變化';
+  if (priceUp && volUp) [rel, bias, relNote] = ['價漲量增', 'bull', '上漲有量能支持，屬於健康的攻擊'];
+  else if (priceUp && volDown) [rel, bias, relNote] = ['價漲量縮', 'neutral', '漲勢缺乏追價，留意上漲動能減弱（量價背離）'];
+  else if (priceDown && volUp) [rel, bias, relNote] = ['價跌量增', 'bear', '賣壓湧出，短線偏弱'];
+  else if (priceDown && volDown) [rel, bias, relNote] = ['價跌量縮', 'neutral', '賣壓減輕，屬於量縮整理，止跌要看能否放量轉強'];
+
+  const points: PatternPoint[] = [];
+  const notes: string[] = [];
+  const scen: Scenario[] = [];
+  // 近 10 日的爆量 K 棒
+  for (let i = last - 9; i <= last; i++) {
+    const base = avg(c.slice(Math.max(0, i - 20), i).map((x) => x.volume));
+    const ratio = base > 0 ? c[i].volume / base : 1;
+    if (ratio < 2.5) continue;
+    const body = (c[i].close - c[i].open) / c[i].open;
+    const kind = body >= 0.03 ? '爆量長紅' : body <= -0.03 ? '爆量長黑' : '爆量';
+    points.push({ i, p: c[i].high, label: kind.replace('爆量', '') || '爆量', pos: 'above' });
+    notes.push(`${c[i].date.slice(5).replace('-', '/')} ${kind}（均量 ${ratio.toFixed(1)} 倍）`);
+    const hi20 = Math.max(...c.slice(Math.max(0, i - 20), i).map((x) => x.high));
+    if (kind === '爆量長黑' && c[i].high >= hi20 * 0.97) scen.push({ when: `${c[i].date.slice(5).replace('-', '/')} 高檔爆量長黑的低點 ${f2(c[i].low)} 被跌破`, then: '高檔出貨訊號確認，短線容易回檔', bias: 'bear' });
+    if (kind === '爆量長紅' && c[i].close >= hi20) scen.push({ when: `守住 ${c[i].date.slice(5).replace('-', '/')} 爆量長紅的低點 ${f2(c[i].low)}`, then: '帶量突破有效，主力成本區形成支撐', bias: 'bull' });
+  }
+  // 頂背離：創 20 日新高，但量比前一個高點時少
+  const closes = c.map((x) => x.close);
+  const hi20 = Math.max(...closes.slice(-21, -1));
+  if (c[last].close > hi20) {
+    const prevHighIdx = closes.slice(-60, -10).reduce((best, v, k, arr) => (v > arr[best] ? k : best), 0) + c.length - 60;
+    const vNow = avg(c.slice(-3).map((x) => x.volume));
+    const vThen = avg(c.slice(Math.max(0, prevHighIdx - 1), prevHighIdx + 2).map((x) => x.volume));
+    if (vThen > 0 && vNow < vThen * 0.7) {
+      notes.push('價格創 20 日新高，但量比前波高點少 30% 以上（量價背離）');
+      scen.push({ when: '新高後量能持續萎縮', then: '追價意願不足，容易形成假突破', bias: 'bear' });
+    }
+  }
+  // OBV 和價格的方向（近 20 日）
+  const o = obv(c);
+  const oChg = o[last] - o[last - 20];
+  const pChg = c[last].close - c[last - 20].close;
+  if (pChg > 0 && oChg < 0) notes.push('近 20 日價格上漲但 OBV 下降，資金沒有跟進');
+  else if (pChg < 0 && oChg > 0) notes.push('近 20 日價格下跌但 OBV 上升，可能有資金逢低承接');
+  const lowVol = v5 < vol20 * 0.6;
+  if (lowVol) notes.push(`近 5 日均量只有 20 日均量的 ${Math.round((v5 / vol20) * 100)}%，量縮整理`);
+  if (lowVol) scen.push({ when: '量縮後出現帶量長紅', then: '整理結束、表態向上的機率提高', bias: 'bull' });
+  if (!scen.length)
+    scen.push(
+      { when: '價漲量增延續', then: '趨勢健康，可續抱', bias: 'bull' },
+      { when: '價漲量縮、或高檔爆量長黑', then: '漲勢可能進入尾聲', bias: 'bear' },
+    );
+  return {
+    id: 'volume',
+    name: '量價分析',
+    bias,
+    status: rel,
+    lines: [],
+    points,
+    summary: `近 5 日${rel}：${relNote}。${notes.length ? notes.join('；') + '。' : ''}`,
+    scenarios: scen,
+  };
+}
+
 /** 每種型態固定一個顏色（多空看狀態標籤），避免同方向的型態疊在一起分不清楚。 */
 export const PATTERN_COLORS: Record<Pattern['id'], string> = {
   channel: '#8ff0ff',
@@ -414,6 +622,8 @@ export const PATTERN_COLORS: Record<Pattern['id'], string> = {
   'hs-top': '#ffa36b',
   'hs-bottom': '#ffa36b',
   triangle: '#b9f27c',
+  gap: '#e2e8f0',
+  volume: '#c4b5fd',
 };
 
 /** 偵測所有型態（只看最近一年內）。 */
@@ -430,6 +640,8 @@ export function detectPatterns(all: Candle[]): { pivots: Pivot[]; patterns: Patt
     doubleBottom(c, piv, false),
     triangle(c, piv),
     waves(piv),
+    gaps(c),
+    volumePrice(c),
   ].filter((p): p is Pattern => !!p);
   // 頭肩和雙重頂底同時成立時，留下頭肩（比較完整的型態）
   const hs = found.some((p) => p.id === 'hs-top' || p.id === 'hs-bottom');
@@ -446,6 +658,7 @@ export function detectPatterns(all: Candle[]): { pivots: Pivot[]; patterns: Patt
   for (const p of patterns) {
     p.lines = p.lines.map((l) => ({ ...l, a: [shift(l.a[0]), l.a[1]], b: [shift(l.b[0]), l.b[1]] }));
     p.points = p.points.map((pt) => ({ ...pt, i: shift(pt.i) }));
+    p.zones = p.zones?.map((z) => ({ ...z, i: shift(z.i) }));
   }
   return { pivots: piv.map((p) => ({ ...p, i: shift(p.i) })), patterns };
 }
@@ -462,5 +675,15 @@ export const PATTERN_GUIDE: Array<{ name: string; bias: Bias; shape: string; whe
   { name: '上升三角形', bias: 'bull', shape: '高點持平、低點墊高', when: '帶量突破水平壓力', then: '多半向上突破，目標 ≈ 三角形開口高度' },
   { name: '下降三角形', bias: 'bear', shape: '低點持平、高點下移', when: '跌破水平支撐', then: '多半向下跌破' },
   { name: '對稱三角形', bias: 'neutral', shape: '高點下移、低點墊高，越收越窄', when: '價格貼近頂點、量縮', then: '突破方向就是接下來的走勢，假突破也常見' },
+  { name: '突破缺口', bias: 'neutral', shape: '整理區間後帶量跳空，脫離原本的區間', when: '三天內不回補', then: '常是新一段行情的起點，缺口成為支撐（或壓力）' },
+  { name: '中繼缺口', bias: 'neutral', shape: '趨勢走到一半出現的跳空', when: '缺口不被回補', then: '趨勢延續；常用缺口前的漲幅估算後面的距離' },
+  { name: '竭盡缺口', bias: 'neutral', shape: '走了一大段之後的跳空，常伴隨爆量', when: '幾天內就被回補', then: '趨勢可能結束，留意反轉' },
+  { name: '缺口回補', bias: 'neutral', shape: '價格回到跳空前的價位，把缺口填滿', when: '向上缺口被完全回補', then: '原本的突破失敗、支撐失守；向下缺口回補則是壓力被消化' },
+  { name: '價漲量增', bias: 'bull', shape: '價格上漲、成交量放大', when: '突破壓力時特別明顯', then: '健康的攻擊，趨勢容易延續' },
+  { name: '價漲量縮', bias: 'neutral', shape: '價格上漲、成交量萎縮', when: '在高檔出現', then: '追價意願不足（量價背離），漲勢可能趨緩' },
+  { name: '價跌量增', bias: 'bear', shape: '價格下跌、成交量放大', when: '跌破支撐時', then: '賣壓湧出，短線偏弱' },
+  { name: '價跌量縮', bias: 'neutral', shape: '價格下跌、成交量萎縮', when: '回檔到支撐附近', then: '賣壓減輕的量縮整理，等放量表態' },
+  { name: '爆量長黑', bias: 'bear', shape: '成交量是均量數倍、收一根長黑 K', when: '出現在高檔', then: '常見的出貨訊號，跌破長黑低點更確認' },
+  { name: '爆量長紅', bias: 'bull', shape: '成交量是均量數倍、收一根長紅 K', when: '突破整理區間時', then: '主力進場的攻擊訊號，長紅低點成為支撐' },
   { name: '艾略特 5 波', bias: 'neutral', shape: '推動浪 1-2-3-4-5，接著 A-B-C 修正', when: '第 2 浪不破起點、第 3 浪不是最短、第 4 浪不碰第 1 浪高點', then: '第 3 浪通常最強；第 5 浪後容易修正' },
 ];
