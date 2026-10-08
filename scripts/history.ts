@@ -215,34 +215,49 @@ async function tdccHistory(dir: string): Promise<void> {
   const targets = [all[3], ...all.filter((_, i) => i !== 3)].filter(Boolean);
   let budget = TDCC_MAX;
   let ok = 0;
-  let fail = 0;
+  let empty = 0;
+  // 連續失敗（例外或查不到）太多次代表可能被擋，停下來；個別股票該週沒有資料（例如已下市）則記下來，下次跳過
+  let streak = 0;
+  const missingPath = join(dir, 'tdcc-missing.json');
+  const missing = readJson<Record<string, string[]>>(missingPath, {});
   for (const target of targets) {
-    if (budget <= 0 || fail > 30 || timeUp()) break;
+    if (budget <= 0 || streak > 50 || timeUp()) break;
     const path = join(tdccDir, `${target}.json`);
     const have = readJson<Record<string, number>>(path, {});
-    const todo = codes.filter((c) => have[c] === undefined);
+    const skip = new Set(missing[target] ?? []);
+    const todo = codes.filter((c) => have[c] === undefined && !skip.has(c));
     if (!todo.length) continue;
     console.log(`集保 ${target}：已有 ${Object.keys(have).length} 檔，還缺 ${todo.length} 檔`);
     for (const code of todo.slice(0, budget)) {
-      if (timeUp()) break;
+      if (timeUp() || streak > 50) break;
       budget--;
       try {
         const v = await tdccBig(s, code, target.replace(/-/g, ''));
         if (v !== null) {
           have[code] = v;
           ok++;
-        } else if (++fail > 30 && ok === 0) throw new Error('連續查不到資料，停止');
+          streak = 0;
+        } else {
+          (missing[target] ??= []).push(code);
+          empty++;
+          streak++;
+        }
       } catch (e) {
         console.log(`集保 ${code} ✗ ${e}`);
-        if (++fail > 30) break;
+        streak++;
         s = await tdccSession().catch(() => s);
       }
-      if ((ok + fail) % 100 === 0) writeFileSync(path, JSON.stringify(have));
+      if ((ok + empty) % 100 === 0) {
+        writeFileSync(path, JSON.stringify(have));
+        writeFileSync(missingPath, JSON.stringify(missing));
+      }
       await sleep(1000);
     }
     writeFileSync(path, JSON.stringify(have));
+    writeFileSync(missingPath, JSON.stringify(missing));
   }
-  console.log(`集保：這次補 ${ok} 筆，失敗 ${fail} 筆`);
+  if (streak > 50) console.log('集保：連續 50 次查不到，可能被擋，先停止');
+  console.log(`集保：這次補 ${ok} 筆，${empty} 筆該週沒有資料（已記下，下次跳過）`);
 }
 
 // ------------------------------------------------------------ 歷史重大訊息
