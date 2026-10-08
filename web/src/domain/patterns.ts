@@ -1,4 +1,5 @@
 import type { Candle } from './technicals';
+import { detectCandles } from './candlesticks';
 
 /**
  * K 線型態自動辨識：先用「轉折點」（ZigZag）找出波段高低點，再從轉折點組合出常見型態，
@@ -25,6 +26,8 @@ export interface PatternLine {
   extend?: boolean;
   dash?: boolean;
   label?: string;
+  /** 標籤寫在線的起點（左邊），例如費波納契各層，避免擠在右邊價格軸。 */
+  labelAt?: 'start';
 }
 
 export interface PatternPoint {
@@ -49,13 +52,41 @@ export interface PatternZone {
 }
 
 export interface Pattern {
-  id: 'channel' | 'double-bottom' | 'double-top' | 'hs-top' | 'hs-bottom' | 'triangle' | 'wave' | 'gap' | 'volume';
+  id:
+    | 'channel'
+    | 'double-bottom'
+    | 'double-top'
+    | 'hs-top'
+    | 'hs-bottom'
+    | 'triangle'
+    | 'wave'
+    | 'gap'
+    | 'volume'
+    | 'candle'
+    | 'flag'
+    | 'wedge'
+    | 'broadening'
+    | 'island'
+    | 'rounding'
+    | 'cup'
+    | 'v-reversal'
+    | 'triple'
+    | 'fib'
+    | 'vprofile'
+    | 'boll'
+    | 'deduct';
   name: string;
   bias: Bias;
   status: string;
   lines: PatternLine[];
   points: PatternPoint[];
   zones?: PatternZone[];
+  /** 折線或曲線（例如圓弧、布林通道），每條是一串 [索引, 價格]。 */
+  paths?: Array<{ pts: Array<[number, number]>; dash?: boolean; width?: number }>;
+  /** 分價量表：每個價格區間的成交量（0～1 為相對最大值的比例）。 */
+  hbars?: Array<{ lo: number; hi: number; v: number; poc?: boolean; inValue?: boolean }>;
+  /** 小標記（例如 K 棒訊號、扣抵位置）：只畫一個符號＋短字。 */
+  marks?: Array<{ i: number; p: number; label: string; pos: 'above' | 'below'; bias: Bias }>;
   /** 一句話說明目前的狀況。 */
   summary: string;
   scenarios: Scenario[];
@@ -613,6 +644,532 @@ function volumePrice(c: Candle[]): Pattern | null {
   };
 }
 
+// ------------------------------------------------------------ 楔形 / 擴散喇叭
+
+function wedges(c: Candle[], piv: Pivot[]): Pattern | null {
+  const last = c.length - 1;
+  const recent = piv.filter((p) => p.i >= last - 90);
+  const hs = recent.filter((p) => p.kind === 'H').slice(-3);
+  const ls = recent.filter((p) => p.kind === 'L').slice(-3);
+  if (hs.length < 2 || ls.length < 2) return null;
+  const start = Math.min(hs[0].i, ls[0].i);
+  if (last - start < 15) return null;
+  const H = fit(hs.map((p) => p.i), hs.map((p) => p.price));
+  const L = fit(ls.map((p) => p.i), ls.map((p) => p.price));
+  const ref = c[last].close;
+  const sh = (H.b / ref) * 100;
+  const sl = (L.b / ref) * 100;
+  const flat = 0.06;
+  const up = (i: number) => H.a + H.b * i;
+  const dn = (i: number) => L.a + L.b * i;
+  const cl = c[last].close;
+  const lines: PatternLine[] = [
+    { a: [start, up(start)], b: [last, up(last)], extend: true, label: '上緣' },
+    { a: [start, dn(start)], b: [last, dn(last)], extend: true, label: '下緣' },
+  ];
+  if (sh > flat && sl < -flat) {
+    return {
+      id: 'broadening',
+      name: '擴散喇叭型',
+      bias: 'neutral',
+      status: '震盪加劇',
+      lines,
+      points: [],
+      summary: `高點越來越高、低點越來越低，波動放大、多空都不穩定，常出現在頭部區。上緣約 ${f2(up(last))}、下緣約 ${f2(dn(last))}。`,
+      scenarios: [
+        { when: `跌破下緣 ${f2(dn(last))}`, then: '喇叭頂確認，下跌力道通常不小', bias: 'bear' },
+        { when: `站上上緣 ${f2(up(last))}`, then: '少見的向上突破，但波動仍大', bias: 'bull' },
+        { when: '在上下緣之間來回', then: '不適合追價，等方向明確', bias: 'neutral' },
+      ],
+    };
+  }
+  const rising = sh > flat && sl > flat && sl > sh;
+  const falling = sh < -flat && sl < -flat && sh < sl;
+  if (!rising && !falling || up(last) <= dn(last)) return null;
+  const status = cl > up(last) ? '已向上突破' : cl < dn(last) ? '已向下跌破' : '收斂中';
+  return {
+    id: 'wedge',
+    name: rising ? '上升楔形' : '下降楔形',
+    bias: rising ? (status === '已向上突破' ? 'bull' : 'bear') : status === '已向下跌破' ? 'bear' : 'bull',
+    status,
+    lines,
+    points: [],
+    summary: rising
+      ? `高點、低點都在墊高，但低點墊高得更快、越收越窄，上漲力道在減弱，通常向下跌破。目前${status}。`
+      : `高點、低點都在下移，但高點下移得更快、越收越窄，跌勢在減緩，通常向上突破。目前${status}。`,
+    scenarios: rising
+      ? [
+          { when: `跌破下緣 ${f2(dn(last))}`, then: '上升楔形確認，常回到楔形起漲點附近', bias: 'bear' },
+          { when: `帶量站上上緣 ${f2(up(last))}`, then: '型態失效，反而加速上漲', bias: 'bull' },
+        ]
+      : [
+          { when: `站上上緣 ${f2(up(last))}`, then: '下降楔形確認，常反彈回楔形起跌點附近', bias: 'bull' },
+          { when: `跌破下緣 ${f2(dn(last))}`, then: '型態失效，跌勢延續', bias: 'bear' },
+        ],
+  };
+}
+
+// ------------------------------------------------------------ 旗形 / 三角旗
+
+function flags(c: Candle[]): Pattern | null {
+  const last = c.length - 1;
+  // 旗桿：近 35 天內，15 天以內漲跌 15% 以上；旗面：之後 5～20 天的整理
+  for (let end = last - 5; end >= Math.max(15, last - 25); end--) {
+    for (const dir of [1, -1] as const) {
+      let s = end;
+      for (let k = end - 1; k >= end - 15 && k >= 0; k--) if (dir * (c[k].close - c[s].close) < 0) s = k;
+      const pole = (c[end].close - c[s].close) / c[s].close;
+      if (dir * pole < 0.15 || end - s < 3) continue;
+      const body = c.slice(end + 1);
+      if (body.length < 5 || body.length > 20) continue;
+      const hi = Math.max(...body.map((x) => x.high));
+      const lo = Math.min(...body.map((x) => x.low));
+      const poleLen = Math.abs(c[end].close - c[s].close);
+      if (hi - lo > poleLen * 0.5) continue;
+      // 旗面不能吐回太多
+      if (dir === 1 ? lo < c[end].close - poleLen * 0.5 : hi > c[end].close + poleLen * 0.5) continue;
+      const xs = body.map((_, k) => end + 1 + k);
+      const H = fit(xs, body.map((x) => x.high));
+      const L = fit(xs, body.map((x) => x.low));
+      const pennant = H.b < 0 && L.b > 0;
+      const cl = c[last].close;
+      const top = H.a + H.b * last;
+      const bot = L.a + L.b * last;
+      const broke = dir === 1 ? cl > top : cl < bot;
+      const failed = dir === 1 ? cl < bot : cl > top;
+      const target = dir === 1 ? top + poleLen : bot - poleLen;
+      const name = `${dir === 1 ? '上升' : '下降'}${pennant ? '三角旗' : '旗形'}`;
+      return {
+        id: 'flag',
+        name,
+        bias: failed ? 'neutral' : dir === 1 ? 'bull' : 'bear',
+        status: broke ? '已突破' : failed ? '已失效' : '整理中',
+        lines: [
+          { a: [s, c[s].close], b: [end, c[end].close], label: '旗桿' },
+          { a: [end + 1, H.a + H.b * (end + 1)], b: [last, top], extend: true },
+          { a: [end + 1, L.a + L.b * (end + 1)], b: [last, bot], extend: true },
+        ],
+        points: [],
+        summary: `${body.length + end - s} 天前開始，${end - s} 天內${dir === 1 ? '急漲' : '急跌'} ${Math.abs(pole * 100).toFixed(0)}%（旗桿），之後 ${body.length} 天小幅整理（旗面）。旗形是中繼型態，突破後常再走一段和旗桿差不多的距離。`,
+        scenarios: [
+          { when: `${dir === 1 ? '帶量突破' : '跌破'}旗面 ${f2(dir === 1 ? top : bot)}`, then: `延續原趨勢，等幅目標約 ${f2(target)}`, bias: dir === 1 ? 'bull' : 'bear' },
+          { when: `反向${dir === 1 ? '跌破' : '突破'} ${f2(dir === 1 ? bot : top)}`, then: '旗形失敗，原趨勢可能結束', bias: dir === 1 ? 'bear' : 'bull' },
+          { when: '整理超過 3～4 週還沒突破', then: '動能消退，旗形的參考性降低', bias: 'neutral' },
+        ],
+      };
+    }
+  }
+  return null;
+}
+
+// ------------------------------------------------------------ 島狀反轉
+
+function island(c: Candle[]): Pattern | null {
+  const gs = findGaps(c, 160);
+  for (let k = gs.length - 1; k >= 1; k--) {
+    const b = gs[k];
+    for (let j = k - 1; j >= 0; j--) {
+      const a = gs[j];
+      if (b.i - a.i > 20) break;
+      if (a.dir === b.dir) continue;
+      // 島的期間至少 1 天，兩個缺口重疊在差不多的價位
+      const top = a.dir === 'up';
+      const seg = c.slice(a.i, b.i);
+      if (!seg.length) continue;
+      const islandLo = Math.min(...seg.map((x) => x.low));
+      const islandHi = Math.max(...seg.map((x) => x.high));
+      const ok = top ? islandLo > Math.max(c[a.i - 1].high, c[b.i].high) : islandHi < Math.min(c[a.i - 1].low, c[b.i].low);
+      if (!ok || b.i < c.length - 60) continue;
+      return {
+        id: 'island',
+        name: top ? '島狀反轉（頂部）' : '島狀反轉（底部）',
+        bias: b.filled ? 'neutral' : top ? 'bear' : 'bull',
+        status: b.filled ? '第二個缺口已回補（效力減弱）' : '成立',
+        lines: [],
+        points: [],
+        zones: [
+          { i: a.i, lo: Math.min(a.lo, a.hi), hi: Math.max(a.lo, a.hi), label: '缺口 1' },
+          { i: b.i, lo: Math.min(b.lo, b.hi), hi: Math.max(b.lo, b.hi), label: '缺口 2' },
+        ],
+        summary: `${c[a.i].date.slice(5).replace('-', '/')} 跳空${top ? '向上' : '向下'}、${c[b.i].date.slice(5).replace('-', '/')} 又反向跳空，中間 ${b.i - a.i} 天像一座孤島，是強烈的${top ? '頭部' : '底部'}反轉訊號。`,
+        scenarios: [
+          { when: `第二個缺口 ${f2(Math.min(b.lo, b.hi))}～${f2(Math.max(b.lo, b.hi))} 不被回補`, then: top ? '反轉確認，下跌容易持續' : '反轉確認，上漲容易持續', bias: top ? 'bear' : 'bull' },
+          { when: '價格回補第二個缺口', then: '島狀反轉失效', bias: 'neutral' },
+        ],
+      };
+    }
+  }
+  return null;
+}
+
+// ------------------------------------------------------------ 圓弧底 / 圓弧頂、杯柄
+
+/** 二次曲線 y = a + b·x + c·x² 的最小平方解，回傳係數與 R²。 */
+function quadFit(xs: number[], ys: number[]): { a: number; b: number; c: number; r2: number } {
+  const n = xs.length;
+  let s1 = 0, s2 = 0, s3 = 0, s4 = 0, t0 = 0, t1 = 0, t2 = 0;
+  for (let k = 0; k < n; k++) {
+    const x = xs[k];
+    const y = ys[k];
+    s1 += x; s2 += x * x; s3 += x ** 3; s4 += x ** 4;
+    t0 += y; t1 += x * y; t2 += x * x * y;
+  }
+  // 解 3×3 正規方程
+  const m = [[n, s1, s2, t0], [s1, s2, s3, t1], [s2, s3, s4, t2]];
+  for (let col = 0; col < 3; col++) {
+    let piv = col;
+    for (let r = col + 1; r < 3; r++) if (Math.abs(m[r][col]) > Math.abs(m[piv][col])) piv = r;
+    [m[col], m[piv]] = [m[piv], m[col]];
+    for (let r = 0; r < 3; r++) {
+      if (r === col || !m[col][col]) continue;
+      const f = m[r][col] / m[col][col];
+      for (let k = col; k < 4; k++) m[r][k] -= f * m[col][k];
+    }
+  }
+  const [a, b, cc] = [m[0][3] / m[0][0], m[1][3] / m[1][1], m[2][3] / m[2][2]];
+  const my = t0 / n;
+  let ssr = 0;
+  let sst = 0;
+  for (let k = 0; k < n; k++) {
+    const fy = a + b * xs[k] + cc * xs[k] ** 2;
+    ssr += (ys[k] - fy) ** 2;
+    sst += (ys[k] - my) ** 2;
+  }
+  return { a, b, c: cc, r2: sst ? 1 - ssr / sst : 0 };
+}
+
+function rounding(c: Candle[]): Pattern | null {
+  const last = c.length - 1;
+  for (const n of [120, 90, 60]) {
+    if (c.length < n) continue;
+    const start = last - n + 1;
+    const xs = Array.from({ length: n }, (_, k) => k);
+    const ys = xs.map((k) => c[start + k].close);
+    const q = quadFit(xs, ys);
+    if (q.r2 < 0.75) continue;
+    const vx = -q.b / (2 * q.c);
+    if (!(vx > n * 0.3 && vx < n * 0.75)) continue;
+    const vy = q.a + q.b * vx + q.c * vx * vx;
+    const edge = (ys[0] + ys[n - 1]) / 2;
+    const depth = Math.abs(edge - vy) / edge;
+    if (depth < 0.08) continue;
+    const bottom = q.c > 0;
+    const pts: Array<[number, number]> = xs.filter((k) => k % 3 === 0 || k === n - 1).map((k) => [start + k, q.a + q.b * k + q.c * k * k]);
+    const rim = ys[0];
+    const cl = c[last].close;
+    // 杯柄：圓弧底右側接近左緣高點後，小幅回檔整理
+    const recentHi = Math.max(...c.slice(last - 15, last + 1).map((x) => x.high));
+    const handle = bottom && recentHi >= rim * 0.95 && cl < recentHi * 0.98 && cl > recentHi - (rim - vy) / 2;
+    if (handle) {
+      return {
+        id: 'cup',
+        name: '杯柄型態',
+        bias: 'bull',
+        status: cl > recentHi ? '已突破杯緣' : '杯柄整理中',
+        lines: [{ a: [start, rim], b: [last, rim], extend: true, dash: true, label: `杯緣 ${f2(Math.max(rim, recentHi))}` }],
+        points: [],
+        paths: [{ pts }],
+        summary: `近 ${n} 天形成圓弧形的杯身（深度 ${(depth * 100).toFixed(0)}%），右側回到杯緣附近後小幅回檔（杯柄）。杯柄型態是常見的多頭續漲型態。`,
+        scenarios: [
+          { when: `帶量突破杯緣 ${f2(Math.max(rim, recentHi))}`, then: `型態完成，目標約 ${f2(Math.max(rim, recentHi) + (rim - vy))}（杯深）`, bias: 'bull' },
+          { when: `杯柄跌破杯身一半 ${f2((rim + vy) / 2)}`, then: '杯柄太深，型態失效', bias: 'bear' },
+        ],
+      };
+    }
+    return {
+      id: 'rounding',
+      name: bottom ? '圓弧底' : '圓弧頂',
+      bias: bottom ? 'bull' : 'bear',
+      status: bottom ? (cl > rim ? '已突破起跌點' : '打底中') : cl < rim ? '已跌破起漲點' : '築頂中',
+      lines: [],
+      points: [],
+      paths: [{ pts }],
+      summary: `近 ${n} 天的價格呈${bottom ? '碗狀（先跌後漲、轉折平緩）' : '倒碗狀（先漲後跌、轉折平緩）'}，曲線吻合度 ${Math.round(q.r2 * 100)}%。圓弧型態形成慢，但反轉通常比較紮實。`,
+      scenarios: bottom
+        ? [
+            { when: `站上左側起跌點 ${f2(rim)}`, then: '圓弧底完成，常展開較長的上升段', bias: 'bull' },
+            { when: `跌破弧底 ${f2(vy)}`, then: '型態失效', bias: 'bear' },
+          ]
+        : [
+            { when: `跌破左側起漲點 ${f2(rim)}`, then: '圓弧頂完成，下跌常持續較久', bias: 'bear' },
+            { when: `站上弧頂 ${f2(vy)}`, then: '型態失效', bias: 'bull' },
+          ],
+    };
+  }
+  return null;
+}
+
+// ------------------------------------------------------------ V 型反轉
+
+function vReversal(c: Candle[]): Pattern | null {
+  const last = c.length - 1;
+  const win = c.slice(-40);
+  const off = c.length - win.length;
+  let lowK = 0;
+  let highK = 0;
+  win.forEach((x, k) => {
+    if (x.low < win[lowK].low) lowK = k;
+    if (x.high > win[highK].high) highK = k;
+  });
+  for (const bottom of [true, false]) {
+    const k = bottom ? lowK : highK;
+    const pivot = bottom ? win[k].low : win[k].high;
+    if (k < 5 || win.length - 1 - k < 3) continue;
+    const pre = win.slice(Math.max(0, k - 15), k);
+    const startP = bottom ? Math.max(...pre.map((x) => x.high)) : Math.min(...pre.map((x) => x.low));
+    const fall = Math.abs(startP - pivot) / startP;
+    if (fall < 0.15) continue;
+    const now = c[last].close;
+    const back = Math.abs(now - pivot) / Math.abs(startP - pivot);
+    if (back < 0.75) continue;
+    const i = off + k;
+    return {
+      id: 'v-reversal',
+      name: bottom ? 'V 型反轉' : '倒 V 型反轉',
+      bias: bottom ? 'bull' : 'bear',
+      status: `已收復 ${Math.round(back * 100)}%`,
+      lines: [],
+      points: [{ i, p: pivot, label: bottom ? 'V 底' : '倒 V 頂', pos: bottom ? 'below' : 'above' }],
+      summary: `${bottom ? '急跌' : '急漲'} ${Math.round(fall * 100)}% 到 ${f2(pivot)} 後，又快速${bottom ? '漲回' : '跌回'}原本跌幅的 ${Math.round(back * 100)}%，沒有打底（築頂）的過程。V 型反轉力道強，但也容易出現劇烈回測。`,
+      scenarios: [
+        { when: `${bottom ? '站上' : '跌破'}起點 ${f2(startP)}`, then: bottom ? '完全收復跌幅，多方掌控' : '完全吐回漲幅，空方掌控', bias: bottom ? 'bull' : 'bear' },
+        { when: `回測一半位置 ${f2((startP + pivot) / 2)} 守不住`, then: '反轉力道不足，可能二次探底（頂）', bias: bottom ? 'bear' : 'bull' },
+      ],
+    };
+  }
+  return null;
+}
+
+// ------------------------------------------------------------ 三重頂 / 三重底
+
+function triple(c: Candle[], piv: Pivot[]): Pattern | null {
+  const last = c.length - 1;
+  for (let k = piv.length - 1; k >= 4; k--) {
+    const seq = piv.slice(k - 4, k + 1);
+    const top = seq[0].kind === 'H';
+    const peaks = [seq[0], seq[2], seq[4]];
+    const troughs = [seq[1], seq[3]];
+    if (seq[4].i < last - 100) break;
+    const ref = top ? Math.max(...peaks.map((p) => p.price)) : Math.min(...peaks.map((p) => p.price));
+    if (peaks.some((p) => Math.abs(p.price - ref) / ref > 0.04)) continue;
+    const neck = top ? Math.min(...troughs.map((p) => p.price)) : Math.max(...troughs.map((p) => p.price));
+    if (Math.abs(neck - ref) / ref < 0.06) continue;
+    const cl = c[last].close;
+    const status = top ? (cl < neck ? '已確認（跌破頸線）' : '形成中') : cl > neck ? '已確認（突破頸線）' : '形成中';
+    const target = top ? neck - (ref - neck) : neck + (neck - ref);
+    return {
+      id: 'triple',
+      name: top ? '三重頂' : '三重底',
+      bias: top ? 'bear' : 'bull',
+      status,
+      lines: [{ a: [seq[0].i, neck], b: [last, neck], extend: true, dash: true, label: `頸線 ${f2(neck)}` }],
+      points: peaks.map((p, n) => ({ i: p.i, p: p.price, label: `${n + 1}`, pos: top ? 'above' : 'below' })),
+      summary: `三次${top ? '在 ' + f2(ref) + ' 附近漲不上去' : '在 ' + f2(ref) + ' 附近跌不下去'}，${top ? '壓力' : '支撐'}非常明確。目前${status}。`,
+      scenarios: [
+        { when: `${top ? '跌破' : '站上'}頸線 ${f2(neck)}`, then: `型態確認，目標約 ${f2(target)}`, bias: top ? 'bear' : 'bull' },
+        { when: `${top ? '站上' : '跌破'} ${f2(top ? ref * 1.03 : ref * 0.97)}`, then: '型態失效', bias: top ? 'bull' : 'bear' },
+      ],
+    };
+  }
+  return null;
+}
+
+// ------------------------------------------------------------ 費波納契回檔
+
+export const FIB_RATIOS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+
+function fibonacci(c: Candle[]): Pattern | null {
+  const win = c.slice(-120);
+  const off = c.length - win.length;
+  let hi = 0;
+  let lo = 0;
+  win.forEach((x, k) => {
+    if (x.high > win[hi].high) hi = k;
+    if (x.low < win[lo].low) lo = k;
+  });
+  const H = win[hi].high;
+  const L = win[lo].low;
+  if ((H - L) / L < 0.1) return null;
+  const upMove = lo < hi; // 先低後高 = 上漲段，量測回檔
+  const level = (r: number) => (upMove ? H - (H - L) * r : L + (H - L) * r);
+  const cl = c[c.length - 1].close;
+  const lines: PatternLine[] = FIB_RATIOS.map((r) => ({ a: [off + Math.min(hi, lo), level(r)], b: [c.length - 1, level(r)], extend: true, dash: r !== 0 && r !== 1, label: `${(r * 100).toFixed(1).replace('.0', '')}% ${f2(level(r))}`, labelAt: 'start' }));
+  // 目前價格落在哪兩條之間
+  const sorted = FIB_RATIOS.map((r) => ({ r, p: level(r) })).sort((a, b) => a.p - b.p);
+  const below = [...sorted].reverse().find((x) => x.p <= cl);
+  const above = sorted.find((x) => x.p > cl);
+  const pct = (r: number) => `${(r * 100).toFixed(1).replace('.0', '')}%`;
+  return {
+    id: 'fib',
+    name: '費波納契回檔',
+    bias: 'neutral',
+    status: upMove ? '上漲段的回檔' : '下跌段的反彈',
+    lines,
+    points: [],
+    summary: `以近半年${upMove ? '低點 ' + f2(L) + ' 到高點 ' + f2(H) : '高點 ' + f2(H) + ' 到低點 ' + f2(L)} 這段計算。目前 ${f2(cl)}${below ? `，下方是 ${pct(below.r)}（${f2(below.p)}）` : ''}${above ? `、上方是 ${pct(above.r)}（${f2(above.p)}）` : ''}。38.2%、50%、61.8% 是最常見的${upMove ? '回檔支撐' : '反彈壓力'}。`,
+    scenarios: upMove
+      ? [
+          { when: `回檔守住 38.2%（${f2(level(0.382))}）`, then: '強勢回檔，上漲趨勢健康', bias: 'bull' },
+          { when: `回到 50%～61.8%（${f2(level(0.5))}～${f2(level(0.618))}）止穩`, then: '正常回檔，常見的承接區', bias: 'bull' },
+          { when: `跌破 78.6%（${f2(level(0.786))}）`, then: '漲勢幾乎被吃光，趨勢可能反轉', bias: 'bear' },
+        ]
+      : [
+          { when: `反彈不過 38.2%（${f2(level(0.382))}）`, then: '弱勢反彈，跌勢未止', bias: 'bear' },
+          { when: `站上 61.8%（${f2(level(0.618))}）`, then: '反彈力道強，可能扭轉跌勢', bias: 'bull' },
+        ],
+  };
+}
+
+// ------------------------------------------------------------ 分價量表
+
+function volumeProfile(c: Candle[], window = 120, bins = 24): Pattern | null {
+  const win = c.slice(-window);
+  const lo = Math.min(...win.map((x) => x.low));
+  const hi = Math.max(...win.map((x) => x.high));
+  if (!(hi > lo)) return null;
+  const step = (hi - lo) / bins;
+  const vol = new Array<number>(bins).fill(0);
+  for (const x of win) {
+    // 把每天的量平均分到當天最高到最低之間的價格區間
+    const a = Math.max(0, Math.floor((x.low - lo) / step));
+    const b = Math.min(bins - 1, Math.floor((x.high - lo) / step));
+    for (let k = a; k <= b; k++) vol[k] += x.volume / (b - a + 1);
+  }
+  const max = Math.max(...vol);
+  const poc = vol.indexOf(max);
+  // 價值區：從最大量往兩側擴到 70% 成交量
+  const total = vol.reduce((s, v) => s + v, 0);
+  let va = vol[poc];
+  let l = poc;
+  let h = poc;
+  while (va < total * 0.7 && (l > 0 || h < bins - 1)) {
+    const nl = l > 0 ? vol[l - 1] : -1;
+    const nh = h < bins - 1 ? vol[h + 1] : -1;
+    if (nh >= nl) va += vol[++h];
+    else va += vol[--l];
+  }
+  const cl = c[c.length - 1].close;
+  const pocLo = lo + poc * step;
+  const pocHi = pocLo + step;
+  const vaLo = lo + l * step;
+  const vaHi = lo + (h + 1) * step;
+  const where = cl > vaHi ? '在價值區之上' : cl < vaLo ? '在價值區之下' : '在價值區內';
+  return {
+    id: 'vprofile',
+    name: '分價量表',
+    bias: cl > pocHi ? 'bull' : cl < pocLo ? 'bear' : 'neutral',
+    status: where,
+    lines: [],
+    points: [],
+    hbars: vol.map((v, k) => ({ lo: lo + k * step, hi: lo + (k + 1) * step, v: v / max, poc: k === poc, inValue: k >= l && k <= h })),
+    summary: `近 ${win.length} 天成交最密集的價位在 ${f2(pocLo)}～${f2(pocHi)}（最大量區），70% 的量落在 ${f2(vaLo)}～${f2(vaHi)}（價值區）。目前股價${where}。`,
+    scenarios: [
+      { when: `股價在最大量區 ${f2(pocLo)} 之上`, then: '大量區變成支撐（多數人有賺），回測不破偏多', bias: 'bull' },
+      { when: `股價在最大量區 ${f2(pocHi)} 之下`, then: '大量區變成套牢壓力，反彈到這裡容易遇到解套賣壓', bias: 'bear' },
+      { when: '在成交量很少的價位', then: '籌碼真空，價格容易快速通過', bias: 'neutral' },
+    ],
+  };
+}
+
+// ------------------------------------------------------------ 布林通道
+
+function bollinger(c: Candle[], n = 20, k = 2): Pattern | null {
+  if (c.length < n + 5) return null;
+  const mid: Array<[number, number]> = [];
+  const upB: Array<[number, number]> = [];
+  const dnB: Array<[number, number]> = [];
+  let width = 0;
+  const widths: number[] = [];
+  for (let i = n - 1; i < c.length; i++) {
+    const w = c.slice(i - n + 1, i + 1).map((x) => x.close);
+    const m = w.reduce((a, b) => a + b, 0) / n;
+    const sd = Math.sqrt(w.reduce((a, b) => a + (b - m) ** 2, 0) / n);
+    mid.push([i, m]);
+    upB.push([i, m + k * sd]);
+    dnB.push([i, m - k * sd]);
+    width = (2 * k * sd) / m;
+    widths.push(width);
+  }
+  const last = c.length - 1;
+  const cl = c[last].close;
+  const [, u] = upB[upB.length - 1];
+  const [, d] = dnB[dnB.length - 1];
+  const [, m] = mid[mid.length - 1];
+  const recentW = widths.slice(-120);
+  const squeeze = width <= Math.min(...recentW) * 1.1;
+  const pos = (cl - d) / Math.max(1e-9, u - d);
+  return {
+    id: 'boll',
+    name: '布林通道（20, 2）',
+    bias: cl > m ? 'bull' : 'bear',
+    status: squeeze ? '帶寬壓縮' : pos > 1 ? '突破上軌' : pos < 0 ? '跌破下軌' : `位置 ${Math.round(pos * 100)}%`,
+    lines: [],
+    points: [],
+    paths: [{ pts: upB }, { pts: mid, dash: true, width: 1 }, { pts: dnB }],
+    summary: `上軌 ${f2(u)}、中軌 ${f2(m)}、下軌 ${f2(d)}，帶寬 ${(width * 100).toFixed(1)}%${squeeze ? '，是近半年最窄，常是大行情的前兆' : ''}。`,
+    scenarios: [
+      { when: '沿著上軌一路走', then: '強勢多頭（「開口沿軌」），不要輕易猜頭', bias: 'bull' },
+      { when: `跌回中軌 ${f2(m)} 之下`, then: '短線轉弱，中軌由支撐變壓力', bias: 'bear' },
+      { when: '帶寬壓縮到極窄後放量', then: '往放量的方向出現一段行情', bias: 'neutral' },
+    ],
+  };
+}
+
+// ------------------------------------------------------------ 均線扣抵
+
+function deduction(c: Candle[]): Pattern | null {
+  const last = c.length - 1;
+  const cl = c[last].close;
+  const marks: NonNullable<Pattern['marks']> = [];
+  const lines: string[] = [];
+  const scen: Scenario[] = [];
+  for (const n of [20, 60, 120]) {
+    const i = last - n + 1;
+    if (i < 0) continue;
+    const ded = c[i].close;
+    // 接下來 5 天會被扣掉的價格（平均）
+    const next = c.slice(i, i + 5).map((x) => x.close);
+    const nextAvg = next.reduce((a, b) => a + b, 0) / next.length;
+    const dir = cl > nextAvg ? '上彎' : cl < nextAvg ? '下彎' : '走平';
+    marks.push({ i, p: c[i].low, label: `扣${n}`, pos: 'below', bias: cl > ded ? 'bull' : 'bear' });
+    lines.push(`${n} 日線明天扣 ${f2(ded)}（${c[i].date.slice(5).replace('-', '/')}），接下來 5 天平均扣 ${f2(nextAvg)}，現價${cl >= nextAvg ? '較高' : '較低'} → 均線傾向${dir}`);
+    scen.push({ when: `股價維持在 ${f2(nextAvg)} 之上`, then: `${n} 日線會${cl > nextAvg ? '持續上彎' : '止跌轉平'}，對${cl > nextAvg ? '多方有利' : '空方壓力減輕'}`, bias: cl > nextAvg ? 'bull' : 'neutral' });
+  }
+  if (!marks.length) return null;
+  const ups = marks.filter((m) => m.bias === 'bull').length;
+  return {
+    id: 'deduct',
+    name: '均線扣抵',
+    bias: ups >= 2 ? 'bull' : ups === 0 ? 'bear' : 'neutral',
+    status: `${ups} / ${marks.length} 條均線將上彎`,
+    lines: [],
+    points: [],
+    marks,
+    summary: `扣抵值是均線明天要減掉的那天價格：現價比扣抵值高，均線就會往上。${lines.join('；')}。`,
+    scenarios: scen,
+  };
+}
+
+// ------------------------------------------------------------ K 棒訊號（包成型態卡片）
+
+function candleCard(c: Candle[]): Pattern | null {
+  const sig = detectCandles(c, 60);
+  if (!sig.length) return null;
+  const recent = sig.filter((s) => s.i >= c.length - 10);
+  const latest = sig[sig.length - 1];
+  return {
+    id: 'candle',
+    name: 'K 棒訊號',
+    bias: recent.length ? recent[recent.length - 1].bias : 'neutral',
+    status: recent.length ? `近 10 日 ${recent.length} 個` : '近 10 日沒有',
+    lines: [],
+    points: [],
+    marks: sig.map((s) => ({ i: s.i, p: s.bias === 'bull' ? c[s.i].low : c[s.i].high, label: s.name, pos: s.bias === 'bull' ? 'below' : 'above', bias: s.bias })),
+    summary: `近 60 日共 ${sig.length} 個 K 棒訊號，最近一個是 ${c[latest.i].date.slice(5).replace('-', '/')} 的「${latest.name}」：${latest.note}。單根 K 棒的訊號要搭配位置（高檔或低檔）與隔天的確認。`,
+    scenarios: (recent.length ? recent : [latest]).slice(-4).map((s) => ({ when: `${c[s.i].date.slice(5).replace('-', '/')} ${s.name}`, then: s.note, bias: s.bias })),
+  };
+}
+
 /** 每種型態固定一個顏色（多空看狀態標籤），避免同方向的型態疊在一起分不清楚。 */
 export const PATTERN_COLORS: Record<Pattern['id'], string> = {
   channel: '#8ff0ff',
@@ -624,7 +1181,23 @@ export const PATTERN_COLORS: Record<Pattern['id'], string> = {
   triangle: '#b9f27c',
   gap: '#e2e8f0',
   volume: '#c4b5fd',
+  candle: '#fde68a',
+  flag: '#fca5a5',
+  wedge: '#86efac',
+  broadening: '#fdba74',
+  island: '#f0abfc',
+  rounding: '#67e8f9',
+  cup: '#67e8f9',
+  'v-reversal': '#fda4af',
+  triple: '#ff8fd8',
+  fib: '#fbbf24',
+  vprofile: '#94a3b8',
+  boll: '#a5b4fc',
+  deduct: '#f9a8d4',
 };
+
+/** 預設不畫在圖上的圖層（輔助線比較佔畫面，需要時再勾選）。 */
+export const DEFAULT_HIDDEN: ReadonlySet<Pattern['id']> = new Set(['vprofile', 'boll', 'deduct', 'fib', 'candle']);
 
 /** 偵測所有型態（只看最近一年內）。 */
 export function detectPatterns(all: Candle[]): { pivots: Pivot[]; patterns: Pattern[] } {
@@ -642,10 +1215,23 @@ export function detectPatterns(all: Candle[]): { pivots: Pivot[]; patterns: Patt
     waves(piv),
     gaps(c),
     volumePrice(c),
+    wedges(c, piv),
+    flags(c),
+    island(c),
+    rounding(c),
+    vReversal(c),
+    triple(c, piv),
+    candleCard(c),
+    fibonacci(c),
+    volumeProfile(c),
+    bollinger(c),
+    deduction(c),
   ].filter((p): p is Pattern => !!p);
   // 頭肩和雙重頂底同時成立時，留下頭肩（比較完整的型態）
   const hs = found.some((p) => p.id === 'hs-top' || p.id === 'hs-bottom');
   let patterns = found.filter((p) => !(hs && (p.id === 'double-top' || p.id === 'double-bottom')));
+  // 三重頂底成立時，雙重頂底通常是其中一部分
+  if (patterns.some((p) => p.id === 'triple')) patterns = patterns.filter((p) => p.id !== 'double-top' && p.id !== 'double-bottom');
   // W 底和 M 頭同時出現時，只留比較新的那個（第二個底／頭比較晚的）
   const dt = patterns.find((p) => p.id === 'double-top');
   const db = patterns.find((p) => p.id === 'double-bottom');
@@ -659,6 +1245,8 @@ export function detectPatterns(all: Candle[]): { pivots: Pivot[]; patterns: Patt
     p.lines = p.lines.map((l) => ({ ...l, a: [shift(l.a[0]), l.a[1]], b: [shift(l.b[0]), l.b[1]] }));
     p.points = p.points.map((pt) => ({ ...pt, i: shift(pt.i) }));
     p.zones = p.zones?.map((z) => ({ ...z, i: shift(z.i) }));
+    p.paths = p.paths?.map((path) => ({ ...path, pts: path.pts.map(([i, v]) => [shift(i), v] as [number, number]) }));
+    p.marks = p.marks?.map((m) => ({ ...m, i: shift(m.i) }));
   }
   return { pivots: piv.map((p) => ({ ...p, i: shift(p.i) })), patterns };
 }
@@ -685,5 +1273,18 @@ export const PATTERN_GUIDE: Array<{ name: string; bias: Bias; shape: string; whe
   { name: '價跌量縮', bias: 'neutral', shape: '價格下跌、成交量萎縮', when: '回檔到支撐附近', then: '賣壓減輕的量縮整理，等放量表態' },
   { name: '爆量長黑', bias: 'bear', shape: '成交量是均量數倍、收一根長黑 K', when: '出現在高檔', then: '常見的出貨訊號，跌破長黑低點更確認' },
   { name: '爆量長紅', bias: 'bull', shape: '成交量是均量數倍、收一根長紅 K', when: '突破整理區間時', then: '主力進場的攻擊訊號，長紅低點成為支撐' },
+  { name: '旗形 / 三角旗', bias: 'neutral', shape: '急漲（跌）一段（旗桿）後，短期小幅反向或收斂整理（旗面）', when: '順著旗桿方向突破旗面', then: '中繼型態，突破後常再走一段旗桿長度' },
+  { name: '上升楔形', bias: 'bear', shape: '高低點都墊高，但越收越窄', when: '跌破下緣', then: '漲勢力竭，常回到楔形起點' },
+  { name: '下降楔形', bias: 'bull', shape: '高低點都下移，但越收越窄', when: '站上上緣', then: '跌勢減緩，常反彈回楔形起點' },
+  { name: '擴散喇叭型', bias: 'bear', shape: '高點越來越高、低點越來越低', when: '跌破下緣', then: '多出現在頭部，波動大、不易操作' },
+  { name: '島狀反轉', bias: 'neutral', shape: '一段走勢被前後兩個反向缺口隔開，像孤島', when: '第二個缺口不回補', then: '強烈反轉訊號' },
+  { name: '圓弧底 / 圓弧頂', bias: 'neutral', shape: '價格呈碗狀（倒碗狀）緩慢轉折', when: '站上（跌破）起始點', then: '形成慢但反轉紮實，常有較長的趨勢' },
+  { name: '杯柄型態', bias: 'bull', shape: '圓弧底（杯身）加上右側小幅回檔（杯柄）', when: '帶量突破杯緣', then: '多頭續漲型態，目標約一個杯深' },
+  { name: 'V 型反轉', bias: 'neutral', shape: '急跌後沒有打底就急漲回來（或反過來）', when: '收復大部分跌幅', then: '力道強但容易劇烈回測' },
+  { name: '三重頂 / 三重底', bias: 'neutral', shape: '三次在差不多的價位折返', when: '跌破（站上）頸線', then: '比雙重頂底更明確的反轉' },
+  { name: '費波納契回檔', bias: 'neutral', shape: '一段漲幅的 23.6%、38.2%、50%、61.8%、78.6% 位置', when: '回檔到 38.2%～61.8% 止穩', then: '常見的支撐（反彈時則是壓力）' },
+  { name: '分價量表', bias: 'neutral', shape: '每個價位累積的成交量', when: '股價在大量區之上或之下', then: '大量區在下方是支撐、在上方是套牢壓力' },
+  { name: '布林通道', bias: 'neutral', shape: '20 日均線 ± 2 倍標準差', when: '帶寬壓縮後放量', then: '往放量方向出現行情；沿上軌走是強勢' },
+  { name: '均線扣抵', bias: 'neutral', shape: '均線明天要減掉的那天價格', when: '現價高於扣抵值', then: '均線會上彎；可以預先知道均線方向' },
   { name: '艾略特 5 波', bias: 'neutral', shape: '推動浪 1-2-3-4-5，接著 A-B-C 修正', when: '第 2 浪不破起點、第 3 浪不是最短、第 4 浪不碰第 1 浪高點', then: '第 3 浪通常最強；第 5 浪後容易修正' },
 ];

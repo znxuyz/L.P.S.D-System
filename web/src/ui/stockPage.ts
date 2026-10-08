@@ -6,7 +6,10 @@ import type { MarketMetrics, StockMetrics } from '../domain/metrics';
 import { mockNews, newsLinks } from '../domain/news';
 import { industryPeMedians, stockView, type StockView } from '../domain/screens';
 import { MA_PERIODS, analyzeTechnicals, type Candle, type MaPeriod, type TechReport, type Tilt } from '../domain/technicals';
-import { PATTERN_COLORS, PATTERN_GUIDE, detectPatterns, type Bias, type Pattern } from '../domain/patterns';
+import { DEFAULT_HIDDEN, PATTERN_COLORS, PATTERN_GUIDE, detectPatterns, type Bias, type Pattern } from '../domain/patterns';
+import { CANDLE_GUIDE } from '../domain/candlesticks';
+import type { ChipSeries } from '../data/chipSeries';
+import { SUB_LABEL, buildSub, type SubPane } from './subPane';
 import type { DirEntry, StockDirectory } from '../data/stockDirectory';
 import type { Palette } from './colors';
 import { direction, escapeHtml as esc, num, pct, price, signedYi, yi } from './format';
@@ -48,6 +51,10 @@ export interface StockPageContext {
   /** 是否為真實行情。 */
   live: boolean;
   today: string;
+  /** 個股籌碼歷史（副圖用）；undefined = 載入中，null = 沒有。 */
+  chips?: ChipSeries | null;
+  /** 加權指數每日收盤（相對強弱用）。 */
+  taiex?: Map<string, number> | null;
 }
 
 /**
@@ -67,13 +74,29 @@ const lineVis: { ma: boolean; ema: boolean; pat: boolean } = (() => {
     return { ma: true, ema: true, pat: true };
   }
 })();
-/** 型態面板裡取消勾選「畫在圖上」的型態，記在這台裝置。 */
-const PAT_HIDDEN_KEY = 'lplc.kchart.hiddenPatterns';
-const hiddenPatterns: Set<string> = (() => {
+/** 每個型態／圖層要不要畫在圖上（使用者的選擇，記在這台裝置）；沒選過就用預設值。 */
+const PAT_VIS_KEY = 'lplc.kchart.patternVisibility';
+const patOverride: Record<string, boolean> = (() => {
   try {
-    return new Set<string>(JSON.parse(localStorage.getItem(PAT_HIDDEN_KEY) ?? '[]'));
+    const v = JSON.parse(localStorage.getItem(PAT_VIS_KEY) ?? 'null');
+    if (v && typeof v === 'object') return v as Record<string, boolean>;
+    // 舊版只記「隱藏的型態」清單
+    const old = JSON.parse(localStorage.getItem('lplc.kchart.hiddenPatterns') ?? '[]') as string[];
+    return Object.fromEntries(old.map((id) => [id, false]));
   } catch {
-    return new Set<string>();
+    return {};
+  }
+})();
+const patVisible = (id: Pattern['id']) => patOverride[id] ?? !DEFAULT_HIDDEN.has(id);
+
+/** K 線下方的副圖。 */
+const SUB_KEY = 'lplc.kchart.sub';
+let subPane: SubPane = (() => {
+  try {
+    const v = localStorage.getItem(SUB_KEY) as SubPane | null;
+    return v && v in SUB_LABEL ? v : 'vol';
+  } catch {
+    return 'vol';
   }
 })();
 /** 切換均線後立刻重畫圖例與 K 線圖（不用等下一次行情更新）。 */
@@ -335,7 +358,10 @@ function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechRepor
       <div class="kc-toggles" role="group" aria-label="圖上顯示的線">
         <label class="kc-toggle"><input type="checkbox" data-line="ma" /><svg width="16" height="6" aria-hidden="true"><line x1="0" x2="16" y1="3" y2="3" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2"></line></svg>MA</label>
         <label class="kc-toggle"><input type="checkbox" data-line="ema" /><svg width="16" height="6" aria-hidden="true"><line x1="0" x2="16" y1="3" y2="3" stroke="currentColor" stroke-width="1.8"></line></svg>EMA</label>
-        <label class="kc-toggle" title="自動畫出通道、W 底 / M 頭、頭肩、三角形、波浪、跳空缺口、爆量"><input type="checkbox" data-line="pat" /><svg width="16" height="8" aria-hidden="true"><polyline points="0,7 5,1 9,5 16,0" fill="none" stroke="currentColor" stroke-width="1.6"></polyline></svg>型態</label>
+        <label class="kc-toggle" title="自動畫出型態、缺口、K 棒訊號與輔助線（每一項可在下方「型態辨識」個別開關）"><input type="checkbox" data-line="pat" /><svg width="16" height="8" aria-hidden="true"><polyline points="0,7 5,1 9,5 16,0" fill="none" stroke="currentColor" stroke-width="1.6"></polyline></svg>型態</label>
+        <label class="kc-sub">副圖<select data-sub aria-label="K 線下方的副圖">${(Object.keys(SUB_LABEL) as SubPane[])
+          .map((k) => `<option value="${k}">${SUB_LABEL[k]}</option>`)
+          .join('')}</select></label>
       </div>
       <ul class="ma-legend" aria-label="均線：虛線為 MA，實線為 EMA"></ul>`;
     for (const box of el.querySelectorAll<HTMLInputElement>('[data-line]')) {
@@ -351,6 +377,17 @@ function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechRepor
         redrawChart?.();
       });
     }
+    const sel = el.querySelector<HTMLSelectElement>('[data-sub]')!;
+    sel.value = subPane;
+    sel.addEventListener('change', () => {
+      subPane = sel.value as SubPane;
+      try {
+        localStorage.setItem(SUB_KEY, subPane);
+      } catch {
+        /* 無法儲存時只在這次有效 */
+      }
+      redrawChart?.();
+    });
     el.dataset.ready = '1';
   }
   const range =
@@ -389,16 +426,18 @@ function renderPatterns(el: HTMLElement, patterns: Pattern[], ctx: StockPageCont
         <div class="pat-guide-grid">${PATTERN_GUIDE.map(
           (g) => `<div class="pg-item"><b class="tilt-text-${g.bias}">${esc(g.name)}</b>
             <p><span>形狀</span>${esc(g.shape)}</p><p><span>關鍵</span>${esc(g.when)}</p><p><span>走法</span>${esc(g.then)}</p></div>`,
+        ).join('')}${CANDLE_GUIDE.map(
+          (g) => `<div class="pg-item"><b class="tilt-text-${g.bias}">${esc(g.name)}</b>
+            <p><span>形狀</span>${esc(g.shape)}</p><p><span>走法</span>${esc(g.then)}</p></div>`,
         ).join('')}</div>
         <p class="disclaimer">型態是用固定規則從歷史價格找出來的，同一段走勢可能有不同解讀；假突破、假跌破也很常見，請搭配量能與基本面判斷。</p>
       </details>`;
     el.addEventListener('change', (e) => {
       const box = (e.target as HTMLElement).closest<HTMLInputElement>('input[data-pat]');
       if (!box) return;
-      if (box.checked) hiddenPatterns.delete(box.dataset.pat!);
-      else hiddenPatterns.add(box.dataset.pat!);
+      patOverride[box.dataset.pat!] = box.checked;
       try {
-        localStorage.setItem(PAT_HIDDEN_KEY, JSON.stringify([...hiddenPatterns]));
+        localStorage.setItem(PAT_VIS_KEY, JSON.stringify(patOverride));
       } catch {
         /* 無法儲存時只在這次有效 */
       }
@@ -420,7 +459,7 @@ function renderPatterns(el: HTMLElement, patterns: Pattern[], ctx: StockPageCont
             <span class="pat-swatch" style="background:${PATTERN_COLORS[p.id]}"></span>
             <b>${esc(p.name)}</b>
             <span class="tilt tilt-${p.bias}">${esc(p.status)}・${BIAS_WORD[p.bias]}</span>
-            <label class="pat-show"><input type="checkbox" data-pat="${p.id}" ${hiddenPatterns.has(p.id) ? '' : 'checked'} />畫在圖上</label>
+            <label class="pat-show"><input type="checkbox" data-pat="${p.id}" ${patVisible(p.id) ? 'checked' : ''} />畫在圖上</label>
           </header>
           <p class="pat-summary">${esc(p.summary)}</p>
           <ul class="pat-scen">${p.scenarios
@@ -510,7 +549,7 @@ function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechRe
   const h = Math.max(260, el.clientHeight);
   const pad = { l: 8, r: 56, t: 10, b: 22 };
   kLayout = { plotL: pad.l, plotW: Math.max(1, w - pad.l - pad.r), total: all.length };
-  const volH = Math.round((h - pad.t - pad.b) * 0.2);
+  const volH = Math.round((h - pad.t - pad.b) * (subPane === 'vol' ? 0.2 : 0.26));
   const gap = 10;
   const priceBottom = h - pad.b - volH - gap;
 
@@ -573,8 +612,11 @@ function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechRe
         const top = y(Math.max(c.open, c.close));
         const bh = Math.max(1, Math.abs(y(c.open) - y(c.close)));
         return `<line x1="${cx(i)}" x2="${cx(i)}" y1="${y(c.high)}" y2="${y(c.low)}" stroke="${col}" stroke-width="1"></line>
-          <rect x="${x(i)}" y="${top}" width="${bw}" height="${bh}" rx="${Math.min(2, bw / 3)}" fill="${col}"></rect>
-          <rect x="${x(i)}" y="${yv(c.volume)}" width="${bw}" height="${Math.max(0, h - pad.b - yv(c.volume))}" rx="${Math.min(2, bw / 3)}" fill="${col}" opacity="0.45"></rect>`;
+          <rect x="${x(i)}" y="${top}" width="${bw}" height="${bh}" rx="${Math.min(2, bw / 3)}" fill="${col}"></rect>${
+            subPane === 'vol'
+              ? `<rect x="${x(i)}" y="${yv(c.volume)}" width="${bw}" height="${Math.max(0, h - pad.b - yv(c.volume))}" rx="${Math.min(2, bw / 3)}" fill="${col}" opacity="0.45"></rect>`
+              : ''
+          }`;
       })
       .join('')}
     ${[...MA_PERIODS]
@@ -588,7 +630,8 @@ function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechRe
     ${tech && !(lineVis.pat && patterns.length) ? levelLine(tech.resistance, '壓力') + levelLine(tech.support, '支撐') : ''}
     ${lineVis.pat ? patternLayer() : ''}
     <text class="axis strong" x="${w - pad.r + 6}" y="${y(last.close) + 4}">${price(last.close)}</text>
-    <text class="axis" x="${pad.l}" y="${h - pad.b - volH - 2}">成交量</text>
+    ${subPane === 'vol' ? '' : subLayer()}
+    <text class="axis" x="${pad.l}" y="${h - pad.b - volH - 2}">${esc(subTitle())}</text>
     ${months.map((m) => `<text class="axis" x="${cx(m.i)}" y="${h - 6}" text-anchor="middle">${m.label}</text>`).join('')}
     <line class="cross" y1="${pad.t}" y2="${h - pad.b}" visibility="hidden"></line>
     <rect class="hit" x="${pad.l}" y="0" width="${w - pad.l - pad.r}" height="${h}" fill="transparent"></rect>
@@ -599,7 +642,7 @@ function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechRe
     const step = x.step();
     const xAt = (gi: number) => cx(0) + (gi - off) * step;
     const right = off + N - 1 + 2;
-    const shown = patterns.filter((p) => !hiddenPatterns.has(p.id));
+    const shown = patterns.filter((p) => patVisible(p.id));
     if (!shown.length) return '';
     let volMarks = '';
     const body = shown
@@ -615,14 +658,17 @@ function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechRe
             }
             // 手機寬度太窄時不標線名，避免和價格標籤擠在一起
             const lab =
-              l.label && w >= 520 && l.b[0] >= off && l.b[0] < off + N
-                ? `<text class="pat-label" x="${xAt(i2) - 4}" y="${y(v2) - 5}" text-anchor="end" fill="${col}">${esc(l.label)}</text>`
-                : '';
+              l.label && w >= 520 && l.labelAt === 'start'
+                ? `<text class="pat-label" x="${Math.max(xAt(l.a[0]), pad.l) + 4}" y="${y(l.a[1]) - 4}" fill="${col}">${esc(l.label)}</text>`
+                : l.label && w >= 520 && l.b[0] >= off && l.b[0] < off + N
+                  ? `<text class="pat-label" x="${xAt(i2) - 4}" y="${y(v2) - 5}" text-anchor="end" fill="${col}">${esc(l.label)}</text>`
+                  : '';
             return `<line x1="${xAt(l.a[0])}" y1="${y(l.a[1])}" x2="${xAt(i2)}" y2="${y(v2)}" stroke="${col}" stroke-width="${l.dash ? 1.2 : 1.6}" ${l.dash ? 'stroke-dasharray="6 4"' : ''} opacity="0.9"></line>${lab}`;
           })
           .join('');
         // 量價的爆量標記畫在成交量柱上（不在價格區，避免和 K 線、缺口標籤擠在一起）
         if (p.id === 'volume') {
+          if (subPane !== 'vol') return '';
           let lastLabel = -Infinity;
           volMarks += p.points
             .filter((pt) => pt.i >= off && pt.i < off + N)
@@ -659,10 +705,112 @@ function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechRe
             return `<rect x="${x1}" y="${top}" width="${Math.max(0, x2 - x1)}" height="${hgt}" fill="${col}" fill-opacity="0.12" stroke="${col}" stroke-opacity="0.5" stroke-dasharray="3 3"></rect>${lab}`;
           })
           .join('');
-        return `<g class="pat pat-${p.id}">${zones}${lines}${pts}</g>`;
+        const paths = (p.paths ?? [])
+          .map((path) => {
+            const d = path.pts
+              .filter(([i]) => i >= off - 1 && i <= off + N)
+              .map(([i, v], k) => `${k ? 'L' : 'M'}${xAt(i).toFixed(1)},${y(v).toFixed(1)}`)
+              .join('');
+            return d ? `<path d="${d}" fill="none" stroke="${col}" stroke-width="${path.width ?? 1.5}" ${path.dash ? 'stroke-dasharray="5 4"' : ''} opacity="0.85"></path>` : '';
+          })
+          .join('');
+        const maxW = (w - pad.l - pad.r) * 0.22;
+        const hbars = (p.hbars ?? [])
+          .map((b) => {
+            const top = y(b.hi);
+            const hgt = Math.max(1, y(b.lo) - y(b.hi) - 1);
+            const bwid = b.v * maxW;
+            return `<rect x="${w - pad.r - bwid}" y="${top}" width="${bwid}" height="${hgt}" fill="${col}" fill-opacity="${b.poc ? 0.45 : b.inValue ? 0.25 : 0.12}" ${b.poc ? `stroke="${col}"` : ''}></rect>`;
+          })
+          .join('');
+        const lastAt: Record<string, number> = { above: -Infinity, below: -Infinity };
+        const marks = (p.marks ?? [])
+          .filter((m) => m.i >= off && m.i < off + N)
+          .map((m) => {
+            const px = xAt(m.i);
+            const py = y(m.p);
+            const above = m.pos === 'above';
+            const tri = above ? `M${px - 4},${py - 9} L${px + 4},${py - 9} L${px},${py - 3} Z` : `M${px - 4},${py + 9} L${px + 4},${py + 9} L${px},${py + 3} Z`;
+            const mcol = m.bias === 'bull' ? ctx.pal.up.strong : m.bias === 'bear' ? ctx.pal.down.strong : col;
+            // 相鄰的標記只寫一次文字，避免重疊
+            const showLabel = w >= 520 && px - lastAt[m.pos] > 44;
+            if (showLabel) lastAt[m.pos] = px;
+            return `<path d="${tri}" fill="${mcol}"></path>${
+              showLabel ? `<text class="pat-point" x="${px}" y="${above ? py - 12 : py + 20}" text-anchor="middle" fill="${mcol}">${esc(m.label)}</text>` : ''
+            }`;
+          })
+          .join('');
+        return `<g class="pat pat-${p.id}">${hbars}${zones}${paths}${lines}${pts}${marks}</g>`;
       })
       .join('');
     return `<defs><clipPath id="kclip"><rect x="${pad.l}" y="${pad.t}" width="${w - pad.l - pad.r}" height="${priceBottom - pad.t}"></rect></clipPath></defs><g clip-path="url(#kclip)">${body}</g>${volMarks}`;
+  }
+
+  /** 副圖的數列（顯示範圍內，已依需要換算成以左邊為 100）。 */
+  function subVisible() {
+    if (subPane === 'vol') return null;
+    const d = buildSub(subPane, all, ctx.chips, ctx.taiex);
+    if (typeof d === 'string') return d;
+    const vis = d.series.map((sr) => {
+      const arr = sr.values.slice(off, off + N);
+      if (!d.normalize) return arr;
+      const base = arr.find((v) => v != null);
+      return arr.map((v) => (v == null || !base ? null : (v / base) * 100));
+    });
+    return { d, vis };
+  }
+
+  function subTitle(): string {
+    if (subPane === 'vol') return '成交量';
+    const sv = subVisible();
+    if (!sv || typeof sv === 'string') return SUB_LABEL[subPane];
+    const lastVals = sv.d.series.map((sr, k) => {
+      const v = [...sv.vis[k]].reverse().find((x) => x != null);
+      return v == null ? '' : `${sr.name} ${num(v, sv.d.digits)}${sv.d.unit}`;
+    });
+    return `${SUB_LABEL[subPane]}・${lastVals.filter(Boolean).join('・')}`;
+  }
+
+  function subLayer(): string {
+    const top = h - pad.b - volH;
+    const bottom = h - pad.b;
+    const sv = subVisible();
+    if (!sv) return '';
+    if (typeof sv === 'string') return `<text class="axis" x="${pad.l + (w - pad.l - pad.r) / 2}" y="${top + volH / 2}" text-anchor="middle">${esc(sv)}</text>`;
+    const { d, vis } = sv;
+    const vals = vis.flat().filter((v): v is number => v != null);
+    if (!vals.length) return `<text class="axis" x="${pad.l + (w - pad.l - pad.r) / 2}" y="${top + volH / 2}" text-anchor="middle">顯示範圍內沒有資料</text>`;
+    const refs = d.refs ?? [];
+    const dom: [number, number] = d.domain ?? [Math.min(...vals, ...refs), Math.max(...vals, ...refs)];
+    const ys = scaleLinear().domain(dom).nice(3).range([bottom, top + 6]);
+    const ref = refs
+      .filter((r) => r >= ys.domain()[0] && r <= ys.domain()[1])
+      .map((r) => `<line class="grid" x1="${pad.l}" x2="${w - pad.r}" y1="${ys(r)}" y2="${ys(r)}" stroke-dasharray="3 3"></line><text class="axis" x="${w - pad.r + 6}" y="${ys(r) + 4}">${num(r, 0)}</text>`)
+      .join('');
+    const series = d.series
+      .map((sr, k) => {
+        const arr = vis[k];
+        if (sr.kind === 'bar') {
+          const zero = ys(Math.max(ys.domain()[0], Math.min(0, ys.domain()[1])));
+          return arr
+            .map((v, i) => {
+              if (v == null) return '';
+              const col = sr.signed ? (v >= 0 ? up : down) : sr.color;
+              const y1 = ys(v);
+              return `<rect x="${x(i)}" y="${Math.min(y1, zero)}" width="${bw}" height="${Math.max(0.5, Math.abs(zero - y1))}" fill="${col}" opacity="0.6"></rect>`;
+            })
+            .join('');
+        }
+        let path = '';
+        arr.forEach((v, i) => {
+          if (v == null) return;
+          path += `${path ? 'L' : 'M'}${cx(i).toFixed(1)},${ys(v).toFixed(1)}`;
+        });
+        return `<path d="${path}" fill="none" stroke="${sr.color}" stroke-width="1.5"></path>`;
+      })
+      .join('');
+    const axis = d.domain || refs.length ? '' : `<text class="axis" x="${w - pad.r + 6}" y="${top + 12}">${num(ys.domain()[1], d.digits)}</text><text class="axis" x="${w - pad.r + 6}" y="${bottom}">${num(ys.domain()[0], d.digits)}</text>`;
+    return `<g class="sub-pane">${ref}${series}${axis}</g>`;
   }
 
   function levelLine(v: number, label: string): string {
@@ -701,7 +849,16 @@ function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechRe
                   `<dt><i style="background:${MA_COLORS[n]}"></i>${n} 日</dt><dd>${[lineVis.ma ? mv(ma?.ma[n]) : '', lineVis.ema ? mv(ma?.ema[n]) : ''].filter(Boolean).join(' / ')}</dd>`,
               ).join('') + `<dt></dt><dd class="muted">${[lineVis.ma ? 'MA' : '', lineVis.ema ? 'EMA' : ''].filter(Boolean).join(' / ')}</dd>`
             : ''
-        }</dl>`;
+        }${(() => {
+          const sv = subVisible();
+          if (!sv || typeof sv === 'string') return '';
+          return sv.d.series
+            .map((sr, k) => {
+              const v = sv.vis[k][i];
+              return `<dt>${esc(sr.name)}</dt><dd>${v == null ? '—' : `${num(v, sv.d.digits)}${sv.d.unit}`}</dd>`;
+            })
+            .join('');
+        })()}</dl>`;
       const left = cx(i) + 14 + tip.offsetWidth > w - pad.r ? cx(i) - 14 - tip.offsetWidth : cx(i) + 14;
       tip.style.transform = `translate(${Math.max(4, left)}px, ${pad.t + 6}px)`;
     })

@@ -7,7 +7,7 @@
  *   從 2025-01-01 開始全部保留（每次回補 INST_MAX 天），用來算「法人連買 / 連賣幾天」。
  * - 千張大戶：集保股權分散表（每週更新，只提供最新一週），存在 tdcc/<日期>.json（持股 1,000 張以上的比率）。
  *   每週一份全部保留；history.ts 會回補過去的週。
- * - 輸出 chips.json 給網頁讀。
+ * - 輸出 chips.json（全市場摘要）與 chips/<代號>.json（個股的每日法人、每週大戶，副圖用）給網頁讀。
  */
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -176,7 +176,24 @@ function main(dir: string): void {
     out.big = { asOf, from, chg };
   }
   writeFileSync(join(dir, 'chips.json'), JSON.stringify(out));
-  console.log(`完成：法人 ${instFiles.length} 天、集保 ${weeks.length} 週`);
+
+  // 每檔股票一個檔案，給個股分析頁的副圖用：法人每日買賣超（張）、千張大戶每週持股比率
+  const perCode = new Map<string, { inst: Array<[string, number]>; big: Array<[string, number]> }>();
+  const get = (code: string) => {
+    if (!perCode.has(code)) perCode.set(code, { inst: [], big: [] });
+    return perCode.get(code)!;
+  };
+  for (const f of [...instFiles].reverse()) {
+    const date = f.replace(/\.json$/, '');
+    for (const [code, net] of Object.entries(readJson<Record<string, number>>(join(dir, 'inst', f), {}))) get(code).inst.push([date, Math.round(net / 1000)]);
+  }
+  for (const w of weeks) {
+    const date = w.replace(/\.json$/, '');
+    for (const [code, pct] of Object.entries(readJson<Record<string, number>>(join(dir, 'tdcc', w), {}))) get(code).big.push([date, pct]);
+  }
+  mkdirSync(join(dir, 'chips'), { recursive: true });
+  for (const [code, v] of perCode) writeFileSync(join(dir, 'chips', `${code}.json`), JSON.stringify(v));
+  console.log(`完成：法人 ${instFiles.length} 天、集保 ${weeks.length} 週，個股籌碼檔 ${perCode.size} 檔`);
 }
 
 const dir = process.argv[2] ?? 'data';
