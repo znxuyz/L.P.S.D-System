@@ -27,6 +27,7 @@ import { externalFundamentals } from './data/mockUniverse';
 import type { StockMetrics } from './domain/metrics';
 import { loadOfficialCandles, type DailySeries } from './data/candles';
 import { taipeiDate } from './data/liveProvider';
+import { loadChipSeries, loadTaiex, type ChipSeries } from './data/chipSeries';
 import { coverageOf, indexDirectory, loadChips, loadFinancials, loadPeBands, overlayReal, realNote, type Chips, type FinData, type PeBands } from './data/realFundamentals';
 
 interface RealState {
@@ -95,6 +96,10 @@ class App {
   private readonly daily = new Map<string, DailySeries>();
   /** 正在下載日 K 的股票與開始時間（載入動畫顯示已等待幾秒）。 */
   private readonly dailyLoading = new Map<string, number>();
+  /** 個股籌碼歷史（副圖用）；有 key 但值為 undefined = 載入中。 */
+  private readonly chipSeries = new Map<string, ChipSeries | null | undefined>();
+  private taiex: Map<string, number> | null | undefined = undefined;
+  private taiexStarted = false;
   /** 全市場股票目錄（個股分析頁查詢股票池以外的股票用）；undefined = 還沒載入。 */
   private directory: StockDirectory | null | undefined;
   /** 股票池以外股票的即時報價（真實行情模式每 30 秒更新）。 */
@@ -200,6 +205,7 @@ class App {
     if (this.page === 'stock') {
       const external = this.externalStock(this.analyzed);
       this.ensureDaily(this.analyzed, external?.stock.prevClose);
+      this.ensureChipSeries(this.analyzed);
       renderStockPage($('#page-stock'), this.analyzed, {
         external,
         directory: this.directory ?? undefined,
@@ -213,6 +219,8 @@ class App {
         dailySource: this.live && this.settings.fugleKey ? 'fugle' : !this.live && this.stockCodes.has(this.analyzed) ? 'mock' : 'official',
         live: this.live,
         realSrc: this.real?.label,
+        chips: this.chipSeries.get(this.analyzed),
+        taiex: this.taiex,
         today: taipeiDate(Date.now()),
       });
     }
@@ -330,6 +338,24 @@ class App {
    * - 其他情況（真實行情、或股票池以外的股票）：富果（有金鑰時）→ 證交所／櫃買每日收盤 → 沒有就不畫，
    *   不再用亂數產生假的走勢。
    */
+  /** 副圖用的資料：個股籌碼歷史與加權指數，各只下載一次。 */
+  private ensureChipSeries(code: string): void {
+    if (!this.chipSeries.has(code)) {
+      this.chipSeries.set(code, undefined);
+      void loadChipSeries(code).then((v) => {
+        this.chipSeries.set(code, v);
+        this.renderPanels();
+      });
+    }
+    if (!this.taiexStarted) {
+      this.taiexStarted = true;
+      void loadTaiex().then((v) => {
+        this.taiex = v;
+        this.renderPanels();
+      });
+    }
+  }
+
   private ensureDaily(code: string, prevClose?: number): void {
     if (this.daily.has(code) || this.dailyLoading.has(code)) return;
     const simulated = !this.live && this.stockCodes.has(code);

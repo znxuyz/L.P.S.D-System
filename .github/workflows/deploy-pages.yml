@@ -48,6 +48,8 @@ jobs:
             if [ -f ".data/$f" ]; then cp ".data/$f" web/public/data/; fi
           done
           if [ -d .data/candles ]; then cp -r .data/candles web/public/data/; fi
+          if [ -d .data/chips ]; then cp -r .data/chips web/public/data/; fi
+          if [ -f .data/index/TAIEX.json ]; then mkdir -p web/public/data/index && cp .data/index/TAIEX.json web/public/data/index/; fi
 
       - run: npm ci
         working-directory: web
