@@ -28,6 +28,7 @@ import type { StockMetrics } from './domain/metrics';
 import { loadOfficialCandles, type DailySeries } from './data/candles';
 import { taipeiDate } from './data/liveProvider';
 import { loadChipSeries, loadTaiex, type ChipSeries } from './data/chipSeries';
+import { loadPatternStats, type PatternStats } from './data/patternStats';
 import { coverageOf, indexDirectory, loadChips, loadFinancials, loadPeBands, overlayReal, realNote, type Chips, type FinData, type PeBands } from './data/realFundamentals';
 
 interface RealState {
@@ -100,6 +101,7 @@ class App {
   private readonly chipSeries = new Map<string, ChipSeries | null | undefined>();
   private taiex: Map<string, number> | null | undefined = undefined;
   private taiexStarted = false;
+  private patStats: PatternStats | null | undefined = undefined;
   /** 全市場股票目錄（個股分析頁查詢股票池以外的股票用）；undefined = 還沒載入。 */
   private directory: StockDirectory | null | undefined;
   /** 股票池以外股票的即時報價（真實行情模式每 30 秒更新）。 */
@@ -221,6 +223,7 @@ class App {
         realSrc: this.real?.label,
         chips: this.chipSeries.get(this.analyzed),
         taiex: this.taiex,
+        patStats: this.patStats,
         today: taipeiDate(Date.now()),
       });
     }
@@ -349,6 +352,10 @@ class App {
     }
     if (!this.taiexStarted) {
       this.taiexStarted = true;
+      void loadPatternStats().then((v) => {
+        this.patStats = v;
+        this.renderPanels();
+      });
       void loadTaiex().then((v) => {
         this.taiex = v;
         this.renderPanels();

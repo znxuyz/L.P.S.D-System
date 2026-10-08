@@ -6,7 +6,8 @@ import type { MarketMetrics, StockMetrics } from '../domain/metrics';
 import { mockNews, newsLinks } from '../domain/news';
 import { industryPeMedians, stockView, type StockView } from '../domain/screens';
 import { MA_PERIODS, analyzeTechnicals, type Candle, type MaPeriod, type TechReport, type Tilt } from '../domain/technicals';
-import { DEFAULT_HIDDEN, PATTERN_COLORS, PATTERN_GUIDE, detectPatterns, type Bias, type Pattern } from '../domain/patterns';
+import { COMMON, DEFAULT_HIDDEN, PATTERN_COLORS, PATTERN_GUIDE, PATTERN_NAMES, detectPatterns, type Bias, type Pattern } from '../domain/patterns';
+import { MIN_SAMPLES, baselineFor, type PatternStats, type StatRow } from '../data/patternStats';
 import { CANDLE_GUIDE } from '../domain/candlesticks';
 import type { ChipSeries } from '../data/chipSeries';
 import { SUB_LABEL, buildSub, type SubPane } from './subPane';
@@ -55,6 +56,8 @@ export interface StockPageContext {
   chips?: ChipSeries | null;
   /** 加權指數每日收盤（相對強弱用）。 */
   taiex?: Map<string, number> | null;
+  /** 型態歷史勝率（回測）。 */
+  patStats?: PatternStats | null;
 }
 
 /**
@@ -422,6 +425,7 @@ function renderPatterns(el: HTMLElement, patterns: Pattern[], ctx: StockPageCont
   if (!el.dataset.ready) {
     el.innerHTML = `<h2 class="panel-title">型態辨識 <small>依近一年日 K 自動判斷，僅供參考</small></h2>
       <div class="pat-list"></div>
+      <details class="pat-guide"><summary>歷史勝率排行：每種型態出現後的實際走勢（全市場回測）</summary><div class="pat-rank"></div></details>
       <details class="pat-guide"><summary>型態辭典：什麼條件會形成什麼圖、之後常見的走法</summary>
         <div class="pat-guide-grid">${PATTERN_GUIDE.map(
           (g) => `<div class="pg-item"><b class="tilt-text-${g.bias}">${esc(g.name)}</b>
@@ -450,24 +454,83 @@ function renderPatterns(el: HTMLElement, patterns: Pattern[], ctx: StockPageCont
   if (total < 30) return setHtml(list, '<p class="muted">日 K 不足 30 根，還無法辨識型態。</p>');
   if (!patterns.length) return setHtml(list, '<p class="muted">近期沒有明確的型態（走勢沒有形成可辨識的轉折組合）。</p>');
   const icon: Record<Bias, string> = { bull: '▲', bear: '▼', neutral: '●' };
-  setHtml(
-    list,
-    patterns
-      .map(
-        (p) => `<article class="pat-card">
+  const st = ctx.patStats;
+  const statOf = (p: Pattern): StatRow | null => (st && p.bias !== 'neutral' ? st.patterns[`${p.id}|${p.bias}`] ?? null : null);
+  const card = (p: Pattern) => {
+    const row = statOf(p);
+    return `<article class="pat-card">
           <header>
             <span class="pat-swatch" style="background:${PATTERN_COLORS[p.id]}"></span>
             <b>${esc(p.name)}</b>
             <span class="tilt tilt-${p.bias}">${esc(p.status)}・${BIAS_WORD[p.bias]}</span>
             <label class="pat-show"><input type="checkbox" data-pat="${p.id}" ${patVisible(p.id) ? 'checked' : ''} />畫在圖上</label>
           </header>
+          ${row && st ? winBadge(row, baselineFor(st, p.bias as 'bull' | 'bear'), st.horizon) : ''}
           <p class="pat-summary">${esc(p.summary)}</p>
           <ul class="pat-scen">${p.scenarios
-            .map((sc) => `<li class="pt-${sc.bias}"><i>${icon[sc.bias]}</i><span><b>若</b>${esc(sc.when)}</span><span class="pat-then">→ ${esc(sc.then)}</span></li>`)
+            .map((sc) => {
+              // K 棒訊號：每個訊號附上自己的歷史勝率
+              let extra = '';
+              if (p.id === 'candle' && st && sc.bias !== 'neutral') {
+                const r = st.candles[`${sc.when.split(' ').slice(1).join(' ')}|${sc.bias}`];
+                const base = baselineFor(st, sc.bias, true);
+                if (r) extra = `<span class="pat-win-inline">歷史 ${st.candleHorizon} 日勝率 ${Math.round(r.win * 100)}%${base != null ? `（基準 ${Math.round(base * 100)}%）` : ''}・${r.n} 次</span>`;
+              }
+              return `<li class="pt-${sc.bias}"><i>${icon[sc.bias]}</i><span><b>若</b>${esc(sc.when)}</span><span class="pat-then">→ ${esc(sc.then)}${extra}</span></li>`;
+            })
             .join('')}</ul>
-        </article>`,
-      )
-      .join(''),
+        </article>`;
+  };
+  // 依勝率排序（樣本不足或沒有方向的放後面），分成常用與進階兩組
+  const rank = (p: Pattern) => {
+    const r = statOf(p);
+    return r && r.n >= MIN_SAMPLES ? r.win : -1;
+  };
+  const sorted = [...patterns].sort((a, b) => rank(b) - rank(a));
+  const common = sorted.filter((p) => COMMON.has(p.id));
+  const advanced = sorted.filter((p) => !COMMON.has(p.id));
+  const group = (title: string, note: string, items: Pattern[]) =>
+    items.length ? `<h3 class="pat-group">${title} <small>${note}</small></h3><div class="pat-grid">${items.map(card).join('')}</div>` : '';
+  const head = st
+    ? `<p class="pat-statnote">勝率＝型態出現後 ${st.horizon} 個交易日，偏多的有上漲、偏空的有下跌的比例（全市場 ${st.stocks} 檔、${st.from}～${st.to} 回測）。同期隨機買進 ${st.horizon} 天後上漲的機率是 ${Math.round((st.baseline.up20 ?? 0) * 100)}%，偏多型態要高於它、偏空型態要高於 ${Math.round((1 - (st.baseline.up20 ?? 0)) * 100)}% 才算有預測力。</p>`
+    : '<p class="pat-statnote">歷史勝率會在全市場回測完成後顯示。</p>';
+  setHtml(list, head + group('常用型態', '預設畫在圖上', common) + group('進階型態', '預設不畫，需要時勾選', advanced));
+  renderRank(el.querySelector<HTMLElement>('.pat-rank')!, st);
+}
+
+/** 勝率標籤：顯示勝率、和隨機基準的差距與樣本數。 */
+function winBadge(r: StatRow, base: number | null, horizon: number): string {
+  const edge = base != null ? (r.win - base) * 100 : null;
+  const cls = r.n < MIN_SAMPLES ? 'few' : edge == null ? '' : edge >= 3 ? 'good' : edge <= -3 ? 'bad' : 'flat';
+  const edgeTxt = edge == null ? '' : `，${edge >= 0 ? '比隨機高' : '比隨機低'} ${Math.abs(edge).toFixed(1)} 個百分點`;
+  return `<p class="pat-win pat-win-${cls}"><b>歷史勝率 ${Math.round(r.win * 100)}%</b><span>${horizon} 日後・${r.n} 次${r.n < MIN_SAMPLES ? '（樣本少，參考性低）' : ''}${edgeTxt}・平均 ${r.avg >= 0 ? '+' : ''}${r.avg.toFixed(1)}%</span></p>`;
+}
+
+/** 歷史勝率排行表（所有型態與 K 棒訊號）。 */
+function renderRank(el: HTMLElement, st: PatternStats | null | undefined): void {
+  if (!st) return setHtml(el, '<p class="muted">還沒有回測結果。</p>');
+  const rows = [
+    ...Object.entries(st.patterns).map(([k, r]) => {
+      const [id, bias] = k.split('|') as [Pattern['id'], 'bull' | 'bear'];
+      return { name: PATTERN_NAMES[id] ?? id, kind: COMMON.has(id) ? '常用' : '進階', bias, r, base: baselineFor(st, bias), h: st.horizon };
+    }),
+    ...Object.entries(st.candles).map(([k, r]) => {
+      const [name, bias] = k.split('|') as [string, 'bull' | 'bear'];
+      return { name, kind: 'K 棒', bias, r, base: baselineFor(st, bias, true), h: st.candleHorizon };
+    }),
+  ].sort((a, b) => (b.r.n >= MIN_SAMPLES ? 1 : 0) - (a.r.n >= MIN_SAMPLES ? 1 : 0) || b.r.win - a.r.win);
+  setHtml(
+    el,
+    `<table class="rank-table"><thead><tr><th>型態</th><th>方向</th><th class="num">勝率</th><th class="num">基準</th><th class="num">差距</th><th class="num">平均報酬</th><th class="num">次數</th></tr></thead><tbody>${rows
+      .map((x) => {
+        const edge = x.base != null ? (x.r.win - x.base) * 100 : 0;
+        return `<tr class="${x.r.n < MIN_SAMPLES ? 'few' : ''}"><td>${esc(x.name)}<small>${x.kind}・${x.h} 日</small></td><td class="tilt-text-${x.bias}">${BIAS_WORD[x.bias]}</td>
+          <td class="num">${Math.round(x.r.win * 100)}%</td><td class="num muted">${x.base != null ? Math.round(x.base * 100) + '%' : '—'}</td>
+          <td class="num ${edge >= 3 ? 'edge-good' : edge <= -3 ? 'edge-bad' : ''}">${edge >= 0 ? '+' : ''}${edge.toFixed(1)}</td>
+          <td class="num">${x.r.avg >= 0 ? '+' : ''}${x.r.avg.toFixed(1)}%</td><td class="num">${x.r.n}</td></tr>`;
+      })
+      .join('')}</tbody></table>
+    <p class="disclaimer">回測期間只有 ${st.from}～${st.to}，而且大部分是多頭行情，偏多型態的勝率容易偏高；「差距」才代表型態本身有沒有比隨機買賣更準。次數少於 ${MIN_SAMPLES} 的灰色列參考性低。過去的勝率不代表未來。</p>`,
   );
 }
 

@@ -1196,8 +1196,56 @@ export const PATTERN_COLORS: Record<Pattern['id'], string> = {
   deduct: '#f9a8d4',
 };
 
-/** 預設不畫在圖上的圖層（輔助線比較佔畫面，需要時再勾選）。 */
-export const DEFAULT_HIDDEN: ReadonlySet<Pattern['id']> = new Set(['vprofile', 'boll', 'deduct', 'fib', 'candle']);
+/**
+ * 常用型態：多數看盤軟體與教學都會用到、判讀比較客觀的，預設畫在圖上。
+ * 其他屬於進階（較少見或主觀成分較高，例如波浪、圓弧、島狀反轉），預設不畫，需要時在面板勾選。
+ */
+export const COMMON: ReadonlySet<Pattern['id']> = new Set([
+  'channel',
+  'double-bottom',
+  'double-top',
+  'hs-top',
+  'hs-bottom',
+  'triangle',
+  'gap',
+  'volume',
+  'flag',
+  'wedge',
+  'candle',
+]);
+
+/** 預設不畫在圖上的圖層＝進階型態。 */
+export const DEFAULT_HIDDEN: ReadonlySet<Pattern['id']> = new Set(
+  (
+    ['wave', 'broadening', 'island', 'rounding', 'cup', 'v-reversal', 'triple', 'fib', 'vprofile', 'boll', 'deduct'] as Pattern['id'][]
+  ).filter((id) => !COMMON.has(id)),
+);
+
+/** 勝率表用的型態名稱。 */
+export const PATTERN_NAMES: Record<Pattern['id'], string> = {
+  channel: '趨勢通道／箱型',
+  'double-bottom': 'W 底',
+  'double-top': 'M 頭',
+  'hs-top': '頭肩頂',
+  'hs-bottom': '頭肩底',
+  triangle: '三角形',
+  wave: '艾略特波浪',
+  gap: '跳空缺口',
+  volume: '量價分析',
+  candle: 'K 棒訊號',
+  flag: '旗形／三角旗',
+  wedge: '楔形',
+  broadening: '擴散喇叭型',
+  island: '島狀反轉',
+  rounding: '圓弧底／頂',
+  cup: '杯柄型態',
+  'v-reversal': 'V 型反轉',
+  triple: '三重頂／底',
+  fib: '費波納契',
+  vprofile: '分價量表',
+  boll: '布林通道',
+  deduct: '均線扣抵',
+};
 
 /** 偵測所有型態（只看最近一年內）。 */
 export function detectPatterns(all: Candle[]): { pivots: Pivot[]; patterns: Pattern[] } {
