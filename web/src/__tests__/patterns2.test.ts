@@ -60,3 +60,19 @@ describe('更多型態與輔助線', () => {
     expect(ids(series(path))).toContain('rounding');
   });
 });
+
+describe('常用／進階與勝率基準', async () => {
+  const { COMMON, DEFAULT_HIDDEN, PATTERN_NAMES } = await import('../domain/patterns');
+  const { baselineFor } = await import('../data/patternStats');
+  it('常用型態預設顯示、進階預設隱藏，兩者不重疊', () => {
+    for (const id of COMMON) expect(DEFAULT_HIDDEN.has(id)).toBe(false);
+    expect(DEFAULT_HIDDEN.has('wave')).toBe(true);
+    expect(Object.keys(PATTERN_NAMES).length).toBe(COMMON.size + DEFAULT_HIDDEN.size);
+  });
+  it('偏空型態的基準是隨機下跌比例', () => {
+    const st = { baseline: { up20: 0.62, up5: 0.55 } } as never;
+    expect(baselineFor(st, 'bull')).toBe(0.62);
+    expect(baselineFor(st, 'bear')).toBeCloseTo(0.38);
+    expect(baselineFor(st, 'bear', true)).toBeCloseTo(0.45);
+  });
+});

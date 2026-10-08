@@ -44,7 +44,7 @@ jobs:
       - name: 放進網站
         run: |
           mkdir -p web/public/data
-          for f in active-etf.json stocks.json chips.json fundamentals.json pe5y.json; do
+          for f in active-etf.json stocks.json chips.json fundamentals.json pe5y.json pattern-stats.json; do
             if [ -f ".data/$f" ]; then cp ".data/$f" web/public/data/; fi
           done
           if [ -d .data/candles ]; then cp -r .data/candles web/public/data/; fi
