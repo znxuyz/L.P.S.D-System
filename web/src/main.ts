@@ -22,6 +22,8 @@ import { Toasts } from './ui/toasts';
 import { applyActiveEtfData, loadActiveEtfData } from './data/activeEtfData';
 import { MOCK_ETFS } from './data/mockEtfs';
 import { renderStockPage, type ExternalStock } from './ui/stockPage';
+import { SimPage } from './ui/simPage';
+import { playLaplaceIntro } from './ui/laplaceIntro';
 import { industryIdOf, loadStockDirectory, searchDirectory, type StockDirectory } from './data/stockDirectory';
 import { externalFundamentals } from './data/mockUniverse';
 import type { StockMetrics } from './domain/metrics';
@@ -62,7 +64,7 @@ function saveConvention(value: Convention): void {
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
-const PAGES = ['map', 'intel', 'screen', 'etf', 'stock'] as const;
+const PAGES = ['map', 'intel', 'screen', 'etf', 'stock', 'sim'] as const;
 type Page = (typeof PAGES)[number];
 
 function pageFromHash(): Page {
@@ -79,6 +81,7 @@ function stockFromHash(): string | null {
 class App {
   private readonly map: GlassMapView;
   private readonly toasts: Toasts;
+  private readonly sim = new SimPage($('#page-sim'));
   /** 各股票盤中股價紀錄（每分鐘一筆）。 */
   private readonly history = new Map<string, number[]>();
   private readonly fundamentals: Map<string, Fundamentals>;
@@ -260,11 +263,12 @@ class App {
     const app = $('.app');
     for (const p of PAGES) {
       app.classList.toggle(`page-${p}`, p === page);
-      $(`#tab-${p}`).setAttribute('aria-selected', String(p === page));
+      document.querySelector(`#tab-${p}`)?.setAttribute('aria-selected', String(p === page));
     }
     if (page === 'stock') this.analyzed = stockFromHash() ?? this.analyzed;
     const hash = page === 'stock' ? `#stock/${this.analyzed}` : `#${page}`;
     if (location.hash !== hash) history.replaceState(null, '', hash);
+    if (page === 'sim') this.sim.show();
     this.renderPanels();
   }
 
@@ -451,6 +455,14 @@ class App {
       tab.addEventListener('click', () => this.showPage(tab.dataset.page as Page));
     }
     window.addEventListener('hashchange', () => this.showPage(pageFromHash()));
+    // 左上角的拉普拉斯之眼：播放甦醒動畫後進入模擬盤
+    $('#logo-btn').addEventListener('click', () => {
+      if (document.querySelector('.laplace-intro')) return;
+      void playLaplaceIntro().then(() => {
+        this.showPage('sim');
+        window.scrollTo({ top: 0 });
+      });
+    });
     document.addEventListener('click', (e) => {
       const el = (e.target as Element).closest<HTMLElement>(
         '[data-strategy],[data-highlight],[data-etf],[data-etf-cat],[data-etf-highlight],[data-etf-changes],[data-analyze],[data-goto-strategy]',

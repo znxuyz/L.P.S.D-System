@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>L.P.L.C. 資金熱力圖</title>
+    <meta name="theme-color" content="#060914" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="L.P.L.C." />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -16,17 +24,33 @@
     <div class="app page-map">
       <header class="topbar glass">
         <div class="brand">
-          <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
-            <defs>
-              <linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stop-color="#8ff0ff"></stop>
-                <stop offset="1" stop-color="#8b7bff"></stop>
-              </linearGradient>
-            </defs>
-            <circle cx="16" cy="16" r="13" fill="none" stroke="url(#logo-g)" stroke-width="1.6" opacity="0.55"></circle>
-            <path d="M9 22V10M9 22h14" fill="none" stroke="url(#logo-g)" stroke-width="2.4" stroke-linecap="round"></path>
-            <circle cx="21" cy="12" r="3" fill="url(#logo-g)"></circle>
-          </svg>
+          <button type="button" class="logo-btn" id="logo-btn" title="拉普拉斯模擬盤：用歷史行情練習交易" aria-label="進入拉普拉斯模擬盤">
+            <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+              <defs>
+                <linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#8ff0ff"></stop>
+                  <stop offset="1" stop-color="#8b7bff"></stop>
+                </linearGradient>
+                <radialGradient id="logo-iris" cx="50%" cy="50%" r="50%">
+                  <stop offset="0" stop-color="#e9fdff"></stop>
+                  <stop offset="0.45" stop-color="#8ff0ff"></stop>
+                  <stop offset="1" stop-color="#6a5cff"></stop>
+                </radialGradient>
+              </defs>
+              <g class="logo-ring">
+                <circle cx="32" cy="32" r="28" fill="none" stroke="url(#logo-g)" stroke-width="2" opacity="0.6"></circle>
+                <path d="M32 2.5v4M32 57.5v4M2.5 32h4M57.5 32h4M11.1 11.1l2.8 2.8M50.1 50.1l2.8 2.8M11.1 52.9l2.8-2.8M50.1 13.9l2.8-2.8" stroke="url(#logo-g)" stroke-width="2.2" stroke-linecap="round"></path>
+              </g>
+              <g class="logo-orbit">
+                <circle cx="32" cy="32" r="20.5" fill="none" stroke="url(#logo-g)" stroke-width="1.4" stroke-dasharray="2 4" opacity="0.75"></circle>
+                <circle cx="50" cy="23" r="2.4" fill="#8ff0ff"></circle>
+              </g>
+              <path d="M10 32 Q32 14 54 32 Q32 50 10 32 Z" fill="#0b1030" stroke="url(#logo-g)" stroke-width="2.6" stroke-linejoin="round"></path>
+              <circle cx="32" cy="32" r="9.5" fill="url(#logo-iris)"></circle>
+              <ellipse class="logo-pupil" cx="32" cy="32" rx="2.4" ry="7.6" fill="#060914"></ellipse>
+              <circle cx="35.4" cy="28" r="1.9" fill="#fff" opacity="0.9"></circle>
+            </svg>
+          </button>
           <div class="brand-text">
             <b>L.P.L.C.</b>
             <span>資金熱力圖</span>
@@ -120,6 +144,8 @@
       </section>
 
       <section class="analysis" id="page-stock" aria-label="個股分析"></section>
+
+      <section class="sim" id="page-sim" aria-label="拉普拉斯模擬盤"></section>
 
       <section class="screener etf-page" id="page-etf" aria-label="ETF">
         <nav class="strategies glass" id="etf-cats"></nav>
