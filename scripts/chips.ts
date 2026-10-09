@@ -4,7 +4,7 @@
  *   node scripts/chips.ts <資料資料夾>
  *
  * - 法人買賣超：證交所 T86、櫃買三大法人，每個交易日各一次請求，存在 inst/<日期>.json（外資＋投信買賣超股數）。
- *   從 2025-01-01 開始全部保留（每次回補 INST_MAX 天），用來算「法人連買 / 連賣幾天」。
+ *   從 2020-01-01 開始全部保留（每次回補 INST_MAX 天），用來算「法人連買 / 連賣幾天」。
  * - 千張大戶：集保股權分散表（每週更新，只提供最新一週），存在 tdcc/<日期>.json（持股 1,000 張以上的比率）。
  *   每週一份全部保留；history.ts 會回補過去的週。
  * - 輸出 chips.json（全市場摘要）與 chips/<代號>.json（個股的每日法人、每週大戶，副圖用）給網頁讀。
@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 L.P.L.C.-System';
 /** 法人買賣超從這一天開始全部保留；每次最多回補 INST_MAX 天。 */
-const START = process.env.ARCHIVE_START ?? '2025-01-01';
+const START = process.env.ARCHIVE_START ?? '2020-01-01';
 const INST_MAX = Number(process.env.INST_MAX ?? 60);
 const GAP_MS = 2500;
 /** 這次執行的截止時間（毫秒）；到了就不再發新請求，已抓到的照常存檔。 */

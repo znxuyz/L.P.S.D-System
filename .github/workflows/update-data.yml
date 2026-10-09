@@ -2,7 +2,7 @@ name: Update market data
 
 # 抓官方資料存進 data 分支；跑完會觸發「Deploy to GitHub Pages」把新資料放上網站。
 # - 收盤後（台北 18:37、22:07）：每日資料（主動式 ETF、股票目錄、日 K、籌碼、財報、重大訊息）。
-# - 每小時：回補 2025-01-01 以後的歷史資料（留作之後模擬交易回測用），每次跑 50 分鐘，補完之後幾乎不會再發請求。
+# - 每小時：回補 2020-01-01 以後的歷史資料（留作之後模擬交易回測用），每次跑 50 分鐘，補完之後幾乎不會再發請求。
 # - 抓資料的程式有改動時：馬上跑一次。
 on:
   push:
@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 100
     env:
       DATA_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-      ARCHIVE_START: '2025-01-01'
+      ARCHIVE_START: '2020-01-01'
       # 每小時的回補（含自動接續的下一輪）不用重抓每天只更新一次的資料
       HOURLY: ${{ github.event.schedule == '23 * * * *' || github.event_name == 'workflow_dispatch' }}
     steps:
