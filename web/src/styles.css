@@ -182,6 +182,17 @@ html:has(.page-sim), body:has(.page-sim) { height: auto; }
 .app.page-sim .dock,
 .app.page-sim .screener,
 .app:not(.page-sim) .sim { display: none; }
+/* 模擬盤只留模擬：頂端列只剩圖示、名稱與離開 */
+.app.page-sim .pages,
+.app.page-sim .ticker,
+.app.page-sim .chip-source,
+.app.page-sim .menu,
+.app.page-sim .brand-main,
+.app:not(.page-sim) .brand-sim,
+.app:not(.page-sim) .sim-bar { display: none; }
+.app.page-sim .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sim-bar { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.brand-sim { color: var(--accent) !important; }
 
 /* ---------------- 頂部 ---------------- */
 .topbar {
@@ -1267,3 +1278,17 @@ button.log-text:hover { color: var(--ink); }
   .sim-kpis dd { font-size: 16px; }
 }
 .sim-search .btn { flex: none; white-space: nowrap; }
+
+.sim-gate input { width: 320px; letter-spacing: 0.08em; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }
+.sim-note { font-size: 12px; margin: 6px 0 0; }
+.sim-lobby { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 6px 0 8px; }
+.sim-card { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: var(--radius-sm); border: 1px solid var(--glass-line); background: rgba(255, 255, 255, 0.03); }
+.sim-card p { margin: 0; }
+.sim-card .btn { margin-top: auto; }
+.sim-card-date { font-size: 22px; font-weight: 600; }
+.sim-card-empty { justify-content: center; }
+.sim-lobby-foot { margin: 16px 0 0; text-align: right; }
+@media (max-width: 720px) {
+  .sim-gate input { width: 100%; }
+  .sim-gate label { flex-basis: 100%; }
+}

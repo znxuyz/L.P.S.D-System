@@ -53,7 +53,8 @@
           </button>
           <div class="brand-text">
             <b>L.P.L.C.</b>
-            <span>資金熱力圖</span>
+            <span class="brand-main">資金熱力圖</span>
+            <span class="brand-sim">LAPLACE 模擬盤</span>
           </div>
           <button type="button" class="chip-source is-mock" id="source-chip" title="目前使用模擬行情，數字不代表實際市場">模擬行情</button>
         </div>
@@ -63,6 +64,10 @@
           <button type="button" role="tab" id="tab-screen" data-page="screen" aria-selected="false">五大選股</button>
           <button type="button" role="tab" id="tab-etf" data-page="etf" aria-selected="false">ETF</button>
           <button type="button" role="tab" id="tab-stock" data-page="stock" aria-selected="false">個股分析</button>
+        </div>
+        <div class="sim-bar">
+          <button type="button" class="btn btn-sm" id="sim-who" hidden title="回到大廳"></button>
+          <button type="button" class="btn btn-sm" id="sim-exit" title="離開模擬盤">離開</button>
         </div>
         <dl class="ticker" id="ticker"></dl>
         <details class="menu">

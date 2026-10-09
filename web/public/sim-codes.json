@@ -1,0 +1,29 @@
+{
+  "salt": "456b40a9020e8efc6764b686",
+  "codes": [
+    {
+      "id": "48729f1f17a4b043cdfde8e00f435f561cd51d035da248b12d3b1e2f2336aacb",
+      "label": "玩家 1"
+    },
+    {
+      "id": "0fc693fc96ae63dd36a6b175f44a1ea269c0b7301044f4b539786a5ab260f8eb",
+      "label": "玩家 2"
+    },
+    {
+      "id": "a196622a404bf478ff4e52af9e190505d439e69709ae1cbc00650fade7d2e553",
+      "label": "玩家 3"
+    },
+    {
+      "id": "9f2f771938848b42020dfb4e1f8761411c1aece77c307d6c88b783ccb15a3efd",
+      "label": "玩家 4"
+    },
+    {
+      "id": "58ec1f810c07b235d3f60fb9789e4a5ed1121cf654af0cd16bf0ac2d2dfffb68",
+      "label": "玩家 5"
+    },
+    {
+      "id": "dfd8384afa47321a3c3840e93f2f8888682a46f3b1d4e687501bfc1f3666ac69",
+      "label": "玩家 6"
+    }
+  ]
+}

@@ -455,6 +455,7 @@ class App {
       tab.addEventListener('click', () => this.showPage(tab.dataset.page as Page));
     }
     window.addEventListener('hashchange', () => this.showPage(pageFromHash()));
+    $('#sim-exit').addEventListener('click', () => this.showPage('map'));
     // 左上角的拉普拉斯之眼：播放甦醒動畫後進入模擬盤
     $('#logo-btn').addEventListener('click', () => {
       if (document.querySelector('.laplace-intro')) return;
