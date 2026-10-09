@@ -1,0 +1,17 @@
+rules_version = '2';
+
+// 拉普拉斯模擬盤的雲端存檔（web/src/data/simSync.ts）。
+// 文件 ID 是由開通碼算出的 64 位十六進位雜湊，知道 ID 才能讀寫；不能列出、刪除全部文件。
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /sims/{id} {
+      allow get: if id.matches('^[0-9a-f]{64}$');
+      allow create, update: if id.matches('^[0-9a-f]{64}$')
+        && request.resource.data.keys().hasOnly(['data', 'updatedAt'])
+        && request.resource.data.data is string
+        && request.resource.data.data.size() < 800000
+        && request.resource.data.updatedAt is int;
+      allow list, delete: if false;
+    }
+  }
+}
