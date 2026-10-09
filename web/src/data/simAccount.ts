@@ -34,9 +34,12 @@ export interface SimRecord {
 export interface SimSave {
   current: SimState | null;
   history: SimRecord[];
+  /** 最後修改時間（毫秒），雲端同步時比較哪一邊比較新。 */
+  updatedAt?: number;
 }
 
 const USER_KEY = 'lplc.sim.user';
+const SYNC_PREFIX = 'lplc.sim.sync.';
 const SAVE_PREFIX = 'lplc.sim.u.';
 /** 第一版沒有開通碼時的存檔；第一個登入的開通碼會接收它。 */
 const LEGACY_KEY = 'lplc.sim.v1';
@@ -68,6 +71,11 @@ export async function verifyCode(code: string, list: CodeList): Promise<CodeEntr
   return list.codes.find((c) => c.id === id) ?? null;
 }
 
+/** 雲端同步用的 ID：和公開的開通碼雜湊用不同的前綴，沒有開通碼就算不出來。 */
+export function syncIdFor(code: string, salt: string): Promise<string> {
+  return hashCode(code, `sync:${salt}`);
+}
+
 function read<T>(key: string): T | null {
   try {
     return JSON.parse(localStorage.getItem(key) ?? 'null') as T | null;
@@ -94,9 +102,18 @@ export function rememberUser(id: string | null): void {
   write(USER_KEY, id);
 }
 
+/** 這台裝置記住的同步 ID（登入時由開通碼算出）。 */
+export function rememberedSyncId(id: string): string | null {
+  return read<string>(SYNC_PREFIX + id);
+}
+
+export function rememberSyncId(id: string, syncId: string | null): void {
+  write(SYNC_PREFIX + id, syncId);
+}
+
 export function loadSave(id: string): SimSave {
   const s = read<SimSave>(SAVE_PREFIX + id);
-  if (s && Array.isArray(s.history)) return { current: s.current?.v === 1 ? s.current : null, history: s.history };
+  if (s && Array.isArray(s.history)) return { current: s.current?.v === 1 ? s.current : null, history: s.history, updatedAt: s.updatedAt };
   // 舊版（沒有開通碼）的存檔交給第一個登入的人
   const legacy = read<SimState>(LEGACY_KEY);
   const save: SimSave = { current: legacy?.v === 1 ? legacy : null, history: [] };

@@ -7,7 +7,8 @@ import { loadOfficialCandles } from '../data/candles';
 import { loadTaiex } from '../data/chipSeries';
 import { loadStockDirectory, searchDirectory, type DirEntry } from '../data/stockDirectory';
 import { detectPatterns, type Bias } from '../domain/patterns';
-import { loadCodes, loadSave, rememberUser, rememberedUser, verifyCode, writeSave, type CodeEntry, type CodeList, type SimSave } from '../data/simAccount';
+import { loadCodes, loadSave, rememberSyncId, rememberUser, rememberedSyncId, rememberedUser, syncIdFor, verifyCode, writeSave, type CodeEntry, type CodeList, type SimSave } from '../data/simAccount';
+import { loadSyncConfig, pullSave, pushSave, type SyncConfig } from '../data/simSync';
 import {
   LOT,
   advance,
@@ -51,6 +52,14 @@ export class SimPage {
   private save: SimSave = { current: null, history: [] };
   private view: 'gate' | 'lobby' | 'setup' | 'play' = 'gate';
   private gateMsg = '';
+  /** 雲端同步：設定（null = 沒設定）、這個玩家的同步 ID、狀態。 */
+  private sync: SyncConfig | null | undefined;
+  private syncId: string | null = null;
+  private syncState: 'off' | 'syncing' | 'ok' | 'error' = 'off';
+  private syncNote = '';
+  /** 上次和雲端一致時的存檔時間；雲端比它新代表別台裝置改過。 */
+  private syncedAt = 0;
+  private pushTimer = 0;
   private readonly candles = new Map<string, Candle[] | null>();
   private readonly loading = new Map<string, Promise<Candle[] | null>>();
   private calendar: string[] | null | undefined;
@@ -72,10 +81,14 @@ export class SimPage {
   show(): void {
     this.build();
     // 每次進來先到大廳，讓玩家選「接續」或「開新的模擬」
-    if (this.user) this.view = 'lobby';
+    if (this.user) {
+      this.view = 'lobby';
+      void this.pull();
+    }
     if (this.codeList === undefined) {
-      void loadCodes().then((list) => {
+      void Promise.all([loadCodes(), loadSyncConfig()]).then(([list, sync]) => {
         this.codeList = list;
+        this.sync = sync;
         const id = rememberedUser();
         const entry = id ? list?.codes.find((c) => c.id === id) : undefined;
         if (entry) this.login(entry);
@@ -153,18 +166,112 @@ export class SimPage {
 
   // ------------------------------------------------------------ 帳號
 
-  private login(entry: CodeEntry): void {
+  private login(entry: CodeEntry, syncId?: string): void {
     this.user = entry;
     rememberUser(entry.id);
+    if (syncId) rememberSyncId(entry.id, syncId);
+    this.syncId = syncId ?? rememberedSyncId(entry.id);
     this.save = loadSave(entry.id);
     this.state = this.save.current;
+    this.syncedAt = 0;
     this.view = 'lobby';
     this.gateMsg = '';
     void this.prepare();
+    void this.pull();
+  }
+
+  // ------------------------------------------------------------ 雲端同步
+
+  private canSync(): boolean {
+    return !!(this.sync && this.syncId && this.user);
+  }
+
+  private adopt(remote: SimSave, note: string): void {
+    this.save = { current: remote.current?.v === 1 ? remote.current : null, history: remote.history, updatedAt: remote.updatedAt };
+    this.state = this.save.current;
+    writeSave(this.user!.id, this.save);
+    this.syncedAt = remote.updatedAt ?? 0;
+    this.syncNote = note;
+    if (this.view === 'play' && !this.state) this.view = 'lobby';
+    void this.prepare();
+  }
+
+  /** 從雲端拉存檔：雲端比較新就用雲端的，本機比較新就推上去。 */
+  private async pull(): Promise<void> {
+    if (!this.canSync()) {
+      this.syncState = 'off';
+      return;
+    }
+    const user = this.user;
+    this.syncState = 'syncing';
+    this.render();
+    try {
+      const remote = await pullSave(this.sync!, this.syncId!);
+      if (this.user !== user) return;
+      const local = this.save.updatedAt ?? 0;
+      if (remote && (remote.updatedAt ?? 0) > local) this.adopt(remote, '已載入雲端上最新的進度');
+      else if (!remote || local > (remote.updatedAt ?? 0)) {
+        this.syncedAt = remote?.updatedAt ?? 0;
+        if (this.save.current || this.save.history.length) await this.push();
+      } else this.syncedAt = local;
+      this.syncState = 'ok';
+    } catch {
+      this.syncState = 'error';
+    }
+    this.render();
+  }
+
+  /** 推到雲端前先確認雲端沒有被別台裝置改過；改過就以雲端為準。 */
+  private async push(): Promise<void> {
+    if (!this.canSync()) return;
+    window.clearTimeout(this.pushTimer);
+    this.pushTimer = 0;
+    this.syncState = 'syncing';
+    try {
+      const remote = await pullSave(this.sync!, this.syncId!);
+      if (remote && (remote.updatedAt ?? 0) > this.syncedAt && (remote.updatedAt ?? 0) !== this.save.updatedAt) {
+        this.adopt(remote, '另一台裝置有比較新的進度，已改用雲端上的進度');
+      } else {
+        const save = { ...this.save };
+        await pushSave(this.sync!, this.syncId!, save);
+        this.syncedAt = save.updatedAt ?? 0;
+      }
+      this.syncState = 'ok';
+    } catch {
+      this.syncState = 'error';
+    }
+    this.render();
+  }
+
+  private schedulePush(): void {
+    if (!this.canSync()) return;
+    window.clearTimeout(this.pushTimer);
+    this.pushTimer = window.setTimeout(() => void this.push(), 1500);
+  }
+
+  /** 關閉或切走網頁時，把還沒送出的進度送出去。 */
+  private flush(): void {
+    if (!this.pushTimer || !this.canSync()) return;
+    window.clearTimeout(this.pushTimer);
+    this.pushTimer = 0;
+    void pushSave(this.sync!, this.syncId!, { ...this.save }, true).then(
+      () => (this.syncedAt = this.save.updatedAt ?? 0),
+      () => (this.syncState = 'error'),
+    );
+  }
+
+  private syncBadge(): string {
+    if (!this.sync) return '<span class="sim-sync is-off">未設定雲端同步，紀錄只存在這台裝置</span>';
+    if (!this.syncId) return '<span class="sim-sync is-off">請重新輸入一次開通碼以開啟雲端同步</span>';
+    const label = { off: '', syncing: '同步中⋯⋯', ok: '已同步到雲端', error: '暫時連不上雲端，進度先存在這台裝置' }[this.syncState];
+    return `<span class="sim-sync is-${this.syncState}">☁ ${label}</span>`;
   }
 
   private logout(): void {
+    this.flush();
     this.user = null;
+    this.syncId = null;
+    this.syncNote = '';
     this.state = null;
     this.save = { current: null, history: [] };
     rememberUser(null);
@@ -183,13 +290,15 @@ export class SimPage {
       this.gateMsg = '開通碼不正確';
       return this.render();
     }
-    this.login(entry);
+    this.login(entry, await syncIdFor(code, this.codeList.salt));
   }
 
   private persist(): void {
     if (!this.user) return;
     this.save.current = this.state;
+    this.save.updatedAt = Date.now();
     writeSave(this.user.id, this.save);
+    this.schedulePush();
   }
 
   /** 把目前這一局的成績存進歷史紀錄（至少玩過一天才記）。 */
@@ -327,9 +436,11 @@ export class SimPage {
         this.view = 'lobby';
         this.render();
       } else if (a === 'resume') {
+        this.syncNote = '';
         this.view = 'play';
         void this.prepare();
       } else if (a === 'new') {
+        this.syncNote = '';
         this.view = 'setup';
         this.render();
       } else if (a === 'logout') this.logout();
@@ -391,6 +502,12 @@ export class SimPage {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => this.render());
     }).observe(root);
+    window.addEventListener('pagehide', () => this.flush());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this.flush();
+      // 回到這個分頁時看看別台裝置有沒有新進度（玩到一半不打斷）
+      else if (this.user && this.view !== 'play') void this.pull();
+    });
     // → 鍵下一天（不在輸入框時）
     window.addEventListener('keydown', (e) => {
       if (!document.querySelector('.app.page-sim') || !this.state || this.view !== 'play') return;
@@ -438,7 +555,7 @@ export class SimPage {
         <button type="submit" class="btn btn-accent">開通</button>
       </form>
       <p class="sim-msg" role="alert">${esc(this.gateMsg)}</p>
-      <p class="muted sim-note">紀錄存在這台裝置的瀏覽器；換手機、電腦或清除瀏覽器資料後不會跟著過去。</p>`;
+      <p class="muted sim-note">${this.sync ? '紀錄會同步到雲端：換手機或電腦，用同一個開通碼登入就能接著玩。' : '紀錄存在這台裝置的瀏覽器；換手機、電腦或清除瀏覽器資料後不會跟著過去。'}</p>`;
   }
 
   private lobbyHtml(): string {
@@ -466,6 +583,7 @@ export class SimPage {
     return `
       <p class="eyebrow">Laplace Replay</p>
       <h2 class="sim-title">歡迎，${label}</h2>
+      ${this.syncNote ? `<p class="sim-msg" role="status">${esc(this.syncNote)}</p>` : ''}
       <div class="sim-lobby">
         ${resume}
         <div class="sim-card">
@@ -476,7 +594,7 @@ export class SimPage {
       </div>
       <h3 class="sim-sub">歷史紀錄</h3>
       ${hist ? `<div class="sim-table-wrap"><table class="sim-table"><thead><tr><th>期間</th><th>交易日</th><th>報酬</th><th>同期大盤</th><th>成交筆數</th></tr></thead><tbody>${hist}</tbody></table></div>` : '<p class="muted">還沒有完成的模擬。</p>'}
-      <p class="sim-lobby-foot"><button type="button" class="btn btn-sm" data-sim="logout">換開通碼／登出</button></p>`;
+      <p class="sim-lobby-foot">${this.syncBadge()}<button type="button" class="btn btn-sm" data-sim="logout">換開通碼／登出</button></p>`;
   }
 
   private setupHtml(): string {

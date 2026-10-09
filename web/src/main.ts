@@ -82,6 +82,8 @@ class App {
   private readonly map: GlassMapView;
   private readonly toasts: Toasts;
   private readonly sim = new SimPage($('#page-sim'));
+  /** 進模擬盤之前的頁面（再按一次圖示回到這裡）。 */
+  private beforeSim: Page = 'map';
   /** 各股票盤中股價紀錄（每分鐘一筆）。 */
   private readonly history = new Map<string, number[]>();
   private readonly fundamentals: Map<string, Fundamentals>;
@@ -269,6 +271,11 @@ class App {
     const hash = page === 'stock' ? `#stock/${this.analyzed}` : `#${page}`;
     if (location.hash !== hash) history.replaceState(null, '', hash);
     if (page === 'sim') this.sim.show();
+    else this.beforeSim = page;
+    const logo = $('#logo-btn');
+    const tip = page === 'sim' ? '回到原本的畫面' : '進入拉普拉斯模擬盤';
+    logo.title = tip;
+    logo.setAttribute('aria-label', tip);
     this.renderPanels();
   }
 
@@ -455,10 +462,16 @@ class App {
       tab.addEventListener('click', () => this.showPage(tab.dataset.page as Page));
     }
     window.addEventListener('hashchange', () => this.showPage(pageFromHash()));
-    $('#sim-exit').addEventListener('click', () => this.showPage('map'));
+    $('#sim-exit').addEventListener('click', () => this.showPage(this.beforeSim));
     // 左上角的拉普拉斯之眼：播放甦醒動畫後進入模擬盤
     $('#logo-btn').addEventListener('click', () => {
       if (document.querySelector('.laplace-intro')) return;
+      // 在模擬盤再按一次：回到進來之前的頁面
+      if (this.page === 'sim') {
+        this.showPage(this.beforeSim);
+        window.scrollTo({ top: 0 });
+        return;
+      }
       void playLaplaceIntro().then(() => {
         this.showPage('sim');
         window.scrollTo({ top: 0 });
