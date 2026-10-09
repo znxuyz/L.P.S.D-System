@@ -145,7 +145,7 @@ async function financials(dir: string, out: Record<string, FinRow>): Promise<str
 
 /** 回補 START 以後每一季的彙總報表（只存檔備查，每次最多 FIN_MAX 份）。 */
 async function archiveQuarters(finDir: string, y: number, q: number): Promise<void> {
-  const start = Number((process.env.ARCHIVE_START ?? '2025-01-01').slice(0, 4)) - 1911;
+  const start = Number((process.env.ARCHIVE_START ?? '2020-01-01').slice(0, 4)) - 1911;
   const max = Number(process.env.FIN_MAX ?? 6);
   let n = 0;
   for (let yy = y; yy >= start; yy--) {

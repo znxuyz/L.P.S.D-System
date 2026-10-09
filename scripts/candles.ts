@@ -4,7 +4,7 @@
  *   node scripts/candles.ts <資料資料夾>
  *
  * - 每個交易日只要兩次請求（上市一次、上櫃一次）就拿到全部股票的開高低收量。
- * - 從 START（預設 2025-01-01）開始全部保留；每次最多回補 MAX_DATES 天（從最近的日期往回），幾次執行後就補齊。
+ * - 從 START（預設 2020-01-01）開始全部保留；每次最多回補 MAX_DATES 天（從最近的日期往回），幾次執行後就補齊。
  * - 輸出 candles/<代號>.json：[[日期, 開, 高, 低, 收, 張], …]（一檔一個檔案，網頁只下載正在看的那檔）
  * - candles-meta.json 記錄已抓過的日期與休市日，避免重抓。
  */
@@ -14,7 +14,7 @@ import { join } from 'node:path';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 L.P.L.C.-System';
 const MAX_DATES = Number(process.env.CANDLE_MAX_DATES ?? 80);
 /** 資料從這一天開始全部保留（不再只留一年）。 */
-const START = process.env.ARCHIVE_START ?? '2025-01-01';
+const START = process.env.ARCHIVE_START ?? '2020-01-01';
 const GAP_MS = 2500;
 /** 這次執行的截止時間（毫秒）；到了就不再發新請求，已抓到的照常存檔。 */
 const DEADLINE = Number(process.env.DEADLINE ?? Infinity);

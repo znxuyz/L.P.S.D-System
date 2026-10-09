@@ -5,7 +5,7 @@
  *
  * - 5 年本益比區間：證交所 BWIBBU_d、櫃買本益比查詢（某一天全市場），每月取月底一天，共 60 個月。
  *   存在 pe/<年-月>.json，過去的月份只抓一次；輸出 pe5y.json：{ 代號: [最低, 25%, 中位數, 75%, 最高] }。
- * - 每日本益比、殖利率、淨值比：同上的來源，START（預設 2025-01-01）以後每天一份，存在 ratios/<日期>.json。
+ * - 每日本益比、殖利率、淨值比：同上的來源，START（預設 2020-01-01）以後每天一份，存在 ratios/<日期>.json。
  * - 除權息明細：證交所 TWT49U、櫃買除權息結果，START 以後每年一份 exrights/<年>.json（回測還原股價用）。
  * - 加權指數日 K：證交所 MI_5MINS_HIST（每月一次請求），index/TAIEX.json（回測比較基準）。
  * - 重大訊息：公開資訊觀測站「歷史重大訊息」（某一天全市場），START 以後全部回補，主旨全文存在 events/<日期>.json。
@@ -22,7 +22,7 @@ const PE_MONTHS = Number(process.env.PE_MONTHS ?? 60);
 const PE_MIN_SAMPLES = 24;
 const TDCC_MAX = Number(process.env.TDCC_MAX ?? 500);
 /** 每日資料從這一天開始全部回補保留。 */
-const START = process.env.ARCHIVE_START ?? '2025-01-01';
+const START = process.env.ARCHIVE_START ?? '2020-01-01';
 const EVENT_MAX = Number(process.env.EVENT_MAX ?? 25);
 const RATIO_MAX = Number(process.env.RATIO_MAX ?? 60);
 /** 這次執行的截止時間（毫秒）；到了就不再發新請求，已抓到的照常存檔。 */
