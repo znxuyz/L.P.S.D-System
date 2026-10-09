@@ -70,8 +70,9 @@ jobs:
             HISTORY_PARTS=pe,index,div,ratios node scripts/history.ts .data
           ) > twse.log 2>&1 &
           (
-            HISTORY_PARTS=events node scripts/history.ts .data
+            # 財報先跑：歷史事件回補很久，放前面會把時間用完，財報季報就一直補不到
             node scripts/financials.ts .data
+            HISTORY_PARTS=events node scripts/history.ts .data
           ) > mops.log 2>&1 &
           ( HISTORY_PARTS=tdcc node scripts/history.ts .data ) > tdcc.log 2>&1 &
           wait
