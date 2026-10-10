@@ -23,7 +23,7 @@ import { applyActiveEtfData, loadActiveEtfData } from './data/activeEtfData';
 import { MOCK_ETFS } from './data/mockEtfs';
 import { renderStockPage, type ExternalStock } from './ui/stockPage';
 import { SimPage } from './ui/simPage';
-import { playLaplaceIntro, playLaplaceOutro } from './ui/laplaceIntro';
+import { laplaceBusy, playLaplaceIntro, playLaplaceOutro } from './ui/laplaceIntro';
 import { industryIdOf, loadStockDirectory, searchDirectory, type StockDirectory } from './data/stockDirectory';
 import { externalFundamentals } from './data/mockUniverse';
 import type { StockMetrics } from './domain/metrics';
@@ -143,7 +143,20 @@ class App {
     provider.subscribe((snap) => this.onSnapshot(snap));
   }
 
+  /** 進出場動畫期間收到的最新行情（動畫結束時再處理，避免底下重畫造成卡頓）。 */
+  private pendingSnap: MarketSnapshot | null = null;
+
+  private flushSnapshot(): void {
+    const snap = this.pendingSnap;
+    this.pendingSnap = null;
+    if (snap) this.onSnapshot(snap);
+  }
+
   private onSnapshot(snap: MarketSnapshot): void {
+    if (laplaceBusy()) {
+      this.pendingSnap = snap;
+      return;
+    }
     // 重播時時間倒退，日誌重新開始
     if (this.metrics && snap.time < this.metrics.time) {
       this.detector.reset();
@@ -282,9 +295,10 @@ class App {
   /** 離開模擬盤：播放闔眼動畫後回到進來之前的頁面。 */
   private leaveSim(): void {
     if (document.querySelector('.laplace-intro')) return;
-    void playLaplaceOutro().then(() => {
+    void playLaplaceOutro(() => {
+      this.flushSnapshot();
       this.showPage(this.beforeSim);
-      window.scrollTo({ top: 0 });
+      if (window.scrollY) window.scrollTo({ top: 0 });
     });
   }
 
@@ -477,9 +491,11 @@ class App {
       if (document.querySelector('.laplace-intro')) return;
       // 在模擬盤再按一次：回到進來之前的頁面
       if (this.page === 'sim') return this.leaveSim();
-      void playLaplaceIntro().then(() => {
+      this.sim.preload();
+      void playLaplaceIntro(() => {
+        this.flushSnapshot();
         this.showPage('sim');
-        window.scrollTo({ top: 0 });
+        if (window.scrollY) window.scrollTo({ top: 0 });
       });
     });
     document.addEventListener('click', (e) => {

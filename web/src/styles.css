@@ -64,6 +64,10 @@ button { font: inherit; color: inherit; }
 .aurora i:nth-child(1) { width: 46vw; height: 46vw; left: -10vw; top: -16vw; background: radial-gradient(circle, rgba(64, 110, 255, 0.55), transparent 65%); }
 .aurora i:nth-child(2) { width: 40vw; height: 40vw; right: -12vw; bottom: -14vw; background: radial-gradient(circle, rgba(150, 80, 255, 0.45), transparent 65%); animation-duration: 34s; }
 .aurora i:nth-child(3) { width: 30vw; height: 30vw; left: 45vw; top: -8vw; background: radial-gradient(circle, rgba(0, 210, 230, 0.32), transparent 65%); animation-duration: 40s; }
+/* 手機上背景光暈不飄動：它一動，所有毛玻璃面板每一格都要重新模糊，很吃 GPU */
+@media (hover: none), (max-width: 720px) {
+  .aurora i { animation: none; }
+}
 @keyframes drift { to { transform: translate(6vw, 5vh) scale(1.12); } }
 
 /* 霧面玻璃：漸層描邊（上亮下暗）＋上緣高光 */
@@ -218,69 +222,79 @@ html:has(.page-sim), body:has(.page-sim) { height: auto; }
 @keyframes logo-spin { to { transform: rotate(360deg); } }
 @keyframes logo-blink { 0%, 92%, 100% { transform: scale(1, 1); } 95% { transform: scale(1.6, 0.6); } }
 
-/* ---------------- 拉普拉斯甦醒動畫 ---------------- */
+/* ---------------- 拉普拉斯進出場動畫（只動 transform／opacity，交給 GPU 合成） ---------------- */
 .laplace-intro {
   position: fixed; inset: 0; z-index: 1000; overflow: hidden; cursor: pointer;
   display: grid; place-items: center; align-content: center; gap: 18px;
   background: radial-gradient(circle at 50% 45%, #121a45 0%, #060914 60%, #02030a 100%);
   animation: li-in 0.25s ease-out both;
+  contain: strict;
 }
 .laplace-intro.is-leaving { animation: li-out 0.45s ease-in forwards; }
-.li-streams { position: absolute; inset: 0; pointer-events: none; mask-image: radial-gradient(circle at 50% 45%, transparent 18%, #000 55%); }
+/* 動畫期間底下的頁面不畫 */
+body.laplace-busy .app, body.laplace-busy .aurora { visibility: hidden; }
+.li-defs { position: absolute; }
+.li-streams { position: absolute; inset: 0; pointer-events: none; }
 .li-streams i {
-  position: absolute; top: -60%; font: 500 11px/1.6 var(--font); font-style: normal; color: rgba(143, 240, 255, 0.55);
-  font-variant-numeric: tabular-nums; text-shadow: 0 0 8px rgba(143, 240, 255, 0.5); animation: li-fall 2s linear both;
+  position: absolute; top: -60%; font: 500 11px/1.6 var(--font); font-style: normal; color: rgba(143, 240, 255, 0.5);
+  font-variant-numeric: tabular-nums; animation: li-fall 2s linear both; will-change: transform, opacity;
 }
-.li-streams i:nth-child(3n) { color: rgba(184, 169, 255, 0.55); }
-.li-core { width: min(64vmin, 440px); height: min(64vmin, 440px); overflow: visible; animation: li-core 3.3s cubic-bezier(0.7, 0, 0.84, 0) both; }
-.li-ticks, .li-ring { transform-origin: 100px 100px; animation: li-spin 9s linear infinite, li-gather 0.9s var(--ease) both; }
-.li-orbit { transform-origin: 100px 100px; animation: li-spin 3.2s linear infinite; }
+.li-streams i:nth-child(3n) { color: rgba(184, 169, 255, 0.5); }
+/* 中央壓暗，數字不會蓋到眼睛與文字（取代成本高的 mask-image） */
+.li-vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 45%, #0e1440 0%, rgba(8, 12, 34, 0.96) 26%, rgba(6, 9, 20, 0.55) 46%, transparent 62%); }
+.li-core { position: relative; width: min(64vmin, 440px); height: min(64vmin, 440px); animation: li-core 3.3s cubic-bezier(0.7, 0, 0.84, 0) both; will-change: transform, opacity; }
+.li-layer { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.li-ring { animation: li-gather 0.9s var(--ease) both, li-spin 9s 0.9s linear infinite; will-change: transform; }
+.li-orbit { animation: li-spin 3.2s linear infinite; will-change: transform; }
 .li-orbit-2 { animation-direction: reverse; animation-duration: 2.2s; }
-.li-glow { transform-origin: 100px 100px; animation: li-pulse 1.6s ease-in-out infinite alternate; }
-.li-eye { transform-origin: 100px 100px; animation: li-open 0.7s 0.45s var(--ease) both; }
-.li-pupil { transform-origin: 100px 100px; animation: li-dilate 0.6s 2.3s cubic-bezier(0.5, 0, 0.2, 1) both; }
+.li-glow { animation: li-pulse 1.6s ease-in-out infinite alternate; will-change: transform, opacity; }
+.li-eye, .lo-eye { position: absolute; inset: 0; will-change: transform; }
+.li-eye { animation: li-open 0.7s 0.45s var(--ease) both; }
+.li-pupil { animation: li-dilate 0.6s 2.3s cubic-bezier(0.5, 0, 0.2, 1) both; will-change: transform; }
 .li-quote {
-  margin: 0; max-width: min(640px, 86vw); min-height: 3.2em; text-align: center; font-size: clamp(13px, 2.1vmin, 17px); line-height: 1.6;
-  color: #cfe9ff; letter-spacing: 0.06em; text-shadow: 0 0 12px rgba(143, 240, 255, 0.45); animation: li-fade 0.4s 0.9s both, li-zoom-out 0.4s 2.5s both;
+  position: relative; z-index: 1; margin: 0; max-width: min(640px, 86vw); padding: 10px 18px; border-radius: 14px; text-align: center;
+  background: rgba(3, 5, 15, 0.78); box-shadow: 0 0 30px 12px rgba(3, 5, 15, 0.7); font-size: clamp(13px, 2.1vmin, 17px); line-height: 1.6;
+  color: #cfe9ff; letter-spacing: 0.06em; animation: li-fade 0.4s 0.9s both, li-zoom-out 0.4s 2.5s both;
 }
+.li-quote span { display: inline-block; opacity: 0; animation: li-ch 0.12s linear forwards; }
 .li-quote::after { content: '— 拉普拉斯，1814'; display: block; margin-top: 6px; font-size: 0.78em; color: var(--muted); letter-spacing: 0.2em; }
 .li-title {
   position: absolute; top: 9vh; left: 0; right: 0; margin: 0; text-align: center; font-size: 12px; font-weight: 700; letter-spacing: 0.6em;
   color: var(--accent); animation: li-fade 0.5s 0.2s both, li-zoom-out 0.4s 2.5s both;
 }
 .li-skip { position: absolute; bottom: 4vh; margin: 0; font-size: 11px; color: var(--muted); letter-spacing: 0.2em; animation: li-fade 0.4s 0.8s both; }
-.li-flash { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 45%, #e9fdff 0%, #8ff0ff 25%, rgba(139, 123, 255, 0.6) 55%, transparent 80%); opacity: 0; animation: li-flash 0.7s 2.65s ease-out both; }
+.li-flash { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 45%, #e9fdff 0%, #8ff0ff 25%, rgba(139, 123, 255, 0.6) 55%, transparent 80%); opacity: 0; animation: li-flash 0.7s 2.65s ease-out both; will-change: opacity; }
 @keyframes li-in { from { opacity: 0; } }
 @keyframes li-out { to { opacity: 0; } }
 @keyframes li-fall { from { transform: translateY(0); opacity: 0; } 15% { opacity: 1; } to { transform: translateY(170vh); opacity: 0.2; } }
 @keyframes li-spin { to { transform: rotate(360deg); } }
-@keyframes li-gather { from { opacity: 0; transform: scale(1.6) rotate(-40deg); } }
+@keyframes li-gather { from { opacity: 0; transform: scale(1.6) rotate(-40deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
 @keyframes li-pulse { from { opacity: 0.5; transform: scale(0.92); } to { opacity: 1; transform: scale(1.08); } }
 @keyframes li-open { from { transform: scaleY(0.04); opacity: 0.4; } }
 @keyframes li-dilate { to { transform: scale(4.2, 1.25); } }
-@keyframes li-core { 0% { transform: scale(0.7); opacity: 0; } 18% { transform: scale(1); opacity: 1; } 75% { transform: scale(1.04); } 100% { transform: scale(14); opacity: 0; } }
+@keyframes li-core { 0% { transform: scale(0.7); opacity: 0; } 18% { transform: scale(1); opacity: 1; } 75% { transform: scale(1.04); } 100% { transform: scale(5); opacity: 0; } }
 @keyframes li-fade { from { opacity: 0; transform: translateY(6px); } }
 @keyframes li-zoom-out { to { opacity: 0; transform: scale(0.96); } }
 @keyframes li-flash { 0% { opacity: 0; } 45% { opacity: 1; } 100% { opacity: 0.85; } }
+@keyframes li-ch { to { opacity: 1; } }
 .laplace-intro.is-reduced * { animation: none !important; }
+.laplace-intro.is-reduced .li-quote span { opacity: 1; }
 /* 離開模擬盤：闔眼、時間倒流回到現在 */
-.laplace-outro { background: radial-gradient(circle at 50% 45%, #0f1640 0%, #060914 55%, #02030a 100%); animation: lo-in 0.45s ease-out both; }
+.laplace-outro { background: radial-gradient(circle at 50% 45%, #0f1640 0%, #060914 55%, #02030a 100%); animation: li-in 0.45s ease-out both; }
 .lo-streams i { top: auto; bottom: -60%; animation-name: lo-rise; }
 .lo-core { animation: lo-core 2.3s ease-in both; }
-.lo-ticks, .lo-ring { transform-origin: 100px 100px; animation: lo-scatter 1.1s 0.15s cubic-bezier(0.4, 0, 0.2, 1) both; }
-.lo-ring { animation-duration: 0.9s; }
-.lo-eye { transform-origin: 100px 100px; animation: lo-close 0.45s 1.15s cubic-bezier(0.7, 0, 0.3, 1) both; }
-.lo-pupil { transform-origin: 100px 100px; animation: lo-constrict 0.8s 0.2s cubic-bezier(0.3, 0, 0.2, 1) both; }
+.lo-ring { animation: lo-scatter 1.1s 0.15s cubic-bezier(0.4, 0, 0.2, 1) both; will-change: transform, opacity; }
+.lo-eye { animation: lo-close 0.45s 1.15s cubic-bezier(0.7, 0, 0.3, 1) both; }
+.lo-pupil { animation: lo-constrict 0.8s 0.2s cubic-bezier(0.3, 0, 0.2, 1) both; will-change: transform; }
 .lo-line {
   position: absolute; left: 50%; top: 45%; width: min(40vmin, 280px); height: 2px; margin-left: calc(min(40vmin, 280px) / -2);
   background: linear-gradient(90deg, transparent, #e9fdff 30%, #8ff0ff 50%, #e9fdff 70%, transparent);
   box-shadow: 0 0 18px #8ff0ff, 0 0 40px rgba(139, 123, 255, 0.6); opacity: 0; pointer-events: none;
-  animation: lo-line 0.8s 1.5s cubic-bezier(0.5, 0, 0.2, 1) both;
+  animation: lo-line 0.8s 1.5s cubic-bezier(0.5, 0, 0.2, 1) both; will-change: transform, opacity;
 }
-.lo-quote { min-height: 0; position: relative; z-index: 1; padding: 10px 20px; border-radius: 14px; background: rgba(3, 5, 15, 0.8); box-shadow: 0 0 30px 10px rgba(3, 5, 15, 0.7); animation: li-fade 0.4s 0.3s both, li-zoom-out 0.3s 1.85s both; }
+.lo-quote { animation: li-fade 0.4s 0.3s both, li-zoom-out 0.3s 1.85s both; }
 .lo-quote::after { content: '— 回到現在'; }
 .lo-title { animation: li-fade 0.4s 0.1s both, li-zoom-out 0.3s 1.85s both; }
-@keyframes lo-in { from { opacity: 0; backdrop-filter: blur(0); } }
 @keyframes lo-rise { from { transform: translateY(0); opacity: 0; } 15% { opacity: 1; } to { transform: translateY(-170vh); opacity: 0.2; } }
 @keyframes lo-core { 0% { transform: scale(1.5); opacity: 0; } 20% { transform: scale(1); opacity: 1; } 100% { transform: scale(0.94); } }
 @keyframes lo-scatter { from { opacity: 1; transform: scale(1) rotate(0); } to { opacity: 0; transform: scale(1.9) rotate(50deg); } }
