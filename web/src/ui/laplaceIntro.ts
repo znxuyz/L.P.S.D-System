@@ -7,10 +7,11 @@
  * 點一下或按 Esc 可以跳過；系統設定「減少動態效果」時只做淡入淡出。
  *
  * 手機效能：
- * - 會旋轉、縮放的部分各自是獨立的 <svg>／<div>，動畫只改 transform 與 opacity，交給 GPU 合成，不佔主執行緒。
+ * - 會旋轉、縮放的部分各自是獨立的 <svg>／<div>，動畫只改 transform 與 opacity，交給 GPU 合成。
+ * - 動畫都在插入時就開始（等待寫進關鍵影格），iOS Safari 主執行緒忙時也不會停在第一格。
  * - 名句一開始就整句排好版，用每個字的淡入做「打字」，不會每 32 毫秒重新排版。
- * - 動畫期間底下的頁面隱藏、停止重畫（body.laplace-busy），切換頁面在畫面完全被蓋住時進行，
- *   等新頁面畫好兩個影格後才開始淡出，避免切換那一下卡頓。
+ * - 動畫期間暫停底下頁面的行情重畫（body.laplace-busy 只當旗標，不改樣式），切換頁面在畫面完全被蓋住時進行，
+ *   等新頁面畫好兩個影格後才開始淡出。
  */
 
 const QUOTE = '若有一位智者，知道此刻宇宙中所有的力與每個粒子的位置⋯⋯未來就會像過去一樣，清清楚楚地呈現在祂眼前。';
@@ -27,7 +28,8 @@ function streams(): string {
   const cols = window.innerWidth < 600 ? 10 : 18;
   for (let k = 0; k < cols; k++) {
     const left = (k / cols) * 100 + Math.random() * 3;
-    const delay = Math.random() * 0.8;
+    // 負的 delay：一插入就從動畫中段開始，不必等主執行緒啟動（iOS Safari）
+    const delay = -Math.random() * 0.6;
     const dur = 1.6 + Math.random() * 1.4;
     const nums = Array.from({ length: 14 }, () => {
       const r = Math.random();
@@ -85,14 +87,13 @@ interface Run {
 function run({ el, swapAt, swap }: Run): Promise<void> {
   const body = document.body;
   body.appendChild(el);
-  // 淡入完成、畫面完全被蓋住後才隱藏底下頁面
-  const hideTimer = window.setTimeout(() => body.classList.add('laplace-busy'), 260);
+  // 只當旗標：動畫期間暫停底下頁面的行情重畫（不改任何樣式，避免 Safari 重新排版整頁）
+  body.classList.add('laplace-busy');
   return new Promise((resolve) => {
     let done = false;
     const finish = () => {
       if (done) return;
       done = true;
-      window.clearTimeout(hideTimer);
       window.clearTimeout(swapTimer);
       window.removeEventListener('keydown', onKey);
       // 先在蓋住的狀態下切換頁面，讓重畫發生在看不到的地方
@@ -133,10 +134,10 @@ export function playLaplaceIntro(swap: () => void): Promise<void> {
     <div class="li-vignette" aria-hidden="true"></div>
     <div class="li-core" aria-hidden="true">
       ${layer('li-glow', '<circle cx="100" cy="100" r="80" fill="url(#li-glow)"></circle>')}
-      ${layer('li-ring', RING)}
+      <div class="li-wrap li-ring-wrap">${layer('li-ring', RING)}</div>
       ${layer('li-orbit', '<circle cx="100" cy="100" r="64" fill="none" stroke="url(#li-g)" stroke-width="0.8" stroke-dasharray="2 5"></circle><circle cx="164" cy="100" r="3" fill="#8ff0ff"></circle><circle cx="45" cy="133" r="2.2" fill="#b8a9ff"></circle>')}
       ${layer('li-orbit li-orbit-2', '<circle cx="100" cy="100" r="48" fill="none" stroke="url(#li-g)" stroke-width="0.6" stroke-dasharray="1 7"></circle><circle cx="100" cy="52" r="1.8" fill="#e9fdff"></circle>')}
-      <div class="li-eye">
+      <div class="li-wrap li-eye">
         ${layer('', EYE)}
         ${layer('li-pupil', PUPIL)}
         ${layer('', SHINE)}
@@ -161,7 +162,7 @@ export function playLaplaceOutro(swap: () => void): Promise<void> {
     <div class="li-vignette" aria-hidden="true"></div>
     <div class="li-core lo-core" aria-hidden="true">
       ${layer('lo-ring', RING)}
-      <div class="lo-eye">
+      <div class="li-wrap lo-eye">
         ${layer('', EYE)}
         ${layer('lo-pupil', PUPIL)}
         ${layer('', SHINE)}
