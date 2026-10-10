@@ -7,7 +7,7 @@ import { mockNews, newsLinks } from '../domain/news';
 import { industryPeMedians, stockView, type StockView } from '../domain/screens';
 import { MA_PERIODS, analyzeTechnicals, type Candle, type MaPeriod, type TechReport, type Tilt } from '../domain/technicals';
 import { COMMON, DEFAULT_HIDDEN, PATTERN_COLORS, PATTERN_GUIDE, PATTERN_NAMES, detectPatterns, type Bias, type Pattern } from '../domain/patterns';
-import { MIN_SAMPLES, baselineFor, type PatternStats, type StatRow } from '../data/patternStats';
+import { MIN_SAMPLES, REGIME_MA, REGIME_NAME, baselineFor, currentRegime, regimeView, type PatternStats, type Regime, type StatRow } from '../data/patternStats';
 import { CANDLE_GUIDE } from '../domain/candlesticks';
 import type { ChipSeries } from '../data/chipSeries';
 import { SUB_LABEL, buildSub, type SubPane } from './subPane';
@@ -455,6 +455,18 @@ function renderPatterns(el: HTMLElement, patterns: Pattern[], ctx: StockPageCont
   if (!patterns.length) return setHtml(list, '<p class="muted">近期沒有明確的型態（走勢沒有形成可辨識的轉折組合）。</p>');
   const icon: Record<Bias, string> = { bull: '▲', bear: '▼', neutral: '●' };
   const st = ctx.patStats;
+  // 目前大盤行情下的勝率（加權指數在半年線之上／之下），和整體勝率並列
+  const nowRegime = currentRegime(ctx.taiex);
+  const nowView = st && nowRegime ? regimeView(st, nowRegime) : null;
+  const regimeBadge = (key: string, bias: 'bull' | 'bear', candle: boolean): string => {
+    if (!nowView || !nowRegime) return '';
+    const r = (candle ? nowView.candles : nowView.patterns)[key];
+    if (!r || r.n < MIN_SAMPLES) return '';
+    const base = baselineFor(nowView, bias, candle);
+    const edge = base != null ? (r.win - base) * 100 : null;
+    const cls = edge == null ? '' : edge >= 3 ? 'good' : edge <= -3 ? 'bad' : 'flat';
+    return `<p class="pat-win pat-win-regime pat-win-${cls}"><b>${REGIME_NAME[nowRegime]}時 ${Math.round(r.win * 100)}%</b><span>目前大盤${nowRegime === 'bull' ? '在' : '跌破'}半年線・${r.n} 次${edge == null ? '' : `，${edge >= 0 ? '比隨機高' : '比隨機低'} ${Math.abs(edge).toFixed(1)} 個百分點`}・平均 ${r.avg >= 0 ? '+' : ''}${r.avg.toFixed(1)}%</span></p>`;
+  };
   const statOf = (p: Pattern): StatRow | null => (st && p.bias !== 'neutral' ? st.patterns[`${p.id}|${p.bias}`] ?? null : null);
   const card = (p: Pattern) => {
     const row = statOf(p);
@@ -466,6 +478,7 @@ function renderPatterns(el: HTMLElement, patterns: Pattern[], ctx: StockPageCont
             <label class="pat-show"><input type="checkbox" data-pat="${p.id}" ${patVisible(p.id) ? 'checked' : ''} />畫在圖上</label>
           </header>
           ${row && st ? winBadge(row, baselineFor(st, p.bias as 'bull' | 'bear'), st.horizon) : ''}
+          ${p.bias !== 'neutral' ? regimeBadge(`${p.id}|${p.bias}`, p.bias, false) : ''}
           <p class="pat-summary">${esc(p.summary)}</p>
           <ul class="pat-scen">${p.scenarios
             .map((sc) => {
@@ -475,6 +488,10 @@ function renderPatterns(el: HTMLElement, patterns: Pattern[], ctx: StockPageCont
                 const r = st.candles[`${sc.when.split(' ').slice(1).join(' ')}|${sc.bias}`];
                 const base = baselineFor(st, sc.bias, true);
                 if (r) extra = `<span class="pat-win-inline">歷史 ${st.candleHorizon} 日勝率 ${Math.round(r.win * 100)}%${base != null ? `（基準 ${Math.round(base * 100)}%）` : ''}・${r.n} 次</span>`;
+                const key = `${sc.when.split(' ').slice(1).join(' ')}|${sc.bias}`;
+                const rr = nowView?.candles[key];
+                const rb = nowView ? baselineFor(nowView, sc.bias, true) : null;
+                if (rr && rr.n >= MIN_SAMPLES && nowRegime) extra += `<span class="pat-win-inline">${REGIME_NAME[nowRegime]}時 ${Math.round(rr.win * 100)}%${rb != null ? `（基準 ${Math.round(rb * 100)}%）` : ''}・${rr.n} 次</span>`;
               }
               return `<li class="pt-${sc.bias}"><i>${icon[sc.bias]}</i><span><b>若</b>${esc(sc.when)}</span><span class="pat-then">→ ${esc(sc.then)}${extra}</span></li>`;
             })
@@ -495,7 +512,7 @@ function renderPatterns(el: HTMLElement, patterns: Pattern[], ctx: StockPageCont
     ? `<p class="pat-statnote">勝率＝型態出現後 ${st.horizon} 個交易日，偏多的有上漲、偏空的有下跌的比例（全市場 ${st.stocks} 檔、${st.from}～${st.to} 回測）。同期隨機買進 ${st.horizon} 天後上漲的機率是 ${Math.round((st.baseline.up20 ?? 0) * 100)}%，偏多型態要高於它、偏空型態要高於 ${Math.round((1 - (st.baseline.up20 ?? 0)) * 100)}% 才算有預測力。</p>`
     : '<p class="pat-statnote">歷史勝率會在全市場回測完成後顯示。</p>';
   setHtml(list, head + group('常用型態', '預設畫在圖上', common) + group('進階型態', '預設不畫，需要時勾選', advanced));
-  renderRank(el.querySelector<HTMLElement>('.pat-rank')!, st);
+  renderRank(el.querySelector<HTMLElement>('.pat-rank')!, st, nowRegime);
 }
 
 /** 勝率標籤：顯示勝率、和隨機基準的差距與樣本數。 */
@@ -507,8 +524,24 @@ function winBadge(r: StatRow, base: number | null, horizon: number): string {
 }
 
 /** 歷史勝率排行表（所有型態與 K 棒訊號）。 */
-function renderRank(el: HTMLElement, st: PatternStats | null | undefined): void {
-  if (!st) return setHtml(el, '<p class="muted">還沒有回測結果。</p>');
+/** 勝率排行目前看的是哪一組：全部、多頭行情、空頭行情。 */
+let rankScope: 'all' | Regime = 'all';
+
+function renderRank(el: HTMLElement, all: PatternStats | null | undefined, now: Regime | null): void {
+  if (!all) return setHtml(el, '<p class="muted">還沒有回測結果。</p>');
+  if (!el.dataset.ready) {
+    el.dataset.ready = '1';
+    el.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-rank-scope]');
+      if (!b) return;
+      rankScope = b.dataset.rankScope as 'all' | Regime;
+      redrawRank?.();
+    });
+  }
+  redrawRank = () => renderRank(el, all, now);
+  const hasRegimes = !!all.regimes?.bull && !!all.regimes?.bear;
+  const scope = hasRegimes ? rankScope : 'all';
+  const st = scope === 'all' ? all : regimeView(all, scope) ?? all;
   const rows = [
     ...Object.entries(st.patterns).map(([k, r]) => {
       const [id, bias] = k.split('|') as [Pattern['id'], 'bull' | 'bear'];
@@ -519,9 +552,19 @@ function renderRank(el: HTMLElement, st: PatternStats | null | undefined): void 
       return { name, kind: 'K 棒', bias, r, base: baselineFor(st, bias, true), h: st.candleHorizon };
     }),
   ].sort((a, b) => (b.r.n >= MIN_SAMPLES ? 1 : 0) - (a.r.n >= MIN_SAMPLES ? 1 : 0) || b.r.win - a.r.win);
+  const R = all.regimes;
+  const tabs = hasRegimes
+    ? `<div class="seg rank-scope" role="group" aria-label="大盤行情">${(['all', 'bull', 'bear'] as const)
+        .map((k) => {
+          const label = k === 'all' ? '全部期間' : `${REGIME_NAME[k]}（${R?.[k]?.days ?? 0} 天）`;
+          return `<button type="button" data-rank-scope="${k}" aria-pressed="${scope === k}">${label}${k !== 'all' && k === now ? ' ・現在' : ''}</button>`;
+        })
+        .join('')}</div>
+      <p class="rank-note">「基準」和「差距」也換成同樣行情下隨機買賣的機率。行情分組：${esc(R?.rule ?? `加權指數在 ${REGIME_MA} 日均線之上＝多頭`)}${now ? `；目前是<b>${REGIME_NAME[now]}</b>` : ''}。</p>`
+    : '';
   setHtml(
     el,
-    `<table class="rank-table"><thead><tr><th>型態</th><th>方向</th><th class="num">勝率</th><th class="num">基準</th><th class="num">差距</th><th class="num">平均報酬</th><th class="num">次數</th></tr></thead><tbody>${rows
+    `${tabs}<table class="rank-table"><thead><tr><th>型態</th><th>方向</th><th class="num">勝率</th><th class="num">基準</th><th class="num">差距</th><th class="num">平均報酬</th><th class="num">次數</th></tr></thead><tbody>${rows
       .map((x) => {
         const edge = x.base != null ? (x.r.win - x.base) * 100 : 0;
         return `<tr class="${x.r.n < MIN_SAMPLES ? 'few' : ''}"><td>${esc(x.name)}<small>${x.kind}・${x.h} 日</small></td><td class="tilt-text-${x.bias}">${BIAS_WORD[x.bias]}</td>
@@ -530,9 +573,10 @@ function renderRank(el: HTMLElement, st: PatternStats | null | undefined): void 
           <td class="num">${x.r.avg >= 0 ? '+' : ''}${x.r.avg.toFixed(1)}%</td><td class="num">${x.r.n}</td></tr>`;
       })
       .join('')}</tbody></table>
-    <p class="disclaimer">回測期間只有 ${st.from}～${st.to}，而且大部分是多頭行情，偏多型態的勝率容易偏高；「差距」才代表型態本身有沒有比隨機買賣更準。次數少於 ${MIN_SAMPLES} 的灰色列參考性低。過去的勝率不代表未來。</p>`,
+    <p class="disclaimer">回測期間 ${all.from}～${all.to}，大部分是多頭行情，偏多型態的勝率容易看起來偏高；「差距」才代表型態本身有沒有比隨機買賣更準。「平均報酬」是照型態方向操作的平均結果——偏空型態可能勝率過半但平均賠錢（漲的時候漲得多、跌的時候跌得少）。次數少於 ${MIN_SAMPLES} 的灰色列參考性低。過去的勝率不代表未來。</p>`,
   );
 }
+let redrawRank: (() => void) | null = null;
 
 function renderLoader(el: HTMLElement, ctx: StockPageContext, compact = false): void {
   const kind = compact ? 'compact' : 'full';

@@ -985,6 +985,11 @@ button.log-text:hover { color: var(--ink); }
 .pat-win-few b, .pat-win-flat b { color: var(--ink-2); }
 .pat-win-inline { display: block; font-size: 11.5px; color: var(--muted); }
 .pat-rank { overflow-x: auto; }
+.rank-scope { margin-top: 10px; max-width: 520px; }
+.rank-scope button { font-size: 12px; padding: 6px 8px; }
+.rank-note { margin: 8px 0 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.rank-note b { color: var(--ink); }
+.pat-win-regime { margin-top: 2px; }
 .rank-table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
 .rank-table th, .rank-table td { padding: 6px 8px; border-bottom: 1px solid var(--glass-line); text-align: left; }
 .rank-table th { color: var(--muted); font-weight: 500; }
