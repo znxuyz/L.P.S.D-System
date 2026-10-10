@@ -10,6 +10,8 @@
  * - K 棒訊號：訊號出現後 5 個交易日的漲跌。
  * - 基準：同樣的取樣點隨機持有 20（5）天上漲的比例。多頭期間偏多型態容易「看起來很準」，
  *   要和基準比較才看得出型態有沒有額外的預測力。
+ * - 行情分組：訊號當天加權指數收盤在 120 日均線（半年線）之上算「多頭行情」、之下算「空頭行情」，
+ *   各自另算一份勝率與基準（regimes），看型態是不是只在某種行情有效。這個判斷只用當天以前的資料。
  * 只用一般股票（4 碼），不含 ETF。
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -38,6 +40,29 @@ const acc = (m: Map<string, Acc>, key: string, signedRet: number) => {
 };
 
 const dir = process.argv[2] ?? 'data';
+
+type Regime = 'bull' | 'bear';
+const REGIME_MA = 120;
+/** 每個交易日的大盤行情：加權指數收盤在 120 日均線之上＝多頭。 */
+const regimeOf = new Map<string, Regime>();
+{
+  let taiex: Array<[string, number, number, number, number]> = [];
+  try {
+    taiex = JSON.parse(readFileSync(join(dir, 'index', 'TAIEX.json'), 'utf8'));
+  } catch {
+    console.log('沒有加權指數資料，不分行情');
+  }
+  let sum = 0;
+  taiex.forEach(([date, , , , close], i) => {
+    sum += close;
+    if (i >= REGIME_MA) sum -= taiex[i - REGIME_MA][4];
+    if (i >= REGIME_MA - 1) regimeOf.set(date, close >= sum / REGIME_MA ? 'bull' : 'bear');
+  });
+}
+const byRegime = {
+  bull: { patterns: new Map<string, Acc>(), candles: new Map<string, Acc>(), base20: { n: 0, up: 0 }, base5: { n: 0, up: 0 } },
+  bear: { patterns: new Map<string, Acc>(), candles: new Map<string, Acc>(), base20: { n: 0, up: 0 }, base5: { n: 0, up: 0 } },
+};
 const files = readdirSync(join(dir, 'candles')).filter((f) => /^\d{4}\.json$/.test(f));
 const patterns = new Map<string, Acc>();
 const candles = new Map<string, Acc>();
@@ -65,26 +90,42 @@ for (const f of files) {
     const ret = (c[t + HORIZON].close - c[t].close) / c[t].close;
     base20.n++;
     if (ret > 0) base20.up++;
+    const reg = regimeOf.get(c[t].date);
+    const R = reg ? byRegime[reg] : null;
+    if (R) {
+      R.base20.n++;
+      if (ret > 0) R.base20.up++;
+    }
     const { patterns: found } = detectPatterns(c.slice(0, t + 1));
     for (const p of found) {
       if (p.bias === 'neutral') continue;
       if (t - (last[p.id] ?? -Infinity) < HORIZON) continue;
       last[p.id] = t;
       acc(patterns, `${p.id}|${p.bias}`, p.bias === 'bull' ? ret : -ret);
+      if (R) acc(R.patterns, `${p.id}|${p.bias}`, p.bias === 'bull' ? ret : -ret);
     }
   }
 
   for (let t = 20; t + CANDLE_HORIZON < c.length; t += STEP) {
     base5.n++;
-    if (c[t + CANDLE_HORIZON].close > c[t].close) base5.up++;
+    const up = c[t + CANDLE_HORIZON].close > c[t].close;
+    if (up) base5.up++;
+    const reg = regimeOf.get(c[t].date);
+    if (reg) {
+      byRegime[reg].base5.n++;
+      if (up) byRegime[reg].base5.up++;
+    }
   }
   for (const s of detectCandles(c, c.length)) {
     if (s.bias === 'neutral' || s.i + CANDLE_HORIZON >= c.length) continue;
     const ret = (c[s.i + CANDLE_HORIZON].close - c[s.i].close) / c[s.i].close;
     acc(candles, `${s.name}|${s.bias}`, s.bias === 'bull' ? ret : -ret);
+    const reg = regimeOf.get(c[s.i].date);
+    if (reg) acc(byRegime[reg].candles, `${s.name}|${s.bias}`, s.bias === 'bull' ? ret : -ret);
   }
 }
 
+const rate = (b: { n: number; up: number }) => (b.n ? Math.round((b.up / b.n) * 1000) / 1000 : null);
 const pack = (m: Map<string, Acc>) =>
   Object.fromEntries([...m].map(([k, a]) => [k, { n: a.n, win: Math.round((a.win / a.n) * 1000) / 1000, avg: Math.round((a.ret / a.n) * 100) / 100 }]));
 const out = {
@@ -97,6 +138,18 @@ const out = {
   baseline: { up20: base20.n ? Math.round((base20.up / base20.n) * 1000) / 1000 : null, up5: base5.n ? Math.round((base5.up / base5.n) * 1000) / 1000 : null },
   patterns: pack(patterns),
   candles: pack(candles),
+  regimes: regimeOf.size
+    ? {
+        rule: `加權指數收盤在 ${REGIME_MA} 日均線之上＝多頭行情，之下＝空頭行情（以訊號當天判斷）`,
+        ...Object.fromEntries(
+          (['bull', 'bear'] as const).map((r) => {
+            const R = byRegime[r];
+            const days = [...regimeOf.values()].filter((v) => v === r).length;
+            return [r, { days, baseline: { up20: rate(R.base20), up5: rate(R.base5) }, patterns: pack(R.patterns), candles: pack(R.candles) }];
+          }),
+        ),
+      }
+    : undefined,
 };
 writeFileSync(join(dir, 'pattern-stats.json'), JSON.stringify(out));
 console.log(`完成：${used} 檔、${from}～${to}，型態 ${patterns.size} 類、K 棒 ${candles.size} 類，基準 20 日上漲 ${out.baseline.up20}，耗時 ${Math.round((Date.now() - started) / 1000)} 秒`);

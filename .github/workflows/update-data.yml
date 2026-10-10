@@ -80,7 +80,7 @@ jobs:
           INST_MAX=0 HOURLY=true node scripts/chips.ts .data > chips2.log 2>&1
           # 型態歷史勝率：用全市場日 K 回測（不發請求，約 3～5 分鐘）；每日更新時跑，或還沒有結果時跑
           if [ "$HOURLY" != true ] || [ ! -f .data/pattern-stats.json ]; then
-            DEADLINE=$(( $(date +%s) * 1000 + 8 * 60 * 1000 )) node --import ./scripts/lib/ts-resolve.mjs scripts/pattern-stats.ts .data > stats.log 2>&1
+            DEADLINE=$(( $(date +%s) * 1000 + 12 * 60 * 1000 )) node --import ./scripts/lib/ts-resolve.mjs scripts/pattern-stats.ts .data > stats.log 2>&1
           fi
           for f in twse mops tdcc chips2 stats; do [ -f $f.log ] || continue; echo "::group::$f"; tail -n 80 $f.log; echo "::endgroup::"; done
           # 跑滿時間代表還有沒補完的資料
