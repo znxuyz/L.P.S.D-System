@@ -85,25 +85,30 @@ export class SimPage {
       this.view = 'lobby';
       void this.pull();
     }
-    if (this.codeList === undefined) {
-      void Promise.all([loadCodes(), loadSyncConfig()]).then(([list, sync]) => {
-        this.codeList = list;
-        this.sync = sync;
-        const id = rememberedUser();
-        const entry = id ? list?.codes.find((c) => c.id === id) : undefined;
-        if (entry) this.login(entry);
-        else this.render();
-      });
-    }
-    if (!this.started) {
-      this.started = true;
-      void Promise.all([
-        this.fetchCandles(CALENDAR_CODE).then((c) => (this.calendar = c?.map((x) => x.date) ?? null)),
-        loadStockDirectory().then((d) => (this.dir = d?.stocks ?? [])),
-        loadTaiex().then((t) => (this.taiex = t)),
-      ]).then(() => this.prepare());
-    }
+    this.preload();
     this.render();
+  }
+
+  /**
+   * 先在背景下載模擬盤要用的資料（開通碼、交易日曆、股票目錄、加權指數）。
+   * 按下圖示時就呼叫，動畫播完時資料多半已經處理好，切換畫面不會卡。
+   */
+  preload(): void {
+    if (this.started) return;
+    this.started = true;
+    void Promise.all([loadCodes(), loadSyncConfig()]).then(([list, sync]) => {
+      this.codeList = list;
+      this.sync = sync;
+      const id = rememberedUser();
+      const entry = id ? list?.codes.find((c) => c.id === id) : undefined;
+      if (entry) this.login(entry);
+      else this.render();
+    });
+    void Promise.all([
+      this.fetchCandles(CALENDAR_CODE).then((c) => (this.calendar = c?.map((x) => x.date) ?? null)),
+      loadStockDirectory().then((d) => (this.dir = d?.stocks ?? [])),
+      loadTaiex().then((t) => (this.taiex = t)),
+    ]).then(() => this.prepare());
   }
 
   // ------------------------------------------------------------ 資料
@@ -674,7 +679,6 @@ export class SimPage {
     const last = visible[visible.length - 1];
     const prev = visible[visible.length - 2];
     const chg = last && prev ? last.close / prev.close - 1 : 0;
-    const options = this.dir.map((d) => `<option value="${esc(`${d.code} ${d.name}`)}"></option>`).join('');
     if (!el.dataset.ready) {
       el.dataset.ready = '1';
       el.innerHTML = `
@@ -689,8 +693,14 @@ export class SimPage {
         <div class="sim-k" id="sim-k"></div>
         <div class="sim-hints" id="sim-hints"></div>`;
     }
+    // 股票清單（約 2,000 筆）等瀏覽器有空時才建立，不卡住畫面
     const dl = el.querySelector<HTMLElement>('#sim-dir')!;
-    if (this.dir.length && !dl.childElementCount) dl.innerHTML = options;
+    if (this.dir.length && !dl.dataset.filled) {
+      dl.dataset.filled = '1';
+      const fill = () => (dl.innerHTML = this.dir.map((d) => `<option value="${esc(`${d.code} ${d.name}`)}"></option>`).join(''));
+      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(fill, { timeout: 3000 });
+      else setTimeout(fill, 500);
+    }
     setHtml(
       el.querySelector<HTMLElement>('#sim-stock')!,
       `<b>${esc(s.watch)}</b> ${esc(name)}
