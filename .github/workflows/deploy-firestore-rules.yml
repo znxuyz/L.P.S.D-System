@@ -44,7 +44,16 @@ jobs:
         if: steps.key.outputs.ok == 'true'
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
-        run: npx --yes firebase-tools@13 deploy --only firestore:rules --project lpsdsystem --non-interactive
+        run: |
+          # 印出用的是哪個服務帳戶，權限不足時可以對照 IAM 設定
+          echo "服務帳戶：$(node -p "require(process.env.GOOGLE_APPLICATION_CREDENTIALS).client_email")"
+          # IAM 角色剛加上時要幾分鐘才生效，失敗就等一下再試
+          for i in 1 2 3; do
+            npx --yes firebase-tools@13 deploy --only firestore:rules --project lpsdsystem --non-interactive && exit 0
+            echo "第 $i 次失敗，90 秒後重試"
+            sleep 90
+          done
+          exit 1
       - name: 刪除金鑰檔
         if: always()
         run: rm -f "$RUNNER_TEMP/sa.json"
