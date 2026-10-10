@@ -2,6 +2,7 @@ name: Deploy Firestore rules
 
 # firestore.rules 改了就自動部署到 Firebase（模擬盤雲端存檔的安全規則）。
 # 需要 repo secret FIREBASE_SERVICE_ACCOUNT（Firebase 主控台 → 專案設定 → 服務帳戶 → 產生新的私密金鑰，貼上整個 JSON）。
+# 該服務帳戶在 Google Cloud IAM 需要「Firebase Rules Admin」角色，否則會出現 403 The caller does not have permission。
 on:
   push:
     branches: [main]
