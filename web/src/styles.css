@@ -1350,3 +1350,8 @@ button.log-text:hover { color: var(--ink); }
   .sim-gate input { width: 100%; }
   .sim-gate label { flex-basis: 100%; }
 }
+
+.sim-admin-tag { margin-left: 10px; padding: 2px 10px; border-radius: 99px; font-size: 12px; vertical-align: middle; color: #071022; background: var(--accent-grad); -webkit-text-fill-color: #071022; }
+.sim-card-admin { margin: 0 0 8px; border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.sim-admin-table tbody tr { cursor: pointer; }
+.sim-admin-log { max-height: 420px; overflow: auto; }

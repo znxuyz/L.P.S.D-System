@@ -11,11 +11,23 @@ import type { SimState } from '../domain/sim';
 export interface CodeEntry {
   id: string;
   label: string;
+  /** 管理者：可以查看所有玩家的紀錄。 */
+  admin?: boolean;
+  /** 用管理者公鑰加密的「名稱＋雲端同步 ID」（只有管理者解得開）。 */
+  vault?: string;
 }
 
 export interface CodeList {
   salt: string;
   codes: CodeEntry[];
+  /** 管理者金鑰：公鑰明文，私鑰用管理者開通碼導出的金鑰加密。 */
+  admin?: { pub: string; priv: { iv: string; data: string } };
+}
+
+/** 管理者解開後看到的玩家清單。 */
+export interface PlayerRef {
+  label: string;
+  sync: string;
 }
 
 /** 結束（或開新局時封存）的一局。 */
@@ -74,6 +86,43 @@ export async function verifyCode(code: string, list: CodeList): Promise<CodeEntr
 /** 雲端同步用的 ID：和公開的開通碼雜湊用不同的前綴，沒有開通碼就算不出來。 */
 export function syncIdFor(code: string, salt: string): Promise<string> {
   return hashCode(code, `sync:${salt}`);
+}
+
+const b64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+/**
+ * 管理者登入：用開通碼導出的金鑰解開私鑰，再解開每位玩家的 vault，得到他們的雲端同步 ID。
+ * 開通碼不對或資料被改過會丟出錯誤（AES-GCM 驗證失敗）。
+ */
+export async function openVault(code: string, list: CodeList): Promise<PlayerRef[]> {
+  if (!list.admin) return [];
+  const raw = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`admin:${list.salt}` + normalizeCode(code)));
+  const aes = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+  const pkcs8 = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(list.admin.priv.iv) }, aes, b64(list.admin.priv.data));
+  const key = await crypto.subtle.importKey('pkcs8', pkcs8, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['decrypt']);
+  const out: PlayerRef[] = [];
+  for (const c of list.codes) {
+    if (!c.vault) continue;
+    try {
+      const plain = await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, key, b64(c.vault));
+      const ref = JSON.parse(new TextDecoder().decode(plain)) as PlayerRef;
+      if (ref && typeof ref.sync === 'string') out.push({ label: c.label, sync: ref.sync });
+    } catch {
+      /* 這筆壞掉就略過 */
+    }
+  }
+  return out;
+}
+
+const ADMIN_KEY = 'lplc.sim.players';
+
+/** 管理者在這台裝置解開過的玩家清單（下次自動登入時不用再輸入開通碼）。 */
+export function rememberedPlayers(): PlayerRef[] | null {
+  return read<PlayerRef[]>(ADMIN_KEY);
+}
+
+export function rememberPlayers(list: PlayerRef[] | null): void {
+  write(ADMIN_KEY, list);
 }
 
 function read<T>(key: string): T | null {
