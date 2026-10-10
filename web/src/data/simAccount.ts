@@ -6,7 +6,7 @@
  * - 每個開通碼一份存檔，存在這台裝置的瀏覽器（localStorage），用同一個開通碼登入才讀得到。
  *   換裝置或清除瀏覽器資料後存檔不會跟著走。
  */
-import type { SimState } from '../domain/sim';
+import { migrate, type SimState } from '../domain/sim';
 
 export interface CodeEntry {
   id: string;
@@ -162,10 +162,10 @@ export function rememberSyncId(id: string, syncId: string | null): void {
 
 export function loadSave(id: string): SimSave {
   const s = read<SimSave>(SAVE_PREFIX + id);
-  if (s && Array.isArray(s.history)) return { current: s.current?.v === 1 ? s.current : null, history: s.history, updatedAt: s.updatedAt };
+  if (s && Array.isArray(s.history)) return { current: migrate(s.current), history: s.history, updatedAt: s.updatedAt };
   // 舊版（沒有開通碼）的存檔交給第一個登入的人
   const legacy = read<SimState>(LEGACY_KEY);
-  const save: SimSave = { current: legacy?.v === 1 ? legacy : null, history: [] };
+  const save: SimSave = { current: migrate(legacy), history: [] };
   if (legacy) {
     write(LEGACY_KEY, null);
     write(SAVE_PREFIX + id, save);

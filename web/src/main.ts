@@ -304,7 +304,10 @@ class App {
       /* 存不了就算了 */
     }
     if (page === 'sim') this.sim.show();
-    else this.beforeSim = page;
+    else {
+      this.beforeSim = page;
+      this.sim.hide();
+    }
     const logo = $('#logo-btn');
     const tip = page === 'sim' ? '回到原本的畫面' : '進入拉普拉斯模擬盤';
     logo.title = tip;
