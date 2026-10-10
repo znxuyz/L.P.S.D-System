@@ -65,6 +65,8 @@ jobs:
           export DEADLINE=$(( START_S * 1000 + 50 * 60 * 1000 ))
           (
             if [ "$HOURLY" != true ]; then node scripts/active-etf.ts .data; node scripts/stock-list.ts .data; fi
+            # 股票名稱（含已下市）：每季抽一天抓一次，抓過就不再抓
+            if [ "$HOURLY" != true ] || [ ! -f .data/names.json ]; then node scripts/names.ts .data; fi
             node scripts/candles.ts .data
             node scripts/chips.ts .data
             HISTORY_PARTS=pe,index,div,ratios node scripts/history.ts .data

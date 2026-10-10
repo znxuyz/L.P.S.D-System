@@ -41,6 +41,11 @@ jobs:
             mkdir .data
           fi
 
+      # 模擬盤用：每天全市場行情（排行榜、偽即時行情）與新聞，由 data 分支的資料產生，不另外存
+      - name: 產生模擬盤資料
+        run: |
+          if [ -d .data/candles ]; then node scripts/sim-daily.ts .data && node scripts/sim-news.ts .data; fi
+
       - name: 放進網站
         run: |
           mkdir -p web/public/data
@@ -51,6 +56,8 @@ jobs:
           if [ -d .data/chips ]; then cp -r .data/chips web/public/data/; fi
           if [ -f .data/index/TAIEX.json ]; then mkdir -p web/public/data/index && cp .data/index/TAIEX.json web/public/data/index/; fi
           if [ -d .data/exrights ]; then cp -r .data/exrights web/public/data/; fi
+          for d in simday news; do if [ -d ".data/$d" ]; then cp -r ".data/$d" web/public/data/; fi; done
+          if [ -f .data/names.json ]; then cp .data/names.json web/public/data/; fi
 
       - run: npm ci
         working-directory: web
