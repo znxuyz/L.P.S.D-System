@@ -551,7 +551,7 @@ export class SimPage {
       <h2 class="sim-title">拉普拉斯模擬盤</h2>
       <p class="sim-lead">請輸入開通碼。每個開通碼有自己的模擬帳戶與紀錄，下次用同一個開通碼就能接著玩。</p>
       <form class="sim-form sim-gate" id="sim-gate-form" autocomplete="off">
-        <label>開通碼<input type="text" name="code" id="sim-code" placeholder="LPLC-XXXX-XXXX-XXXX-XXXX" spellcheck="false" autocapitalize="characters" required /></label>
+        <label>開通碼<input type="text" name="code" id="sim-code" placeholder="LPLC-XXXX-XXXX-…（共 40 碼）" spellcheck="false" autocapitalize="characters" required /></label>
         <button type="submit" class="btn btn-accent">開通</button>
       </form>
       <p class="sim-msg" role="alert">${esc(this.gateMsg)}</p>

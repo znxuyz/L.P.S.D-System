@@ -1279,7 +1279,7 @@ button.log-text:hover { color: var(--ink); }
 }
 .sim-search .btn { flex: none; white-space: nowrap; }
 
-.sim-gate input { width: 320px; letter-spacing: 0.08em; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }
+.sim-gate input { width: 560px; max-width: 100%; letter-spacing: 0.04em; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }
 .sim-note { font-size: 12px; margin: 6px 0 0; }
 .sim-lobby { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 6px 0 8px; }
 .sim-card { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: var(--radius-sm); border: 1px solid var(--glass-line); background: rgba(255, 255, 255, 0.03); }
