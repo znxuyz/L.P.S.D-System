@@ -29,6 +29,8 @@ import {
 import { sma, type Candle } from '../domain/technicals';
 import { escapeHtml as esc, num, pct, price } from './format';
 
+/** 上次在模擬盤的哪個畫面（大廳／遊戲中），重新打開時用。 */
+const VIEW_KEY = 'lplc.sim.view';
 /** 交易日曆：0050 從 2003 年起每個交易日都有成交。 */
 const CALENDAR_CODE = '0050';
 /** 起點之前至少要有這麼多根日 K 給圖表與型態判斷用。 */
@@ -51,6 +53,8 @@ export class SimPage {
   private user: CodeEntry | null = null;
   private save: SimSave = { current: null, history: [] };
   private view: 'gate' | 'lobby' | 'setup' | 'play' = 'gate';
+  /** 網頁一打開就在模擬盤、而且上次正在玩：登入後直接回到那一局。 */
+  private resumePlay = false;
   private gateMsg = '';
   /** 雲端同步：設定（null = 沒設定）、這個玩家的同步 ID、狀態。 */
   private sync: SyncConfig | null | undefined;
@@ -78,11 +82,27 @@ export class SimPage {
   constructor(private readonly root: HTMLElement) {}
 
   /** 切到模擬盤時呼叫；第一次會下載交易日曆、股票目錄與加權指數。 */
+  /** 網頁一打開就在模擬盤時呼叫（例如從手機主畫面重新打開）。 */
+  resumeOnLaunch(): void {
+    try {
+      this.resumePlay = localStorage.getItem(VIEW_KEY) === 'play';
+    } catch {
+      this.resumePlay = false;
+    }
+  }
+
+  /** 登入或進入模擬盤時要顯示的畫面：剛重新打開而且上次在玩就回到那一局，否則到大廳。 */
+  private entryView(): 'lobby' | 'play' {
+    const resume = this.resumePlay && !!this.state;
+    this.resumePlay = false;
+    return resume ? 'play' : 'lobby';
+  }
+
   show(): void {
     this.build();
     // 每次進來先到大廳，讓玩家選「接續」或「開新的模擬」
     if (this.user) {
-      this.view = 'lobby';
+      this.view = this.entryView();
       void this.pull();
     }
     this.preload();
@@ -179,7 +199,7 @@ export class SimPage {
     this.save = loadSave(entry.id);
     this.state = this.save.current;
     this.syncedAt = 0;
-    this.view = 'lobby';
+    this.view = this.entryView();
     this.gateMsg = '';
     void this.prepare();
     void this.pull();
@@ -530,6 +550,13 @@ export class SimPage {
     const $ = (id: string) => this.root.querySelector<HTMLElement>(`#${id}`)!;
     const s = this.state;
     if (this.view === 'play' && !s) this.view = 'lobby';
+    if (this.user) {
+      try {
+        localStorage.setItem(VIEW_KEY, this.view);
+      } catch {
+        /* 存不了就算了 */
+      }
+    }
     const who = document.querySelector<HTMLElement>('#sim-who');
     if (who) {
       who.hidden = !this.user;

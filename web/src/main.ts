@@ -64,6 +64,15 @@ function saveConvention(value: Convention): void {
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
+/** 上次停留的頁面（從手機主畫面重新打開時回到這裡，而不是每次都從熱力圖開始）。 */
+const LAST_PAGE_KEY = 'lplc.lastPage';
+try {
+  const last = localStorage.getItem(LAST_PAGE_KEY);
+  if (!location.hash && last?.startsWith('#')) history.replaceState(null, '', last);
+} catch {
+  /* 無痕模式等情況讀不到，就從熱力圖開始 */
+}
+
 const PAGES = ['map', 'intel', 'screen', 'etf', 'stock', 'sim'] as const;
 type Page = (typeof PAGES)[number];
 
@@ -139,6 +148,8 @@ class App {
     this.toasts = new Toasts($('#toasts'), onSelect);
     this.bindControls();
     this.bindSource();
+    // 直接回到模擬盤時（例如從主畫面重新打開），上次正在玩就直接回到那一局，不必再經過大廳
+    if (pageFromHash() === 'sim') this.sim.resumeOnLaunch();
     this.showPage(pageFromHash());
     provider.subscribe((snap) => this.onSnapshot(snap));
     // 模擬盤的資料在網頁閒置時先下載好，按下圖示播動畫時就不用再處理（手機才不會卡）
@@ -287,6 +298,11 @@ class App {
     if (page === 'stock') this.analyzed = stockFromHash() ?? this.analyzed;
     const hash = page === 'stock' ? `#stock/${this.analyzed}` : `#${page}`;
     if (location.hash !== hash) history.replaceState(null, '', hash);
+    try {
+      localStorage.setItem(LAST_PAGE_KEY, hash);
+    } catch {
+      /* 存不了就算了 */
+    }
     if (page === 'sim') this.sim.show();
     else this.beforeSim = page;
     const logo = $('#logo-btn');
@@ -701,6 +717,10 @@ async function main(): Promise<void> {
     for (const s of universe.stocks) if (s.fundamentals) overlayReal(s.code, s.fundamentals, index, chips, fin, pe);
   }
   new App(universe, provider, settings, real);
+  // 離線快取：從手機主畫面打開時直接用存好的程式與資料，不必每次重新下載
+  if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+    void navigator.serviceWorker.register('sw.js').catch(() => undefined);
+  }
 }
 
 void main();
