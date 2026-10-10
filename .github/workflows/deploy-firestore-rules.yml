@@ -1,0 +1,48 @@
+name: Deploy Firestore rules
+
+# firestore.rules 改了就自動部署到 Firebase（模擬盤雲端存檔的安全規則）。
+# 需要 repo secret FIREBASE_SERVICE_ACCOUNT（Firebase 主控台 → 專案設定 → 服務帳戶 → 產生新的私密金鑰，貼上整個 JSON）。
+on:
+  push:
+    branches: [main]
+    paths:
+      - firestore.rules
+      - firebase.json
+      - .github/workflows/deploy-firestore-rules.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firestore-rules
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 準備服務帳戶金鑰
+        id: key
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SA" ]; then
+            echo "::warning::還沒設定 FIREBASE_SERVICE_ACCOUNT，這次不部署規則"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: 部署 Firestore 規則
+        if: steps.key.outputs.ok == 'true'
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+        run: npx --yes firebase-tools@13 deploy --only firestore:rules --project lpsdsystem --non-interactive
+      - name: 刪除金鑰檔
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"

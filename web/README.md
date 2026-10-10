@@ -150,6 +150,12 @@ GitHub Actions 每個交易日台北時間 18:37（22:07 再補抓一次）到�
 4. 「專案設定 → 一般 → 你的應用程式」新增網頁應用程式，複製 `projectId` 與 `apiKey`，寫進 `web/public/sync-config.json`：
    `{ "projectId": "你的專案ID", "apiKey": "你的 apiKey" }`（這兩個值本來就是公開的，安全性靠規則與開通碼）。
 
+目前使用的專案是 `lpsdsystem`。
+
+**自動更新安全規則**：修改 `firestore.rules` 並合併到 main 後，`.github/workflows/deploy-firestore-rules.yml` 會自動部署到 Firebase。
+需要先在 GitHub repo 的 Settings → Secrets and variables → Actions 新增 `FIREBASE_SERVICE_ACCOUNT`，
+內容是 Firebase 主控台「專案設定 → 服務帳戶 → 產生新的私密金鑰」下載的整個 JSON（這把金鑰權限很大，只放在 GitHub Secrets，不要 commit）。
+
 每個開通碼一份文件 `sims/<同步 ID>`，同步 ID 由開通碼算出，和 `sim-codes.json` 裡的雜湊不同，沒有開通碼就讀寫不到。
 兩台裝置同時玩時，以雲端上較新的進度為準。
 
