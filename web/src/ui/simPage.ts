@@ -7,7 +7,7 @@ import { loadOfficialCandles } from '../data/candles';
 import { loadTaiex } from '../data/chipSeries';
 import { loadStockDirectory, searchDirectory, type DirEntry } from '../data/stockDirectory';
 import { detectPatterns, type Bias } from '../domain/patterns';
-import { loadCodes, loadSave, rememberSyncId, rememberUser, rememberedSyncId, rememberedUser, syncIdFor, verifyCode, writeSave, type CodeEntry, type CodeList, type SimSave } from '../data/simAccount';
+import { loadCodes, loadSave, openVault, rememberPlayers, rememberSyncId, rememberUser, rememberedPlayers, rememberedSyncId, rememberedUser, syncIdFor, verifyCode, writeSave, type CodeEntry, type CodeList, type PlayerRef, type SimSave } from '../data/simAccount';
 import { loadSyncConfig, pullSave, pushSave, type SyncConfig } from '../data/simSync';
 import {
   LOT,
@@ -52,7 +52,12 @@ export class SimPage {
   private codeList: CodeList | null | undefined;
   private user: CodeEntry | null = null;
   private save: SimSave = { current: null, history: [] };
-  private view: 'gate' | 'lobby' | 'setup' | 'play' = 'gate';
+  private view: 'gate' | 'lobby' | 'setup' | 'play' | 'admin' = 'gate';
+  /** 管理員（玩家 0）：解開的玩家清單、讀到的各玩家存檔、正在看的玩家。 */
+  private players: PlayerRef[] | null = null;
+  private playerSaves = new Map<string, SimSave | null | 'error'>();
+  private adminLoading = false;
+  private adminPick: string | null = null;
   /** 網頁一打開就在模擬盤、而且上次正在玩：登入後直接回到那一局。 */
   private resumePlay = false;
   private gateMsg = '';
@@ -191,8 +196,12 @@ export class SimPage {
 
   // ------------------------------------------------------------ 帳號
 
-  private login(entry: CodeEntry, syncId?: string): void {
+  private login(entry: CodeEntry, syncId?: string, players?: PlayerRef[]): void {
     this.user = entry;
+    if (entry.admin) {
+      if (players) rememberPlayers(players);
+      this.players = players ?? rememberedPlayers();
+    } else this.players = null;
     rememberUser(entry.id);
     if (syncId) rememberSyncId(entry.id, syncId);
     this.syncId = syncId ?? rememberedSyncId(entry.id);
@@ -300,6 +309,10 @@ export class SimPage {
     this.state = null;
     this.save = { current: null, history: [] };
     rememberUser(null);
+    rememberPlayers(null);
+    this.players = null;
+    this.playerSaves.clear();
+    this.adminPick = null;
     this.view = 'gate';
     this.render();
   }
@@ -315,7 +328,124 @@ export class SimPage {
       this.gateMsg = '開通碼不正確';
       return this.render();
     }
-    this.login(entry, await syncIdFor(code, this.codeList.salt));
+    // 管理員：用開通碼解開所有玩家的雲端同步 ID
+    let players: PlayerRef[] | undefined;
+    if (entry.admin) {
+      try {
+        players = await openVault(code, this.codeList);
+      } catch {
+        players = [];
+      }
+    }
+    this.login(entry, await syncIdFor(code, this.codeList.salt), players);
+  }
+
+  // ------------------------------------------------------------ 管理員
+
+  /** 讀取所有玩家的雲端存檔（唯讀）。 */
+  private async loadPlayers(): Promise<void> {
+    if (!this.players || !this.sync || this.adminLoading) return;
+    this.adminLoading = true;
+    this.render();
+    await Promise.all(
+      this.players.map((p) =>
+        pullSave(this.sync!, p.sync)
+          .then((save) => this.playerSaves.set(p.sync, save))
+          .catch(() => this.playerSaves.set(p.sync, 'error')),
+      ),
+    );
+    this.adminLoading = false;
+    this.render();
+  }
+
+  private adminHtml(): string {
+    const back = `<button type="button" class="btn btn-sm" data-sim="lobby">← 回大廳</button>`;
+    const head = `<p class="eyebrow">Laplace Replay · 管理員</p><h2 class="sim-title">玩家紀錄</h2>`;
+    if (!this.sync) return `${head}<p>還沒有設定雲端同步，看不到其他玩家的紀錄。</p>${back}`;
+    if (!this.players?.length) return `${head}<p>沒有可以查看的玩家（請重新輸入管理員開通碼登入一次）。</p>${back}`;
+    const pick = this.adminPick ? this.players.find((p) => p.sync === this.adminPick) : null;
+    if (pick) return this.playerDetailHtml(pick);
+    const rows = this.players
+      .map((p) => {
+        const sv = this.playerSaves.get(p.sync);
+        if (sv === undefined) return `<tr><td><b>${esc(p.label)}</b></td><td colspan="6" class="muted">${this.adminLoading ? '讀取中⋯⋯' : '—'}</td></tr>`;
+        if (sv === 'error') return `<tr><td><b>${esc(p.label)}</b></td><td colspan="6" class="muted">讀取失敗</td></tr>`;
+        if (!sv || (!sv.current && !sv.history.length)) return `<tr><td><b>${esc(p.label)}</b></td><td colspan="6" class="muted">還沒有玩過</td></tr>`;
+        const c = sv.current;
+        const eq = c ? c.equity.at(-1)?.[1] ?? c.settings.capital : null;
+        const ret = c && eq != null ? eq / c.settings.capital - 1 : null;
+        const bench = c ? this.benchOf(c.settings.start, c.date) : null;
+        const updated = sv.updatedAt ? new Date(sv.updatedAt).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+        return `<tr data-sim="pick" data-sync="${esc(p.sync)}" tabindex="0">
+          <td><b>${esc(p.label)}</b></td>
+          <td class="num">${c ? `${esc(c.settings.start)} → ${esc(c.date)}<br /><small class="muted">${c.equity.length - 1} 個交易日</small>` : '<span class="muted">沒有進行中</span>'}</td>
+          <td class="num">${eq != null ? money(eq) : '—'}</td>
+          <td class="num ${ret == null ? '' : cls(ret)}">${ret == null ? '—' : pct(ret * 100)}</td>
+          <td class="num ${bench == null ? 'muted' : cls(bench)}">${bench == null ? '—' : pct(bench * 100)}</td>
+          <td class="num">${(c?.trades.length ?? 0)} 筆／${sv.history.length} 局</td>
+          <td class="num muted">${esc(updated)}</td></tr>`;
+      })
+      .join('');
+    return `${head}
+      <p class="sim-lead">所有玩家的雲端存檔（唯讀）。點一位玩家可以看他的持股、每一筆交易與過去每一局的成績。</p>
+      <div class="sim-table-wrap"><table class="sim-table sim-admin-table"><thead><tr><th>玩家</th><th>進行中的模擬</th><th>總資產</th><th>報酬</th><th>同期大盤</th><th>交易／完成</th><th>最後更新</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="sim-lobby-foot">${back}<button type="button" class="btn btn-sm" data-sim="admin-refresh" ${this.adminLoading ? 'disabled' : ''}>重新讀取</button></p>`;
+  }
+
+  private benchOf(start: string, end: string): number | null {
+    const t0 = this.taiex?.get(start);
+    const t1 = this.taiex?.get(end);
+    return t0 && t1 ? t1 / t0 - 1 : null;
+  }
+
+  private playerDetailHtml(p: PlayerRef): string {
+    const sv = this.playerSaves.get(p.sync);
+    const back = `<button type="button" class="btn btn-sm" data-sim="admin">← 所有玩家</button>`;
+    if (!sv || sv === 'error') return `<h2 class="sim-title">${esc(p.label)}</h2><p class="muted">沒有資料。</p>${back}`;
+    const c = sv.current;
+    let current = '<p class="muted">目前沒有進行中的模擬。</p>';
+    if (c) {
+      const eq = c.equity.at(-1)?.[1] ?? c.settings.capital;
+      const ret = eq / c.settings.capital - 1;
+      const bench = this.benchOf(c.settings.start, c.date);
+      const holds = Object.entries(c.holdings)
+        .map(([code, h]) => `<tr><td><b>${esc(code)}</b> ${esc(this.nameOf(code))}</td><td class="num">${num(h.shares)}</td><td class="num">${price(h.cost / h.shares)}</td><td class="num">${money(h.cost)}</td></tr>`)
+        .join('');
+      const log = [
+        ...c.trades.map((t) => ({
+          date: t.date,
+          html: `<span class="${t.side === 'buy' ? 'up' : 'down'}">${t.side === 'buy' ? '買進' : '賣出'}</span> <b>${esc(t.code)}</b> ${esc(this.nameOf(t.code))}
+            <span class="num">${num(t.shares)} 股 @ ${price(t.price)}</span>${t.pnl != null ? ` <span class="num ${cls(t.pnl)}">損益 ${money(t.pnl)}</span>` : ''}`,
+        })),
+        ...c.notes.map((n) => ({ date: n.date, html: `<b>${esc(n.code)}</b> ${esc(this.nameOf(n.code))} <span class="muted">${esc(n.text)}</span>` })),
+      ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+      const pending = c.orders.map((o) => `<li>${o.side === 'buy' ? '買' : '賣'} <b>${esc(o.code)}</b> ${num(o.shares)} 股 ${o.limit ? `限價 ${o.limit}` : '市價'}</li>`).join('');
+      current = `
+        <dl class="sim-kpis">
+          <div><dt>期間</dt><dd class="num">${esc(c.settings.start)} → ${esc(c.date)}</dd></div>
+          <div><dt>總資產</dt><dd class="num">${money(eq)}</dd></div>
+          <div><dt>報酬率</dt><dd class="num ${cls(ret)}">${pct(ret * 100)}</dd></div>
+          <div><dt>同期大盤</dt><dd class="num ${bench == null ? 'muted' : cls(bench)}">${bench == null ? '—' : pct(bench * 100)}</dd></div>
+          <div><dt>現金</dt><dd class="num">${money(c.cash)}</dd></div>
+        </dl>
+        <h3 class="sim-sub">持股</h3>
+        ${holds ? `<div class="sim-table-wrap"><table class="sim-table"><thead><tr><th>股票</th><th>股數</th><th>平均成本</th><th>成本合計</th></tr></thead><tbody>${holds}</tbody></table></div>` : '<p class="muted">沒有持股。</p>'}
+        ${pending ? `<h3 class="sim-sub">委託中</h3><ul class="sim-orders">${pending}</ul>` : ''}
+        <h3 class="sim-sub">交易紀錄（${c.trades.length} 筆）</h3>
+        ${log.length ? `<ol class="sim-logs sim-admin-log">${log.map((i) => `<li><time class="num muted">${esc(i.date)}</time> ${i.html}</li>`).join('')}</ol>` : '<p class="muted">還沒有交易。</p>'}`;
+    }
+    const hist = sv.history
+      .map((r) => {
+        const ret = r.equity / r.capital - 1;
+        return `<tr><td class="num">${esc(r.start)} → ${esc(r.end)}</td><td class="num">${r.days}</td><td class="num">${money(r.capital)}</td><td class="num ${cls(ret)}">${pct(ret * 100)}</td>
+          <td class="num ${r.bench == null ? 'muted' : cls(r.bench)}">${r.bench == null ? '—' : pct(r.bench * 100)}</td><td class="num">${r.trades}</td></tr>`;
+      })
+      .join('');
+    return `<p class="eyebrow">Laplace Replay · 管理員</p><h2 class="sim-title">${esc(p.label)}</h2>
+      <h3 class="sim-sub">進行中的模擬</h3>${current}
+      <h3 class="sim-sub">練習紀錄（完成 ${sv.history.length} 局）</h3>
+      ${hist ? `<div class="sim-table-wrap"><table class="sim-table"><thead><tr><th>期間</th><th>交易日</th><th>本金</th><th>報酬</th><th>同期大盤</th><th>成交筆數</th></tr></thead><tbody>${hist}</tbody></table></div>` : '<p class="muted">還沒有完成的模擬。</p>'}
+      <p class="sim-lobby-foot">${back}</p>`;
   }
 
   private persist(): void {
@@ -469,6 +599,16 @@ export class SimPage {
         this.view = 'setup';
         this.render();
       } else if (a === 'logout') this.logout();
+      else if (a === 'admin' || a === 'admin-refresh') {
+        this.view = 'admin';
+        this.adminPick = null;
+        if (a === 'admin-refresh' || !this.playerSaves.size) void this.loadPlayers();
+        else this.render();
+      } else if (a === 'pick') {
+        this.adminPick = el.dataset.sync ?? null;
+        this.render();
+        this.root.scrollIntoView({ block: 'start' });
+      }
       else if (a === 'buy' || a === 'sell') {
         this.side = a;
         this.render();
@@ -564,7 +704,7 @@ export class SimPage {
     }
     this.root.classList.toggle('is-setup', this.view !== 'play');
     if (this.view !== 'play' || !s) {
-      setHtml($('sim-setup'), this.view === 'gate' ? this.gateHtml() : this.view === 'lobby' ? this.lobbyHtml() : this.setupHtml());
+      setHtml($('sim-setup'), this.view === 'gate' ? this.gateHtml() : this.view === 'lobby' ? this.lobbyHtml() : this.view === 'admin' ? this.adminHtml() : this.setupHtml());
       if (this.view === 'gate') this.root.querySelector<HTMLInputElement>('#sim-code')?.focus({ preventScroll: true });
       return;
     }
@@ -614,7 +754,7 @@ export class SimPage {
       .join('');
     return `
       <p class="eyebrow">Laplace Replay</p>
-      <h2 class="sim-title">歡迎，${label}</h2>
+      <h2 class="sim-title">歡迎，${label}${this.user?.admin ? '<span class="sim-admin-tag">管理員</span>' : ''}</h2>
       ${this.syncNote ? `<p class="sim-msg" role="status">${esc(this.syncNote)}</p>` : ''}
       <div class="sim-lobby">
         ${resume}
@@ -624,6 +764,12 @@ export class SimPage {
           <button type="button" class="btn btn-block" data-sim="new">開新的模擬</button>
         </div>
       </div>
+      ${
+        this.user?.admin
+          ? `<div class="sim-card sim-card-admin"><p class="eyebrow">管理員</p><p class="muted">查看所有玩家的持股、交易紀錄與練習紀錄（唯讀）。</p>
+              <button type="button" class="btn btn-block" data-sim="admin">查看玩家紀錄（${this.players?.length ?? 0} 位）</button></div>`
+          : ''
+      }
       <h3 class="sim-sub">歷史紀錄</h3>
       ${hist ? `<div class="sim-table-wrap"><table class="sim-table"><thead><tr><th>期間</th><th>交易日</th><th>報酬</th><th>同期大盤</th><th>成交筆數</th></tr></thead><tbody>${hist}</tbody></table></div>` : '<p class="muted">還沒有完成的模擬。</p>'}
       <p class="sim-lobby-foot">${this.syncBadge()}<button type="button" class="btn btn-sm" data-sim="logout">換開通碼／登出</button></p>`;

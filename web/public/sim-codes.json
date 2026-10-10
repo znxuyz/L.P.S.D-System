@@ -2,44 +2,66 @@
   "salt": "829cd04252812439e387dc58",
   "codes": [
     {
+      "id": "91f539c5a603bb3999dd2ae2ff5b1ac4eebcaabe9ec6a81dc52337337e816524",
+      "label": "玩家 0",
+      "admin": true
+    },
+    {
       "id": "27ab52497c9a0d31e5a33586626c4f40f12a3f57fb63ee134af1065c891edb27",
-      "label": "玩家 1"
+      "label": "玩家 1",
+      "vault": "jAFXow52foB/ibVYJhb0ZbjeckaMjJLZ3ihJ/8iIpPiPVPXEYQ3fgTCoZsRJQL/EHbK9BUGmIc4mp1VdxOKy7YeIzhlbEBNHhdCQ98vnujTRDhVRv2rYAKivJQSqw9pZMRHu9hOMlWGyhdAxR8yXvPt9wuKB/ZEjJaq6TOqroWAHdAmeTnM5Fi7uNrBYQQr7UyPBNxvRV2WhRrxPdlSlSZ47EDavtYrvg5LxHWBOchSEhYT0WPcqQgg/FtO8+/Zl2yr1Kb2WxzomaZo9jgYC1Vo+xGMbkfs6GAT7hKkCQ6Ehivjrap6TESh5hc3GU2q87QQQPDqR6HVoxr3Za/KzJw=="
     },
     {
       "id": "5f8bfa6af418d9de7b45e357a52f89fa058b14027a22d65d66999a74e670df4f",
-      "label": "玩家 2"
+      "label": "玩家 2",
+      "vault": "FwaCfhyRMxJ0peTS/k2oybCDod2xGw6KSAUcnwcMJyDx+y1ZV9D0iG2tZUy2ohO9gmZ8M4bPbf0zjpKrn4MgM3UpGnJSTLhBJ2KMNSRJMJnY8HJTM42Y5j5Fz71g4w3EPib5ydeYQmhUTfZf25O0R4YLk832/Y0kiOhWdGzHdh6zk1m+wYSn86Wv3KxRtZe9TCXuQfqbB9M2eUxNQMtu6zZXGiFmHitJR5keFiif9e/0I2dx+oXaKXa+1gTtOqsEkGqYjyl/729TMV0c8Vr6nfOBBm2r3C2eZDxkRatKlwE2PAoWTI96/O6lGe9s7rZCqqWcgdGSvq/0BSO6hLiKCA=="
     },
     {
       "id": "e69b15b319233a7223a81ae9a2357b525aefd9ab32073f934478056844c0915f",
-      "label": "玩家 3"
+      "label": "玩家 3",
+      "vault": "uZPfdzlICLU0WsPb/qExu94aookiD+aWFOa7WbDFQqyD5mbjcreCkDFChClhHSESN36z3CS1SQ1OK7AQqBHkVKMaLoc2Zw4ISijZsBcMSmVMVWmYWodZoYjlWbgelbtXol+spG7/O756y/5U13CbU/eSf0GZ0iMoGZkRh5ssHGPDZQZiLh+2+wSvnkb0Ja1F9PsB19sX/PreeLl3p9YzsuzOdxEw8ZkRlHVbOdlxMl24vrXO6rCortJSKBvjRZS+jwJVglQ1wzAo52XGX+QCWqXtrqspwjcKEpOESsA/QojkqasKysCSfJ3uej0z8f4wk4YEc/zDjH6ZZrfzL6N1lw=="
     },
     {
       "id": "0d699607a6e975c90108eca262f2beab7ae1e73788bbb77a1390a5cde3df96dd",
-      "label": "玩家 4"
+      "label": "玩家 4",
+      "vault": "cz7aOSa1JXGWySa4wGXt7O2UXvhEsJRJoSkX+Q5iBUMqbR+2CREfZZPjLVac/sLlxvnaBjXblCBSHSs1qSSVRnUCC38AXqQyI2ZecT/EWZDSoDysSESOdQh++8tubWtz4yvg4UN8I08a0uKxpEyAVUNdhVQR1Pa06F2x+MGLKy97HkCwIoAyPP2R+YZmBxJKOlzek39hkKWc9p9jFDduxp9Yio7MSIMyBaiF0B0XVrDBNLStw4vezr6Fmvw1AS2fS8vtKvdFKHcKGC6E9oqP4lflpMXmrF7ALMMLEMreSi3if5177fhnO4vpqMXtZugHSm00f2xtoLwNJNftSnZ6KA=="
     },
     {
       "id": "1aa046453f2db6d599a1e1a99b58c2ad9e704cd1fdd6bfe217d8349dfc9f9285",
-      "label": "玩家 5"
+      "label": "玩家 5",
+      "vault": "QKmArAdhIHi9TYaj8Jdc6/Sc7mu+giIu4FYP6gpA8cK2+fKBJxkXEumCB7UBGsFTw0WiN2T43cBBo7FAILy2/a00IWMC+3uf4KSO0wqX17f/b19kJSu720qrdpeZdi+sEO6/I02DrBm7OpMRmboXOhkl5e/IDoJ6lAeftA2Kn8SmvWltyDQMH9lu9iTUigZTC7GfHMA7X9ktvX5EybCl/gbgj4jqjQrgtPUWD02xE5PYslEHHh5ogAIBQOSPDe4Ko1bmxmINLy9I+wrMnGdZPWPVz5mzwKgRQsRYzFVklw+fAUhHTJHBFlYQhyzGJta+kMTSYP4U7Zhi7oEHE2WOgQ=="
     },
     {
       "id": "f5c226c97d84e514a3bbe7b8e83585b1a002badedbb41112c78358c8b943fcf4",
-      "label": "玩家 6"
+      "label": "玩家 6",
+      "vault": "RJ/WN5SPJJNOpDSjO3PZwaYuOEW9zlSyhqqHwiE3wcYchr0lRLNB1zIed6VpNUbSaxBtd3UgGYSMSvEQL8kxnY8aSCEcVtun5Cl2xdxw/umJrIzCcbLnZP3x2ytU4+QYD57WObBszfYKds3kYywjd+GlVuPn8ReI+FZXElMKknG5d5y+6l2jwCDa3CnCQJ2tVulqc86yoP6819Fpndp6tpXT6Ah2d+XGCK9FyitYhHKM1BwLMGEl4q/1jbyLoIF/sj3mzeyjFjj8RuxwSAQ3BSnBcda7dTpKTM2LLGiOpbkJOwT7l43UAMQLaVeZiE1GbdrxB7A5Sgq1r02grG2yqw=="
     },
     {
       "id": "f0db3a915f69f062d315b0ed7ef00773f095fe45a076c5ca2703e0dc021239d4",
-      "label": "玩家 7"
+      "label": "玩家 7",
+      "vault": "RBK5dQBJKVORZiUl8I60kda4WBP29OXEgrihjo93vc0qvWXcIQtFbVZCxqPcS6F7aE1kSVhe1LNOxdiFuTSk93jojAOtgAY345g1RGdHAYljlHRj9We7SKOE+70O38awqCzqm9UugwFWhTJYK9tcNbYB+RLrcx3Hf657Ni2TMWjPIKNHNZ0CGkehU5TNrXQjoD2+u5u+7dRxo9HZnroAocRDOrn8sgHVefc5GYlB4QvtZctP6yoqGoTRgZLAn1Fh8yvjRTezIyszTBzSsUpC3sCSUwYACk9+dvXm5QMQs8a5i2lpK9UaZPfZvELEsRrYxaMxUoQxuQPWL1VgDtjA9A=="
     },
     {
       "id": "dc562c812757d7a6565425613879c307735b0bdeb31107c615bad1c8ce91f665",
-      "label": "玩家 8"
+      "label": "玩家 8",
+      "vault": "GRF/KMUgXzARA5ZwOc+HZNLwiiKf1i1enrVzthrLRUQDzK4jrSQtaAHWbMqZQJGxmit7o5Bfgb00gfWaYUB4h9gWifIolAyZbU5kDvwl06Od0H+1Ww1fHlxius0OfP+ca5aQa1uue2SPPqT6eIQ9NHG3zOiDOPffoGcCkkaPZYMHGh1qvLlkLcGqUeI4aEHV6yThTsZ95IobTo125fbcrXNOl9VLsw0tgCeneboEN1QWruL40XnPM1KSUuxOEAba+UBMtjC5aHY7msoFNkqa9Puwwy4/EROIcgUVagBqipGkPC9u4/ugPF5D1DQ6KMhL1iYNILSFIPLCLbCmUB9A2g=="
     },
     {
       "id": "b03470aa08ad800737150b7397e3fb15aaae79e7dab70ad884ba6f152cd9000e",
-      "label": "玩家 9"
+      "label": "玩家 9",
+      "vault": "ZS+2l9pLODjrMCieY5hUfCCdoHg0lfAvDOG8lSpZ0R0xyL/cU8W/sgRHoKWaAfV5pvV2YyCP1JnnB7JyHSCCeyfzDb234/0b4khodg9pGtIiTsQcCersNm7GW0rn7zazmXWzgsgD9qnlXpFVo2V+KTTeumdp9YIC/sw7EaBzKCj6jKxVf/mWJierOlmEAdVj56Bu5yckcEUiNYr1Mfausx2cTXPs+dTcybdJhTGSheaKS1Ux7o0eceycHrGM/u1Kdzm0tu+mqSFRL2TKVk+O5vhDnOPNyVzwJsS/aTcJF70w8astUvJYOYqUlMp10wTUDtNsYWk7Dy0vTtRahWSLvw=="
     },
     {
       "id": "33e212301fff7f71d33c63222f272ebbb5be46769cb07e0ab83965db419351f2",
-      "label": "玩家 10"
+      "label": "玩家 10",
+      "vault": "V+Nkxk6pXRO5DDbbB6JM2XqGWBI0IGiyDKE2Ba3E+9NQhblW09wPiZhUlKFc8yZltwCMyJIiGRZIYb2sx4+hQ5PW1Y5iNc2UbeBMUnA8S1ISBBi88JNuHbna/z/4nx90wItC1FWHFhbQvVaKlfnNAK1r+Uyy1f5Xq+shjfHQgA5O3MTNmJ5WdAL4bhQPmhUZcIkJ9ACsWEQYf65i59fdAYBT7Gp4tyrRmlFtq8GQ9+J23cU0RpIFUv7inQgN0JnZeB6TtupOhpEYVkPKhXiUL4kx6xTitgMXscjbaS59f4Lmxzuny+X804advs1TOLafPxdY5VaxNi4MYu8jtvzO3A=="
     }
-  ]
+  ],
+  "admin": {
+    "pub": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu7Yhjt6OPjOCRybF/qrRyvRwUnePT2BNdeWrl39S+r75JYr0US4/9352CXI1pAkTT6y3C8/6vqBNBEAyhcPg4IS5He3HUojaTa+pRvHp9BnEd1EnpmIVMjj9yrGQHZwFAJ/L8mbhfj2B82/q0XadYm2PIQqDh+4j3Fy20h9jqjkAETsz1klYIkIyw8VEE4vL8V5men9NolB6a404jUJ7siFrtB+cALRHawRNu5k3M8RHLIBcOkAHGkbEmOpjeU2pYDQ24sOmBVV9OvnyKEexEUA6+46h+Up7rwNB3Mvy0yLnkjr1MvfsyFtOZ9oz5PkWTjYqTdyhYaTEtfKrCwgu8wIDAQAB",
+    "priv": {
+      "iv": "RWR/4p/5QsAWdq3W",
+      "data": "m9FU7yD5EbknN1A0H25khhzdSbLRNDtnrQ6xA8vAfiRV7o9JgVey6sph6SrrGko33q8BKAk20d8tUOtVrnUj4pQETeSf11LSxEaq47OQbRsieg2jD7DEBApVa+BZ4ZQmmGa+YVkCuzKLYCNQAbdA8TSEOhaxA+nyPecZAvwC2JG2UvH8HiwLD+XBKg0hZ34+WdT1VQihLN2LnVAMl96mNfbbcOFSWgOWIOg83eutAy9My77aGI7El34qhSeQm0dl1rL44gerHjzrgsU0SOth7xIkZA0e/8mc6iFWn8+prRpCDNZC/uJHCk+7JpxpvgkGe1kFxFnMEr6IYxM4FEulm2fnD6kJmuBQMfP1mxMmsgSalwTnRiSqpu590lwhzBD5uji+bdUklMgJCNJeAGuc+Dehn8dURs1+3NQh3ZuZ/VY3Jh+ZIt3qi4fYbQJZzmAbEkmjNn186YGhH9C/ZE/nxVrOIE9Ix1PsfZ2sPxKLTmhtZ1l+2x6DXEzBQIwXWVJkDIgO5BpkyV77I9mRmkZ4wKgiphTdzhfb0940QoohBNLXRpJQBdljw+K/JOUeqQHXYkAGNM3Qa/ey4nbLKNxJcwBeN00TKed+qw+N7+3w3lwZRKN9EnKgOzZRiFSJYBQfKQOt7idkrw3xLJIrKvu25iQUxP/QlP7PEz33pQht0nG8tf72sDJ/JvZwJigEIVNSg2mB9NcBUxcmxVdPydlAs2pfmAIv1A2kG7Ackc719KkR3keppiOvsrV4yw7KRpLYByyIAO78Jay46Rqn6XHdSpxxWS/DLjnqXw3tH8zbronI6Z/Wz7rT/oacXNNaoYq2S5ksA8RYMPvJNG37rI7KPrKu1DoU4ZIpxAE12eZdr5v/BzJk2rjUZLZ/ZmPoV6usru1slsBae5ZXmgR7RJ9/74pUYcuzBEv8RsLWHg+24tUZkJpzgw5qIt3Q97Ghw/oRLLlaA4IMkHC8f7Mcd0iXClhCR2DNBn9H9WXiLTiEu38mLwMoLJ2qL4rUtF76LVk6uJ8TvnPujlj2qTlsG84s+9pH0Q0c3NGv2lKAJxfZ6fQpUyB0P3cvv69s5qyIX4JaJlH/vu25GpaFp7e70VJF/XE7NoVH0MVl6aJoi6aWiS1SpDzLG6NJuAOQ0veZTeLJrslIX3YmsMoBaNRCff9CVMyD7+whs4NUfc9wJD4wUP3L1SpMyoueNFn9mT6DWYtA5jYzZwjc5mk8GXxKwYzP532r3Khl76X5v/+V6Z5Dme0xpfWqXC8XVFvidg+xUlJSxKPC+sRfAUC6ZviMxqa8LnUo5W2tOoJv7LTRDKYLlG/r16ZUGeok5e5+TDsuhFXoGHP79Sw8jZYvoUVPRQCcOrUIfyIlm/2LJQ+lMmyzRZAMnd1/VPVJNtSbmjVHE5vHrGeLBHv/eRqgACStPxNBRTqnAvuhuyye8shRcVc/XFfcNx/nzcSW1cB2IqcQnPVX3tHLgg54bPdrE1U60YeGmXhftdakzPcxs9rtrlcBOJ8EKQqXqqoc0p7NiUysbY2Iz0q28JTRbdiiuWO0UxFnETHBlSs+fBCDpD3SVEARw5ob5VwxtdKIZpcNytvIGzNXpHws0FEhLzT+7NJXHc5Qz81fsYUa2sLRPEM1p/C8Aa8="
+    }
+  }
 }
