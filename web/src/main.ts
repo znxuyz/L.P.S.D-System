@@ -23,7 +23,7 @@ import { applyActiveEtfData, loadActiveEtfData } from './data/activeEtfData';
 import { MOCK_ETFS } from './data/mockEtfs';
 import { renderStockPage, type ExternalStock } from './ui/stockPage';
 import { SimPage } from './ui/simPage';
-import { playLaplaceIntro } from './ui/laplaceIntro';
+import { playLaplaceIntro, playLaplaceOutro } from './ui/laplaceIntro';
 import { industryIdOf, loadStockDirectory, searchDirectory, type StockDirectory } from './data/stockDirectory';
 import { externalFundamentals } from './data/mockUniverse';
 import type { StockMetrics } from './domain/metrics';
@@ -279,6 +279,15 @@ class App {
     this.renderPanels();
   }
 
+  /** 離開模擬盤：播放闔眼動畫後回到進來之前的頁面。 */
+  private leaveSim(): void {
+    if (document.querySelector('.laplace-intro')) return;
+    void playLaplaceOutro().then(() => {
+      this.showPage(this.beforeSim);
+      window.scrollTo({ top: 0 });
+    });
+  }
+
   /** 打開某檔股票的個股分析。 */
   private analyze(code: string): void {
     this.analyzed = code;
@@ -462,16 +471,12 @@ class App {
       tab.addEventListener('click', () => this.showPage(tab.dataset.page as Page));
     }
     window.addEventListener('hashchange', () => this.showPage(pageFromHash()));
-    $('#sim-exit').addEventListener('click', () => this.showPage(this.beforeSim));
+    $('#sim-exit').addEventListener('click', () => this.leaveSim());
     // 左上角的拉普拉斯之眼：播放甦醒動畫後進入模擬盤
     $('#logo-btn').addEventListener('click', () => {
       if (document.querySelector('.laplace-intro')) return;
       // 在模擬盤再按一次：回到進來之前的頁面
-      if (this.page === 'sim') {
-        this.showPage(this.beforeSim);
-        window.scrollTo({ top: 0 });
-        return;
-      }
+      if (this.page === 'sim') return this.leaveSim();
       void playLaplaceIntro().then(() => {
         this.showPage('sim');
         window.scrollTo({ top: 0 });
