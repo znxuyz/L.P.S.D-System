@@ -141,6 +141,10 @@ class App {
     this.bindSource();
     this.showPage(pageFromHash());
     provider.subscribe((snap) => this.onSnapshot(snap));
+    // 模擬盤的資料在網頁閒置時先下載好，按下圖示播動畫時就不用再處理（手機才不會卡）
+    const idle = () => this.sim.preload();
+    if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(idle, { timeout: 4000 });
+    else setTimeout(idle, 2500);
   }
 
   /** 進出場動畫期間收到的最新行情（動畫結束時再處理，避免底下重畫造成卡頓）。 */
@@ -491,7 +495,6 @@ class App {
       if (document.querySelector('.laplace-intro')) return;
       // 在模擬盤再按一次：回到進來之前的頁面
       if (this.page === 'sim') return this.leaveSim();
-      this.sim.preload();
       void playLaplaceIntro(() => {
         this.flushSnapshot();
         this.showPage('sim');
