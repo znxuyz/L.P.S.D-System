@@ -111,3 +111,60 @@ export function playLaplaceIntro(): Promise<void> {
     window.setTimeout(finish, total);
   });
 }
+
+const OUTRO_QUOTE = '然而，未來從未被寫定——下一步，由你決定。';
+
+/**
+ * 離開模擬盤的「闔眼」動畫（約 2.2 秒），和進場相反：
+ * 1. 畫面四周往內收暗，數字往上倒流（時間回到現在）。
+ * 2. 刻度環向外散開消失，放大的瞳孔收回成一道細縫。
+ * 3. 眼睛闔上剩一道光，光線往兩側延伸後消散，回到原本的畫面。
+ * 點一下或按 Esc 可以跳過；「減少動態效果」時只做淡入淡出。
+ */
+export function playLaplaceOutro(): Promise<void> {
+  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const el = document.createElement('div');
+  el.className = `laplace-intro laplace-outro${reduced ? ' is-reduced' : ''}`;
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-label', '離開拉普拉斯模擬盤，點一下或按 Esc 跳過');
+  el.innerHTML = `
+    <div class="li-streams lo-streams" aria-hidden="true">${reduced ? '' : streams()}</div>
+    <svg class="li-core lo-core" viewBox="0 0 200 200" aria-hidden="true">
+      <defs>
+        <linearGradient id="lo-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8ff0ff"></stop><stop offset="1" stop-color="#8b7bff"></stop></linearGradient>
+        <radialGradient id="lo-iris" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#ffffff"></stop><stop offset="0.35" stop-color="#8ff0ff"></stop><stop offset="1" stop-color="#5b4dff"></stop></radialGradient>
+      </defs>
+      <g class="lo-ticks" stroke="url(#lo-g)">${ticks()}</g>
+      <circle class="lo-ring" cx="100" cy="100" r="80" fill="none" stroke="url(#lo-g)" stroke-width="1"></circle>
+      <g class="lo-eye">
+        <path d="M38 100 Q100 50 162 100 Q100 150 38 100 Z" fill="#070b22" stroke="url(#lo-g)" stroke-width="2.4" stroke-linejoin="round"></path>
+        <circle cx="100" cy="100" r="27" fill="url(#lo-iris)"></circle>
+        <ellipse class="lo-pupil" cx="100" cy="100" rx="6" ry="21" fill="#03050f"></ellipse>
+        <circle cx="109" cy="89" r="4.5" fill="#fff" opacity="0.85"></circle>
+      </g>
+    </svg>
+    <div class="lo-line" aria-hidden="true"></div>
+    <p class="li-quote lo-quote">${OUTRO_QUOTE}</p>
+    <p class="li-title lo-title">RETURN · 回到現在</p>
+    <p class="li-skip">點一下或按 Esc 跳過</p>`;
+  document.body.appendChild(el);
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      window.removeEventListener('keydown', onKey);
+      // 先切回原本的頁面，再把動畫淡掉
+      resolve();
+      el.classList.add('is-leaving');
+      window.setTimeout(() => el.remove(), 450);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') finish();
+    };
+    el.addEventListener('click', finish);
+    window.addEventListener('keydown', onKey);
+    window.setTimeout(finish, reduced ? 500 : 2300);
+  });
+}

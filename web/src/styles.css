@@ -263,6 +263,30 @@ html:has(.page-sim), body:has(.page-sim) { height: auto; }
 @keyframes li-zoom-out { to { opacity: 0; transform: scale(0.96); } }
 @keyframes li-flash { 0% { opacity: 0; } 45% { opacity: 1; } 100% { opacity: 0.85; } }
 .laplace-intro.is-reduced * { animation: none !important; }
+/* 離開模擬盤：闔眼、時間倒流回到現在 */
+.laplace-outro { background: radial-gradient(circle at 50% 45%, #0f1640 0%, #060914 55%, #02030a 100%); animation: lo-in 0.45s ease-out both; }
+.lo-streams i { top: auto; bottom: -60%; animation-name: lo-rise; }
+.lo-core { animation: lo-core 2.3s ease-in both; }
+.lo-ticks, .lo-ring { transform-origin: 100px 100px; animation: lo-scatter 1.1s 0.15s cubic-bezier(0.4, 0, 0.2, 1) both; }
+.lo-ring { animation-duration: 0.9s; }
+.lo-eye { transform-origin: 100px 100px; animation: lo-close 0.45s 1.15s cubic-bezier(0.7, 0, 0.3, 1) both; }
+.lo-pupil { transform-origin: 100px 100px; animation: lo-constrict 0.8s 0.2s cubic-bezier(0.3, 0, 0.2, 1) both; }
+.lo-line {
+  position: absolute; left: 50%; top: 45%; width: min(40vmin, 280px); height: 2px; margin-left: calc(min(40vmin, 280px) / -2);
+  background: linear-gradient(90deg, transparent, #e9fdff 30%, #8ff0ff 50%, #e9fdff 70%, transparent);
+  box-shadow: 0 0 18px #8ff0ff, 0 0 40px rgba(139, 123, 255, 0.6); opacity: 0; pointer-events: none;
+  animation: lo-line 0.8s 1.5s cubic-bezier(0.5, 0, 0.2, 1) both;
+}
+.lo-quote { min-height: 0; position: relative; z-index: 1; padding: 10px 20px; border-radius: 14px; background: rgba(3, 5, 15, 0.8); box-shadow: 0 0 30px 10px rgba(3, 5, 15, 0.7); animation: li-fade 0.4s 0.3s both, li-zoom-out 0.3s 1.85s both; }
+.lo-quote::after { content: '— 回到現在'; }
+.lo-title { animation: li-fade 0.4s 0.1s both, li-zoom-out 0.3s 1.85s both; }
+@keyframes lo-in { from { opacity: 0; backdrop-filter: blur(0); } }
+@keyframes lo-rise { from { transform: translateY(0); opacity: 0; } 15% { opacity: 1; } to { transform: translateY(-170vh); opacity: 0.2; } }
+@keyframes lo-core { 0% { transform: scale(1.5); opacity: 0; } 20% { transform: scale(1); opacity: 1; } 100% { transform: scale(0.94); } }
+@keyframes lo-scatter { from { opacity: 1; transform: scale(1) rotate(0); } to { opacity: 0; transform: scale(1.9) rotate(50deg); } }
+@keyframes lo-constrict { from { transform: scale(4.2, 1.25); } to { transform: scale(0.5, 1); } }
+@keyframes lo-close { from { transform: scaleY(1); } 70% { transform: scaleY(0.05); opacity: 1; } to { transform: scaleY(0.02); opacity: 0; } }
+@keyframes lo-line { 0% { opacity: 0; transform: scaleX(0.3); } 25% { opacity: 1; transform: scaleX(1); } 100% { opacity: 0; transform: scaleX(6) scaleY(0.4); } }
 @media (prefers-reduced-motion: reduce) {
   .logo .logo-orbit, .logo .logo-pupil { animation: none; }
 }
