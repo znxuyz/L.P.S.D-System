@@ -76,19 +76,25 @@ function hash(s: string): number {
   return h >>> 0;
 }
 
-/** 日期的亂碼：「年、月、日」看得到，數字是亂碼；同一天每次一樣，但看不出是哪一天（不是逐字替換，沒辦法解回去）。 */
+/**
+ * 日期的亂碼：「年、月、日」看得到，每個數字是一格不停翻動的行情跑馬燈（像報價看板在跳），看不出實際日期。
+ * 每格的數字順序、轉速、起始位置由日期雜湊決定（同一天每次一樣），翻動的數字本身沒有意義。
+ */
 function garble(date: string): string {
-  const glyphs = '▓▒░▚▞▙▛▜▟▖▗▘▝◩◪⌧';
   let h = hash(`lplc-garble|${date}`);
-  const g = (n: number) => {
-    let out = '';
-    for (let i = 0; i < n; i++) {
-      out += glyphs[h % glyphs.length];
-      h = Math.imul(h ^ (h >>> 13), 2654435761) >>> 0;
+  const next = () => (h = Math.imul(h ^ (h >>> 13), 2654435761) >>> 0);
+  const cell = () => {
+    const digits = [...'0123456789'];
+    for (let i = digits.length - 1; i > 0; i--) {
+      const j = next() % (i + 1);
+      [digits[i], digits[j]] = [digits[j], digits[i]];
     }
-    return out;
+    const t = 0.9 + (next() % 1200) / 1000;
+    const d = -((next() % 1000) / 1000) * t;
+    return `<i style="--t:${t.toFixed(2)}s;--d:${d.toFixed(2)}s"><b>${digits.join('\n')}</b></i>`;
   };
-  return `${g(4)}年${g(2)}月${g(2)}日`;
+  const g = (n: number) => `<span class="gb-run">${Array.from({ length: n }, cell).join('')}</span>`;
+  return `<span class="gb" role="img" aria-label="日期已隱藏"><span aria-hidden="true">${g(4)}年${g(2)}月${g(2)}日</span></span>`;
 }
 
 /** 交易動作的名稱（依類別與買賣）。 */
