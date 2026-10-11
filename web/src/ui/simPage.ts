@@ -77,7 +77,7 @@ function hash(s: string): number {
 }
 
 /**
- * 日期的亂碼：「年、月、日」看得到，每個數字是一格不停翻動的行情跑馬燈（像報價看板在跳），看不出實際日期。
+ * 日期的亂碼：「年、月、日」看得到，每個數字是一格不停跳動的報價燈號（像報價看板在跳），看不出實際日期。
  * 每格的數字順序、轉速、起始位置由日期雜湊決定（同一天每次一樣），翻動的數字本身沒有意義。
  */
 function garble(date: string): string {
@@ -89,9 +89,11 @@ function garble(date: string): string {
       const j = next() % (i + 1);
       [digits[i], digits[j]] = [digits[j], digits[i]];
     }
+    // 10 個數字疊在同一格、輪流亮起（不靠位移，所以每格永遠對齊）
     const t = 0.9 + (next() % 1200) / 1000;
-    const d = -((next() % 1000) / 1000) * t;
-    return `<i style="--t:${t.toFixed(2)}s;--d:${d.toFixed(2)}s"><b>${digits.join('\n')}</b></i>`;
+    const phase = (next() % 1000) / 1000;
+    const b = digits.map((c, k) => `<b style="--d:${(-((phase + k / 10) % 1) * t).toFixed(3)}s">${c}</b>`).join('');
+    return `<i style="--t:${t.toFixed(2)}s">${b}</i>`;
   };
   const g = (n: number) => `<span class="gb-run">${Array.from({ length: n }, cell).join('')}</span>`;
   return `<span class="gb" role="img" aria-label="日期已隱藏"><span aria-hidden="true">${g(4)}年${g(2)}月${g(2)}日</span></span>`;

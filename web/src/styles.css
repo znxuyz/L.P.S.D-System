@@ -1400,23 +1400,23 @@ button.log-text:hover { color: var(--ink); }
 .sim-endbox { flex-basis: 100%; }
 .sim-endbox:empty { display: none; }
 
-/* 模擬盤日期亂碼：每個數字是一格不停翻動的報價跑馬燈 */
+/* 模擬盤日期亂碼：每個數字是一格固定位置、不停跳動的報價燈號 */
 .gb > span { display: inline-flex; align-items: center; gap: 0.15em; }
 .gb-run {
   display: inline-flex; gap: 1px; padding: 0 2px;
   border-radius: 3px; background: rgba(143, 240, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(143, 240, 255, 0.14);
 }
 .gb-run i {
-  display: inline-block; width: 0.62em; height: 1.25em; line-height: 1.25em; overflow: hidden;
-  font-style: normal; text-align: center; font-variant-numeric: tabular-nums; color: var(--accent);
-  -webkit-mask-image: linear-gradient(transparent, #000 30%, #000 70%, transparent);
-  mask-image: linear-gradient(transparent, #000 30%, #000 70%, transparent);
+  position: relative; display: inline-block; width: 0.62em; height: 1.25em;
+  font-style: normal; color: var(--accent);
 }
 .gb-run b {
-  display: block; white-space: pre; font-weight: 600; opacity: 0.85;
-  animation: gb-roll var(--t) steps(10) var(--d) infinite;
+  position: absolute; inset: 0; line-height: 1.25em; text-align: center;
+  font-weight: 600; font-variant-numeric: tabular-nums; opacity: 0;
+  animation: gb-flip var(--t) linear var(--d) infinite;
 }
-@keyframes gb-roll { to { transform: translateY(-12.5em); } }
+@keyframes gb-flip { 0%, 9.9% { opacity: 0.9; } 10%, 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   .gb-run b { animation: none; filter: blur(2.5px); }
+  .gb-run b:first-child { opacity: 0.9; }
 }
