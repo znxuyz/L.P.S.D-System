@@ -128,9 +128,12 @@ async function updateTdcc(dir: string): Promise<void> {
   try {
     const text = await (await get('https://opendata.tdcc.com.tw/getOD.ashx?id=1-5')).text();
     const pct: Record<string, number> = {};
+    // ETF 的受益人數（持股分級 17 = 合計的人數），ETF 頁用
+    const holders: Record<string, number> = {};
     let date = '';
     for (const line of text.split('\n').slice(1)) {
-      const [d, code, level, , , ratio] = line.split(',').map((s) => s.trim());
+      const [d, code, level, people, , ratio] = line.split(',').map((s) => s.trim());
+      if (level === '17' && /^00\d{2,4}[A-Z]?$/.test(code)) holders[code] = Number(people);
       if (level !== '15' || !wanted(code)) continue;
       date = d;
       pct[code] = Number(ratio);
@@ -138,6 +141,7 @@ async function updateTdcc(dir: string): Promise<void> {
     if (!date || Object.keys(pct).length < 500) throw new Error(`資料不完整（${Object.keys(pct).length} 檔）`);
     const iso = `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
     writeFileSync(join(tdccDir, `${iso}.json`), JSON.stringify(pct));
+    if (Object.keys(holders).length) writeFileSync(join(dir, 'tdcc-etf.json'), JSON.stringify({ date: iso, holders }));
     console.log(`集保：${iso} ${Object.keys(pct).length} 檔`);
   } catch (e) {
     console.log(`集保 ✗ ${e}`);

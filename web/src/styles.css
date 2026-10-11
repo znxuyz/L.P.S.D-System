@@ -1364,7 +1364,7 @@ button.log-text:hover { color: var(--ink); }
 .sim-garble { margin: 2px 0 0; font-size: 12px; color: var(--muted); letter-spacing: 0.12em; }
 .sim-speed { width: 132px; grid-template-columns: repeat(3, 1fr); }
 .sim-kinds { grid-template-columns: repeat(4, 1fr); }
-.sim-rank-tabs { grid-template-columns: repeat(5, 1fr); margin-top: 10px; }
+.sim-rank-tabs { grid-template-columns: repeat(6, 1fr); margin-top: 10px; }
 .sim-rank-tabs button, .sim-kinds button { padding: 6px 4px; font-size: 12.5px; }
 .sim-main { grid-area: main; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .sim-aside { grid-area: aside; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
@@ -1499,3 +1499,8 @@ button.log-text:hover { color: var(--ink); }
     max-height: calc(100dvh - 80px - env(safe-area-inset-top));
   }
 }
+.sim-fav { margin-left: auto; padding: 6px 12px; border-radius: 99px; border: 1px solid var(--glass-line); background: rgba(255, 255, 255, 0.04); color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; }
+.sim-fav[aria-pressed='true'] { color: #f5c451; border-color: color-mix(in srgb, #f5c451 50%, transparent); }
+.sim-dca-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sim-dca-target { flex-basis: 100%; font-size: 13px; color: var(--ink-2); }
+.sim-rank-tabs button { white-space: nowrap; padding-left: 2px; padding-right: 2px; }

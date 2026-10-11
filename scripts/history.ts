@@ -39,6 +39,8 @@ const num = (v: unknown) => {
   return s === '' || !Number.isFinite(n) ? NaN : n;
 };
 const wanted = (code: string) => /^\d{4}$/.test(code);
+/** 除權息：個股之外也要 ETF（00 開頭，例如 00878、00679B），ETF 的收益分配和模擬盤配息都會用到。 */
+const exWanted = (code: string) => /^\d{4}$/.test(code) || /^00\d{2,4}[A-Z]?$/.test(code);
 
 function readJson<T>(path: string, fallback: T): T {
   try {
@@ -379,7 +381,7 @@ async function exRightsYear(year: number): Promise<ExRow[]> {
   for (const r of tw.data ?? []) {
     const date = String(r[f('資料日期')]).match(/(\d+)年(\d+)月(\d+)日/);
     const code = String(r[f('股票代號')]).trim();
-    if (!date || !wanted(code)) continue;
+    if (!date || !exWanted(code)) continue;
     out.push([`${Number(date[1]) + 1911}-${date[2]}-${date[3]}`, code, num(r[f('除權息前收盤價')]), num(r[f('除權息參考價')]), num(r[f('權值+息值')]), String(r[f('權/息')]).trim()]);
   }
   await sleep(2500);
@@ -390,7 +392,7 @@ async function exRightsYear(year: number): Promise<ExRow[]> {
     for (const r of table.data ?? []) {
       const date = rocToIso(String(r[g('除權息日期')]));
       const code = String(r[g('代號')]).trim();
-      if (!date || !wanted(code)) continue;
+      if (!date || !exWanted(code)) continue;
       out.push([date, code, num(r[g('除權息前收盤價')]), num(r[g('除權息參考價')]), num(r[g('權值+息值')]), String(r[g('權/息')]).trim()]);
     }
   }
@@ -401,20 +403,30 @@ async function exRightsHistory(dir: string): Promise<void> {
   const exDir = join(dir, 'exrights');
   mkdirSync(exDir, { recursive: true });
   const thisYear = new Date(Date.now() + 8 * 3600_000).getUTCFullYear();
+  // 版本 2：加入 ETF。舊版只抓個股，所以過去的年份要重抓一次（抓完寫下標記）
+  const marker = join(exDir, '.v2');
+  const refetch = !existsSync(marker);
+  let done = true;
   for (let y = Number(START.slice(0, 4)); y <= thisYear; y++) {
     const path = join(exDir, `${y}.json`);
     // 過去的年份只抓一次；今年每次更新
-    if (y < thisYear && existsSync(path)) continue;
+    if (y < thisYear && existsSync(path) && !(refetch && !readJson<ExRow[]>(path, []).some((r) => r[1].startsWith('00') && r[1].length > 4))) continue;
+    if (timeUp()) {
+      done = false;
+      break;
+    }
     if (timeUp()) break;
     try {
       const rows = await exRightsYear(y);
       writeFileSync(path, JSON.stringify(rows));
       console.log(`除權息 ${y}：${rows.length} 筆`);
     } catch (e) {
+      done = false;
       console.log(`除權息 ${y} ✗ ${e}`);
     }
     await sleep(2500);
   }
+  if (refetch && done) writeFileSync(marker, '');
 }
 
 // ------------------------------------------------------------ 加權指數日 K（回測比較基準）

@@ -135,6 +135,22 @@ export interface EtfMeta {
    * 成分股與異動的資料來源：mock = 模擬；real = 投信公告（asOf 為公告日期）。
    * 省略時視為模擬。
    */
+  /**
+   * 每日抓取的真實資料（data/etf-info.json）：哪些欄位已換成官方資料。
+   * 沒列在 real 的欄位仍是模擬值，畫面上會標示。
+   */
+  info?: {
+    asOf: string;
+    real: Array<'nav' | 'aum' | 'holders' | 'dividend' | 'fill' | 'underlying'>;
+    /** 預估淨值與日期（收盤資料模式用）。 */
+    nav?: number;
+    navDate?: string;
+    issuer?: string;
+    /** 連續配息年數數到資料開頭（2020 年），實際可能更久。 */
+    dividendYearsAtLeast?: boolean;
+    /** 最近的配息 [日期, 金額]（新到舊）。 */
+    divs?: Array<[string, number]>;
+  };
   holdingsSource?: {
     kind: 'mock' | 'real';
     asOf?: string;

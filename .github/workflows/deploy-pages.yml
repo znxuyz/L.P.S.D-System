@@ -45,11 +45,13 @@ jobs:
       - name: 產生模擬盤資料
         run: |
           if [ -d .data/candles ]; then node scripts/sim-daily.ts .data && node scripts/sim-news.ts .data; fi
+          # 沒有即時行情金鑰時首頁用的最近一個交易日收盤資料
+          node scripts/close-snapshot.ts .data
 
       - name: 放進網站
         run: |
           mkdir -p web/public/data
-          for f in active-etf.json stocks.json chips.json fundamentals.json pe5y.json pattern-stats.json; do
+          for f in active-etf.json stocks.json chips.json fundamentals.json pe5y.json pattern-stats.json close.json etf-info.json; do
             if [ -f ".data/$f" ]; then cp ".data/$f" web/public/data/; fi
           done
           if [ -d .data/candles ]; then cp -r .data/candles web/public/data/; fi

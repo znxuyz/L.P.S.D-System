@@ -18,8 +18,10 @@ import {
   pledgeRelease,
   pledgeRepay,
   repayLoan,
+  setDca,
   setStop,
   summarize,
+  toggleFav,
   takeLoan,
   tickTo,
 } from '../domain/sim';
@@ -140,5 +142,50 @@ describe('薪資、信貸、質押', () => {
     expect(s.stops).toEqual([]);
     expect(s.loans).toEqual([]);
     expect(s.days).toEqual([]);
+  });
+});
+
+describe('定期定額、開盤停損、自選股', () => {
+  it('月初以開盤價買進定期定額（可以買零股）', () => {
+    const m = buildMarket(new Map([['0050', [bar('2024-01-31', 100, 100, 100, 100), bar('2024-02-01', 150, 155, 149, 152)]]]));
+    const s = newSim({ start: '2024-01-31', capital: 100_000, discount: 1, monthly: 20_000 });
+    expect(setDca(s, '0050', 500)).toMatch(/至少/);
+    expect(setDca(s, '0050', 10_000)).toBeNull();
+    closeDay(s, m);
+    beginDay(s, m, '2024-02-01');
+    const t = s.trades.at(-1)!;
+    expect(t).toMatchObject({ code: '0050', side: 'buy', price: 150, shares: 66 });
+    expect(t.shares * t.price + t.fee).toBeLessThanOrEqual(10_000);
+    expect(s.cash).toBe(120_000 - (t.shares * t.price + t.fee));
+    setDca(s, '0050', 0);
+    expect(s.dca).toHaveLength(0);
+  });
+
+  it('開盤跳空跌破停損價：以開盤價賣出', () => {
+    const { m, s } = setup([bar('2024-01-02', 100, 100, 100, 100), bar('2024-01-03', 90, 95, 88, 94)]);
+    placeOrder(s, m, { code: '2330', side: 'buy', kind: 'cash', shares: 1000 });
+    setStop(s, m, '2330', 'cash', 'long', 95);
+    closeDay(s, m);
+    beginDay(s, m, '2024-01-03');
+    expect(s.pos).toHaveLength(0);
+    expect(s.trades.at(-1)!.price).toBe(90);
+  });
+
+  it('開盤一價鎖跌停：停損賣不掉並提醒', () => {
+    const { m, s } = setup([bar('2024-01-02', 100, 100, 100, 100), bar('2024-01-03', 90, 90, 90, 90)]);
+    placeOrder(s, m, { code: '2330', side: 'buy', kind: 'cash', shares: 1000 });
+    setStop(s, m, '2330', 'cash', 'long', 95);
+    closeDay(s, m);
+    beginDay(s, m, '2024-01-03');
+    expect(s.pos).toHaveLength(1);
+    expect(s.notes.at(-1)!.text).toMatch(/鎖跌停/);
+  });
+
+  it('自選股', () => {
+    const s = newSim({ start: '2024-01-02', capital: 1, discount: 1 });
+    expect(toggleFav(s, '2330')).toBe(true);
+    expect(s.fav).toEqual(['2330']);
+    expect(toggleFav(s, '2330')).toBe(false);
+    expect(s.fav).toEqual([]);
   });
 });

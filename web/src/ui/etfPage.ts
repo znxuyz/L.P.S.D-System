@@ -23,6 +23,22 @@ export function renderEtfCategories(el: HTMLElement, etfs: EtfView[], active: Et
 }
 
 /** 資料來源標籤：模擬資料要明確標示，真實資料標出公告日期。 */
+/** 目前的行情來源（由 main 設定）：股價說明用，以及預估淨值是不是官方資料。 */
+let priceSource: 'mock' | 'close' | 'live' = 'mock';
+let closeDate = '';
+export function setEtfPriceSource(src: 'mock' | 'close' | 'live', date = ''): void {
+  priceSource = src;
+  closeDate = date;
+}
+
+type InfoField = NonNullable<EtfView['meta']['info']>['real'][number];
+/** 還是模擬值的欄位標上「模擬」。 */
+function mockMark(e: EtfView, field: InfoField | 'expense'): string {
+  // 預估淨值只有在收盤資料模式、而且淨值日期就是收盤那天時才是真的
+  const real = field === 'nav' ? priceSource === 'close' && !!e.meta.info?.real.includes('nav') && e.meta.info.navDate === closeDate : field !== 'expense' && !!e.meta.info?.real.includes(field);
+  return real ? '' : ' <span class="tag-mock" title="示意資料，不代表實際數字">模擬</span>';
+}
+
 function srcTag(e: EtfView | undefined): string {
   const src = e?.meta.holdingsSource;
   if (src?.kind === 'real')
@@ -132,7 +148,15 @@ export function renderEtfTable(el: HTMLElement, etfs: EtfView[], filter: EtfFilt
           .join('')}</tbody>
       </table>
     </div>
-    <p class="muted small">ETF 的股價、規模、配息與費用率為模擬資料；成分股除了標示「投信公告」的主動式 ETF 以外，也是模擬資料。</p>`;
+    <p class="muted small">${sourceNote(etfs)}</p>`;
+}
+
+function sourceNote(etfs: EtfView[]): string {
+  const price = priceSource === 'mock' ? '股價為模擬行情' : priceSource === 'close' ? '股價為最近一個交易日的收盤資料' : '股價為即時行情';
+  const asOf = etfs.map((e) => e.meta.info?.asOf).filter(Boolean).sort().at(-1);
+  if (!asOf) return `${price}；規模、配息與費用率為模擬資料；成分股除了標示「投信公告」的主動式 ETF 以外，也是模擬資料。`;
+  return `${price}。淨值、規模、受益人數、配息與填息為證交所、櫃買、集保公布的資料（${asOf.slice(5).replace('-', '/')}）；
+    內扣費用率與被動式 ETF 的成分股沒有公開的整理資料，仍是模擬值（標示「模擬」）；主動式 ETF 的持股為投信每日公告。`;
 }
 
 const paysDividend = (e: EtfView) => e.meta.dividendPerYear > 0;
@@ -184,22 +208,30 @@ export function renderEtfDetail(el: HTMLElement, e: EtfView | undefined, history
       <span class="num ${d}">${e.change >= 0 ? '▲' : '▼'} ${price(Math.abs(e.change))} (${pct(e.changePct)})</span></div>
     ${spark}
     <dl class="d-grid">
-      ${kv('預估淨值', price(e.nav))}
-      ${kv('折溢價', `${signed(e.premiumPct, 2)}%`, e.premiumPct > 0.3 ? 'warn' : '')}
+      ${kv(`預估淨值${mockMark(e, 'nav')}`, price(e.nav))}
+      ${kv(`折溢價${mockMark(e, 'nav')}`, `${signed(e.premiumPct, 2)}%`, e.premiumPct > 0.3 ? 'warn' : '')}
       ${
         paysDividend(e)
-          ? `${kv('殖利率', `${e.yieldPct.toFixed(2)}%`)}
-      ${kv('配息', `${e.meta.frequency}配・${e.meta.dividendPerYear.toFixed(2)} 元／年`)}
-      ${kv('連續配息', `${e.meta.dividendYears} 年`)}
-      ${kv('近一年填息率', `${e.meta.fillRate}%`)}`
-          : `${kv('配息', '不配息')}${kv('收益處理', '滾入淨值')}`
+          ? `${kv(`殖利率${mockMark(e, 'dividend')}`, `${e.yieldPct.toFixed(2)}%`)}
+      ${kv(`配息${mockMark(e, 'dividend')}`, `${e.meta.frequency}配・${e.meta.dividendPerYear.toFixed(2)} 元／年`)}
+      ${kv(`連續配息${mockMark(e, 'dividend')}`, `${e.meta.dividendYears} 年${e.meta.info?.dividendYearsAtLeast ? '以上' : ''}`)}
+      ${kv(`近一年填息率${mockMark(e, 'fill')}`, `${e.meta.fillRate}%`)}`
+          : `${kv(`配息${mockMark(e, 'dividend')}`, '不配息')}${kv('收益處理', '滾入淨值')}`
       }
-      ${kv('規模', yi(e.meta.aum, 0))}
-      ${kv('內扣費用', `${e.meta.expenseRatio.toFixed(2)}%／年`)}
-      ${kv('受益人數', `${e.meta.holders} 萬人`)}
+      ${kv(`規模${mockMark(e, 'aum')}`, yi(e.meta.aum, 0))}
+      ${kv(`內扣費用${mockMark(e, 'expense')}`, `${e.meta.expenseRatio.toFixed(2)}%／年`)}
+      ${kv(`受益人數${mockMark(e, 'holders')}`, `${e.meta.holders} 萬人`)}
       ${kv('今日成交額', yi(e.turnover))}
     </dl>
-    <p class="muted small etf-under">${e.meta.category === 'active' ? '投資範圍' : '追蹤'}：${esc(e.meta.underlying)}</p>
+    ${
+      e.meta.info?.divs?.length
+        ? `<p class="muted small etf-divs">最近配息：${e.meta.info.divs
+            .slice(0, 6)
+            .map(([d, v]) => `${d.slice(2).replace(/-/g, '/')} ${v} 元`)
+            .join('、')}</p>`
+        : ''
+    }
+    <p class="muted small etf-under">${e.meta.category === 'active' ? '投資範圍' : '追蹤'}：${esc(e.meta.underlying)}${e.meta.info?.issuer ? `・${esc(e.meta.info.issuer)}` : ''}</p>
     ${holdings}
     ${changes}`;
 }

@@ -20,7 +20,10 @@
  *   現金不夠扣款時，沒繳到的部分加 1% 違約金滾入本金。
  * - 股票質押：拿現股向銀行借錢，最多借市值的 60%，年利率 2.5%（每個交易日計息，每月扣息）；
  *   質押中的股票不能賣。維持率（質押股票市值 ÷ 借款＋利息）收盤低於 130% 提醒，低於 120% 強制賣出質押股票還款。
+ * - 定期定額：每月第一個交易日（薪資入帳後）以開盤價買進設定的金額，可以買零股。
  * 報酬率＝總資產 ÷ 累計投入（本金＋薪資）－ 1；貸款是負債，不算投入。
+ *
+ * 開盤：09:00 是集合競價，開盤前就觸發的停損／停利單以開盤價成交（一價鎖跌停時賣不掉，會提醒）。
  */
 import { SESSION_MINUTES, intradayPath, type IntradayPath } from './intraday';
 import type { Candle } from './technicals';
@@ -121,6 +124,12 @@ export interface StopOrder {
   warned?: string;
 }
 
+/** 定期定額：每月第一個交易日以開盤價買進 amount 元。 */
+export interface DcaPlan {
+  code: string;
+  amount: number;
+}
+
 /** 信用貸款（本息平均攤還）。 */
 export interface Loan {
   id: number;
@@ -186,6 +195,9 @@ export interface SimState {
   days: DayRec[];
   /** 本金以外投入的資金 [日期, 金額]。 */
   flows: Array<[string, number]>;
+  dca: DcaPlan[];
+  /** 自選股。 */
+  fav: string[];
 }
 
 /** 除權息：[日期, 代號, 除權息前收盤, 參考價, 權值+息值, 權/息] */
@@ -238,6 +250,8 @@ export function newSim(settings: SimSettings, watch = '2330'): SimState {
     pledges: [],
     days: [],
     flows: [],
+    dca: [],
+    fav: [],
   };
 }
 
@@ -248,6 +262,8 @@ function withDefaults(s: SimState): SimState {
   s.pledges ??= [];
   s.days ??= [];
   s.flows ??= [];
+  s.dca ??= [];
+  s.fav ??= [];
   return s;
 }
 
@@ -278,6 +294,8 @@ export function migrate(raw: unknown): SimState | null {
     pledges: [],
     days: [],
     flows: [],
+    dca: [],
+    fav: [],
   };
 }
 
@@ -703,6 +721,42 @@ export function pledgeRelease(s: SimState, m: Market, code: string, shares: numb
   return null;
 }
 
+/** 設定（amount > 0）或取消（amount = 0）某檔的定期定額。 */
+export function setDca(s: SimState, code: string, amount: number): string | null {
+  amount = Math.round(amount);
+  s.dca = s.dca.filter((p) => p.code !== code);
+  if (!amount) return null;
+  if (amount < 1000) return '定期定額每月至少 1,000 元';
+  s.dca.push({ code, amount });
+  return null;
+}
+
+/** 每月定期定額：以開盤價買進，股數無條件捨去（可以買零股）。 */
+function runDca(s: SimState, m: Market): void {
+  for (const p of s.dca) {
+    const px = m.path(p.code, s.date)?.price[0];
+    if (!px) {
+      note(s, p.code, `定期定額 ${p.amount.toLocaleString()} 元：今天沒有成交，這個月略過`);
+      continue;
+    }
+    let shares = Math.floor(p.amount / px);
+    while (shares > 0 && shares * px + feeOf(shares * px, s.settings.discount, shares) > p.amount) shares--;
+    if (shares <= 0) {
+      note(s, p.code, `定期定額 ${p.amount.toLocaleString()} 元：金額不夠買 1 股（開盤價 ${px}）`);
+      continue;
+    }
+    const err = placeOrder(s, m, { code: p.code, side: 'buy', kind: 'cash', shares });
+    note(s, p.code, err ? `定期定額買進失敗：${err}` : `定期定額以開盤價 ${px} 買進 ${shares.toLocaleString()} 股`);
+  }
+}
+
+/** 加入或移除自選股。 */
+export function toggleFav(s: SimState, code: string): boolean {
+  const had = s.fav.includes(code);
+  s.fav = had ? s.fav.filter((c) => c !== code) : [...s.fav, code];
+  return !had;
+}
+
 /** 每個月第一個交易日開盤前：薪資入帳、信貸扣款、質押扣息。 */
 function monthStart(s: SimState): void {
   const salary = Math.round(s.settings.monthly ?? 0);
@@ -798,7 +852,6 @@ export function beginDay(s: SimState, m: Market, date: string): void {
   s.minute = 0;
   s.day += 1;
   s.orders = [];
-  if (newMonth) monthStart(s);
   for (const [, code, prev, ref, value, kind] of m.exRights(date)) {
     if (!(value > 0)) continue;
     for (const p of s.pos.filter((x) => x.code === code)) {
@@ -816,6 +869,13 @@ export function beginDay(s: SimState, m: Market, date: string): void {
       }
     }
   }
+  // 月初：薪資、信貸、質押利息，然後定期定額（在除權息之後，除息日當天買進的不會領到股利）
+  if (newMonth) {
+    monthStart(s);
+    runDca(s, m);
+  }
+  // 開盤集合競價：開盤前就觸發的停損／停利以開盤價成交
+  if (s.stops.length) checkStops(s, m, 0);
 }
 
 export interface SimSummary {
