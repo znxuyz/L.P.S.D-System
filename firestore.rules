@@ -1,16 +1,70 @@
 rules_version = '2';
 
-// 拉普拉斯模擬盤的雲端存檔（web/src/data/simSync.ts）。
-// 文件 ID 是由開通碼算出的 64 位十六進位雜湊，知道 ID 才能讀寫；不能列出、刪除全部文件。
+// 拉普拉斯模擬盤的雲端資料（web/src/data/simSync.ts、simBoard.ts）。
+// - sims/<同步 ID>：每位玩家的存檔。只有白名單上的玩家能讀寫（清單是同步 ID 再做一次 SHA-256，公開也推不回同步 ID）。
+// - boards/<公開 ID>：朋友排行榜。大家都能讀；寫入要附上雜湊鏈的上一格，只有本人算得出來。
+// 兩份清單由 scripts/sim-code.mjs 自動改寫，不要手動編輯標記之間的內容。
 service cloud.firestore {
   match /databases/{database}/documents {
+    function players() {
+      return [
+        // <players>
+        'dcd4c48c1206364f5d608f766bca738ac830b05fb9c3aa6b2423edae7308c08a',
+        '2d32765d063bc816e06c9ca38a3f2c57709ed4d73f503337a54f17a93827ffe5',
+        '743b84b4e4f430f2187f0272d602c9222ee309db050bbfdc671649802d2093af',
+        '720e98218163703eea11ae95373449c8744460e978d1ac49dbeeab85c75945b6',
+        'b89dcd49cd4a311aa9e1e86a284450f7343ffda162b10fd0b6c5a7bb81bff0d7',
+        '90283da66a9bd99dd0f79d8c8d676ebd049295329c0046e81ab5d5acea1bf560',
+        '5806790246f723e4a452077abd5b23e2d780c93712185436170656cb201523a9',
+        '8c0ed9a0ccef8f11d430e071a48125bf18edc72db726a258d565e742d669e9fb',
+        'd953ee4f2ae0328bb576cca233918ce826b0b248a7a1a7aeb53c22f3c93e163c',
+        '16ed1879c2ff43c8ea61b8c16efa39bb386dde13d4bc5b835f86b8734934b2a2',
+        '92dfa15b94ddf7e3973c864d69c148205520c51f414fcb6ed82a732a22c5e8f2',        // </players>
+      ];
+    }
+    function boards() {
+      return [
+        // <boards>
+        '1e9387311b7c057c433e449ff40c377d4abecfa898ec8425df9e7653f050712b',
+        '5c137242a70bc021bce7c070eba2c291763a6a29115ce3037b43dabd4042a1e6',
+        'ad153e0d978e0f1f3d8f918d5a87b95341b903ddc8309ac2ca4c5dab9df599df',
+        '83c3692dda13c246ac8bf164f59b867ddaf85ebef30dfd28e8f7c1e99e76008b',
+        'f9e3939086a0e8e0e0c7b7abc303825e6484282968a3d9b3ac93abcbcf78aca9',
+        '1e7e0e8c3ae33efdd416fdf8a79265f9d52cd625ff76da549bf5c4578ebef263',
+        '9e0f06a5e14d7e6ce974bcfa8f72ef2a53d39da5bc1cca325ee8d2a86cd9311f',
+        'be5131a26a5479c5a32afbcd989d3f913b9851f2fcf12ddcb2cc633ed5f9bb4c',
+        '5cb4310ac337dd9c81599609781e89a8f322d0d4d32cdd7c268340a382ce13eb',
+        '486e338315bf7a5bce0be26932d687f91b293c45cb341b0b3ecb2f7c113580d8',
+        'd6c8fa2f9ec51278d5f6a0cdc2e7d2db77ff4f1951a1f5734d2dd4d3cf230cca',        // </boards>
+      ];
+    }
+    function hex(s) {
+      return hashing.sha256(s).toHexString().lower();
+    }
+
     match /sims/{id} {
-      allow get: if id.matches('^[0-9a-f]{64}$');
-      allow create, update: if id.matches('^[0-9a-f]{64}$')
+      allow get: if hex(id) in players();
+      allow create, update: if hex(id) in players()
         && request.resource.data.keys().hasOnly(['data', 'updatedAt'])
         && request.resource.data.data is string
         && request.resource.data.data.size() < 800000
         && request.resource.data.updatedAt is int;
+      allow list, delete: if false;
+    }
+
+    match /boards/{id} {
+      function valid() {
+        let d = request.resource.data;
+        return id in boards()
+          && d.keys().hasOnly(['k', 'n', 's', 'updatedAt'])
+          && d.k is string && d.k.size() == 64
+          && d.n is int
+          && d.s is string && d.s.size() < 4000
+          && d.updatedAt is int;
+      }
+      allow get: if id in boards();
+      allow create: if valid() && hex(request.resource.data.k) == id;
+      allow update: if valid() && hex(request.resource.data.k) == resource.data.k && request.resource.data.n == resource.data.n - 1;
       allow list, delete: if false;
     }
   }

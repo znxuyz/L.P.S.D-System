@@ -6,7 +6,7 @@
  * - 每個開通碼一份存檔，存在這台裝置的瀏覽器（localStorage），用同一個開通碼登入才讀得到。
  *   換裝置或清除瀏覽器資料後存檔不會跟著走。
  */
-import { migrate, type SimState } from '../domain/sim';
+import { migrate, type DayRec, type SimState, type Trade } from '../domain/sim';
 
 export interface CodeEntry {
   id: string;
@@ -15,6 +15,10 @@ export interface CodeEntry {
   admin?: boolean;
   /** 用管理者公鑰加密的「名稱＋雲端同步 ID」（只有管理者解得開）。 */
   vault?: string;
+  /** 雲端白名單用的 SHA-256(同步 ID)。 */
+  w?: string;
+  /** 朋友排行榜的公開 ID。 */
+  board?: string;
 }
 
 export interface CodeList {
@@ -41,6 +45,38 @@ export interface SimRecord {
   bench: number | null;
   trades: number;
   endedAt: string;
+  /** 累計投入（本金＋薪資）；舊紀錄沒有＝本金。 */
+  invested?: number;
+  /** 完整明細（只保留最近幾局），結束報告用。 */
+  detail?: RecordDetail;
+}
+
+export interface RecordDetail {
+  equity: Array<[string, number]>;
+  days: DayRec[];
+  trades: Trade[];
+  flows: Array<[string, number]>;
+  /** 同額投入大盤的對照組，每天收盤的價值（對應 equity）。 */
+  bench: Array<number | null>;
+}
+
+/** 摘要最多留幾局、完整明細留幾局；雲端一份存檔上限約 800KB，超過時從最舊的明細開始捨棄。 */
+export const HISTORY_MAX = 200;
+export const DETAIL_MAX = 10;
+const SAVE_BUDGET = 700_000;
+
+export function trimSave(save: SimSave): SimSave {
+  save.history = save.history.slice(0, HISTORY_MAX);
+  save.history.forEach((r, i) => {
+    if (i >= DETAIL_MAX) delete r.detail;
+  });
+  let size = JSON.stringify(save).length;
+  for (let i = save.history.length - 1; size > SAVE_BUDGET && i >= 0; i--) {
+    if (!save.history[i].detail) continue;
+    delete save.history[i].detail;
+    size = JSON.stringify(save).length;
+  }
+  return save;
 }
 
 export interface SimSave {
