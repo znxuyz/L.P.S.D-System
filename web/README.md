@@ -1,12 +1,15 @@
-# L.P.L.C. 資金熱力圖（原型）
+# L.P.L.C. 網站（技術說明）
 
-L.P.L.C.-System 的第一個視覺化模組，用熱力圖看「錢今天流到哪裡」。介面是玻璃數據艙風格：
+這份是網站原始碼（`web/`）的技術細節：各頁面的計算方式、資料欄位、即時行情設定。
+專案總覽見根目錄的 [README](../README.md)，日常維護（開通碼、Firebase、自動化流程）見 [維運手冊](../docs/OPERATIONS.md)。
+
+介面是玻璃數據艙風格：
 深空背景、緩慢流動的極光、霧面玻璃面板與漸層描邊；紅綠只用於漲跌。預設使用 **模擬行情**，
 在右上角選單可以切換成 **富果** 或 **證交所** 的真實行情（見下方〈使用真實行情〉）。
 
 ## 畫面
 
-網站分四頁，從頂部切換，網址 `#map`、`#intel`、`#screen`、`#etf` 可以直接開到指定頁：
+網站分六頁，從頂部切換（模擬盤從左上角圖示進入），網址 `#map`、`#intel`、`#screen`、`#etf`、`#stock/<代號>`、`#sim` 可以直接開到指定頁：
 
 - **熱力圖**（預設）：整頁只放熱力圖。點個股或產業標題，右上角浮出細節卡；盤中事件從左下角滑入通知。
 - **市場情報**：產業列表、加權指數與台指期走勢、資金輪動、產業與個股資金流排行、細節與盤中事件紀錄。
@@ -128,66 +131,56 @@ GitHub Actions 每個交易日台北時間 18:37（22:07 再補抓一次）到�
 
 ## 拉普拉斯模擬盤
 
-按左上角的「拉普拉斯之眼」圖示，播放一段全畫面動畫後進入模擬盤（網址 `#sim`）。這個圖示也是網頁分頁與手機加到主畫面的圖示。
+按左上角的「拉普拉斯之眼」圖示，播放一段全畫面動畫後進入模擬盤（網址 `#sim`）；再按一次（或「離開」）播放闔眼動畫回到原本的頁面。
+模擬盤裡只顯示模擬相關的畫面。規則總覽見根目錄 [README](../README.md#拉普拉斯模擬盤)，這裡記實作細節。
 
-- **偽即時盤中行情**：每個交易日 09:00 開盤、13:30 收盤，現實 1 秒＝盤中 1 分鐘，可選 1×／3×／5×；可以暫停（暫停時不能交易）、直接跳到隔天，不能倒帶。
-  盤中走勢由當天真實的開、高、低、收產生（`web/src/domain/intraday.ts`：開盤價起、收盤價止，在某個時間點碰到最高與最低，價格照升降單位跳動；同一檔同一天每次都一樣）。
-- **隱藏日期**：進入後只看得到星期幾、時間與「第幾天」，日期顯示成亂碼；K 線圖不畫月份、紀錄用「第 N 天」。設定頁可以「隨機日期開始」（不告訴你是哪一天）。
-- **下單**：市價單立刻成交、限價單碰到價格才成交（收盤取消）。交易類別：現股、現股當沖（稅減半，收盤未沖銷自動沖銷）、
-  融資（自備 40%、年息 6.5%）、融券（保證金 90%、借券費 0.08%）；整戶維持率低於 130% 提醒、低於 120% 收盤強制了結。
-- **今日排行**：漲幅、跌幅、成交量、高價、低價（上市、上櫃、ETF 約 2,000 檔），跟著盤中價格變動，點一下就看那一檔。
-- **新聞**：國內外大事件（改寫成不點名的標題，`scripts/data/macro-news.json`）、公司重大訊息（簡化成短標題）、盤勢（漲跌、漲跌停家數、量能、法人買賣超）。
-  只顯示亂碼日期與標題；盤勢與公司訊息在收盤後才出現，避免提前知道當天結果。
-- 資料：部署時用 `scripts/sim-daily.ts` 產生每天全市場行情（`simday/<月>.json`）、`scripts/sim-news.ts` 產生新聞（`news/<年>.json`），
-  `scripts/names.ts` 補齊已下市股票的名稱（`names.json`）。
-- 會顯示總資產、報酬率、同期加權指數、最大回檔、勝敗次數、部位與交易紀錄；可以開關「型態提示」（只用到昨天收盤為止的資料判斷）。
-- 快捷鍵：空白鍵暫停／繼續，→ 直接到隔天。
+### 引擎（`src/domain/sim.ts`）
+- 狀態 `SimState`（`v: 2`）：日期、第幾分鐘（0 = 09:00，270 = 13:30）、第幾天、現金、部位、委託、停損停利、信貸、質押、交易、提醒、每日收盤總資產與結算（`days`）、薪資投入（`flows`）。
+  舊存檔用 `migrate()` 轉換或補上新欄位。
+- `tickTo()` 逐分鐘前進：檢查限價單與停損停利；`closeDay()` 收盤：取消委託、當沖自動沖銷、融資與質押計息、檢查維持率、寫入每日結算；
+  `beginDay()` 開盤前：除權息，月初還有薪資入帳、信貸扣款、質押扣息。
+- 總資產＝現金＋部位價值－信貸餘額－質押借款與利息；報酬率＝總資產 ÷ 累計投入 − 1；最大回檔用扣掉薪資投入後的報酬指數計算。
+- 「同額買大盤」（`benchValue()`）：本金與每次投入都在投入當天以前一天的加權指數收盤買進。
 
-模擬盤裡只顯示模擬相關的畫面（頂端列只剩圖示與「離開」）。
+### 偽即時行情（`src/domain/intraday.ts`）
+- 用「代號＋日期」當亂數種子，開盤價起、收盤價止，在某個時間點碰到最高、最低（收紅多半先探低、收黑多半先衝高），錨點之間用布朗橋連接，價格照升降單位跳動；成交量依「開盤收盤大、中午小」分配。
+- 同一檔同一天在任何裝置都一樣。開高低收是真的，中間的跳動是模擬的（畫面上有標示）。
+
+### 隱藏日期
+- 只顯示第幾天、星期幾、時間；年月日是不停跳動的數字格（`ui/sim/util.ts` 的 `garble()`，每格十個數字疊在一起輪流亮起，數字沒有意義）。
+- K 線不畫月份刻度，交易紀錄用「第 N 天」；新聞在發布時間後才出現（盤勢與公司訊息在收盤後）。結束報告才揭曉真實日期。
+
+### 資料
+部署時產生：`scripts/sim-daily.ts` → `data/simday/<年-月>.json`（每天全市場開高低收量與昨收，今日排行用）、
+`scripts/sim-news.ts` → `data/news/<年>.json`（大事件改寫標題 `scripts/data/macro-news.json`、重大訊息短標題、盤勢）、
+`scripts/names.ts` → `data/names.json`（含已下市股票名稱）。
+
+### 帳號、雲端同步、排行榜
+- 開通碼：`src/data/simAccount.ts`（驗證、存檔、歷史紀錄保留：摘要 200 局、完整明細最近 10 局，超過約 700KB 從最舊的明細開始捨棄）。產生與管理見[維運手冊](../docs/OPERATIONS.md#開通碼)。
+- 雲端同步：`src/data/simSync.ts`（Firestore REST，`sims/<同步 ID>`，兩台裝置同時玩時以雲端較新的為準）。
+- 朋友排行榜：`src/domain/simRank.ts` 算最近 1／5／20 個模擬交易日與本局的報酬與超額報酬（有薪資投入時用簡化 Modified Dietz）；
+  `src/data/simBoard.ts` 寫入 `boards/<公開 ID>`，用雜湊鏈證明是本人（`src/data/sha256.ts` 是同步版 SHA-256，第一次計算會分段讓出主執行緒）。收盤後 20 秒上傳一次。
+- 管理員：`ui/sim/admin.ts`，用管理員開通碼解開每位玩家的 vault 拿到同步 ID，唯讀讀取存檔。
+
+### 畫面（`src/ui/`）
+| 檔案 | 內容 |
+|---|---|
+| `simPage.ts` | 控制器：狀態、時鐘（requestAnimationFrame）、雲端同步、排行榜上傳、事件處理 |
+| `sim/lobby.ts` | 輸入開通碼、大廳（接續／開新局、朋友排行榜、歷史紀錄）、開新局設定 |
+| `sim/panels.ts` | 遊戲中的面板：收盤結算、部位、資金（薪資／信貸／質押）、停損停利、資產曲線、新聞、交易紀錄 |
+| `sim/report.ts` | 結束報告 |
+| `sim/admin.ts` | 管理員畫面 |
+| `sim/charts.ts` | 日 K、分時、報酬走勢、每日損益、回檔圖 |
+| `sim/util.ts` | 共用小工具（亂碼日期、格式化） |
+| `laplaceIntro.ts` | 進入／離開動畫 |
 
 ### 從手機主畫面打開
-
 - 會記住上次停留的頁面；上次在模擬盤而且正在玩，重新打開會直接回到那一局（不播動畫、不經過大廳）。
-- `web/public/sw.js`（Service Worker）把網頁、程式與資料存在手機裡：網頁先連網拿最新版（3 秒沒回應就用存好的），
+- `public/sw.js`（Service Worker）把網頁、程式與資料存在手機裡：網頁先連網拿最新版（3 秒沒回應就用存好的），
   程式檔直接用存好的，資料先用存好的再在背景更新；開通碼清單與同步設定一律先連網。離線也打得開。
 
-### 開通碼
-
-- 進入模擬盤要先輸入開通碼。每個開通碼有自己的存檔；登入後可以選「接續上次的模擬」或「開新的模擬」（舊的一局會存進歷史紀錄）。
-- 產生開通碼：`node scripts/sim-code.mjs "朋友名稱" [個數]`（40 碼；加 `--reset` 會作廢全部舊碼並重新產生），開通碼只會印出這一次；`web/public/sim-codes.json` 只存雜湊與名稱（名稱登入後會顯示，會公開在網站上）。commit 後部署就生效。
-- 停用開通碼：從 `sim-codes.json` 刪掉那一筆。
-- 管理員（玩家 0）：`node scripts/sim-code.mjs --admin` 產生。登入後大廳多一個「查看玩家紀錄」，可以唯讀查看所有玩家的進行中模擬、持股、每筆交易與完成的每一局。
-  原理：管理員有一組 RSA 金鑰，私鑰用管理員開通碼導出的金鑰加密後放在 `sim-codes.json`；每位玩家的雲端同步 ID 用公鑰加密存在該玩家的 `vault`，
-  只有管理員解得開。之後新增的玩家會自動加密登錄，不需要管理員開通碼；既有玩家用 `--enroll <檔案>` 補登錄。
-- 在模擬盤再按一次左上角圖示（或「離開」），播放「闔眼」動畫後回到進來之前的頁面。
-- 開通碼只是入口，不是嚴格的權限控管（網站本身是公開的靜態網頁）。
-
-### 跨裝置同步（Firebase 免費方案）
-
-存檔會先存在瀏覽器，再同步到 Firestore；換裝置用同一個開通碼登入就能接續。沒有設定時只存在本機。
-
-1. 到 [Firebase 主控台](https://console.firebase.google.com/) 建立專案（不用開 Google Analytics），方案維持免費的 Spark。
-2. 「建構 → Firestore Database → 建立資料庫」，選正式版模式（production mode），位置選 `asia-east1`（台灣）。
-3. 「規則」分頁貼上 repo 根目錄 `firestore.rules` 的內容並發布。
-4. 「專案設定 → 一般 → 你的應用程式」新增網頁應用程式，複製 `projectId` 與 `apiKey`，寫進 `web/public/sync-config.json`：
-   `{ "projectId": "你的專案ID", "apiKey": "你的 apiKey" }`（這兩個值本來就是公開的，安全性靠規則與開通碼）。
-
-目前使用的專案是 `lpsdsystem`。
-
-**自動更新安全規則**：修改 `firestore.rules` 並合併到 main 後，`.github/workflows/deploy-firestore-rules.yml` 會自動部署到 Firebase。
-需要先在 GitHub repo 的 Settings → Secrets and variables → Actions 新增 `FIREBASE_SERVICE_ACCOUNT`，
-內容是 Firebase 主控台「專案設定 → 服務帳戶 → 產生新的私密金鑰」下載的整個 JSON（這把金鑰權限很大，只放在 GitHub Secrets，不要 commit）。
-並在 [Google Cloud IAM](https://console.cloud.google.com/iam-admin/iam?project=lpsdsystem) 幫這個服務帳戶（`firebase-adminsdk-…`）加上「Firebase Rules Admin」角色。
-
-每個開通碼一份文件 `sims/<同步 ID>`，同步 ID 由開通碼算出，和 `sim-codes.json` 裡的雜湊不同，沒有開通碼就讀寫不到。
-兩台裝置同時玩時，以雲端上較新的進度為準。
-
-- 選一個過去的日期（或按「隨機日期」）與本金，用模擬帳戶一天一天往前回放。K 線只畫到目前這一天，看不到未來。
-- 收盤後下單、下一個交易日成交：市價單用開盤價；限價單當天碰到限價才成交，否則取消。
-- 手續費 0.1425% × 折扣（整股最低 20 元、零股 1 元），賣出證交稅 0.3%（ETF 0.1%）。
-- 一價漲停買不到、一價跌停賣不掉；當天沒有成交就取消。除息現金在除息日入帳，除權依參考價換算配股（近似）。
-- 會顯示總資產、報酬率、同期加權指數、最大回檔、勝敗次數與交易紀錄；可以開關「型態提示」（只用到目前日期的資料判斷）。
-- 帳戶存在這台裝置的瀏覽器（localStorage `lplc.sim.v1`），按 → 鍵前進一天、Shift + → 前進五天。
+### 快捷鍵
+空白鍵暫停／繼續，→ 直接到隔天。
 
 ## 使用證交所即時行情
 
@@ -312,7 +305,7 @@ data 分支每次更新只保留最新一個版本（舊版本會被覆蓋），
 cd web
 npm install
 npm run dev        # http://localhost:5173
-npm test           # 資金流、輪動、事件偵測、五大選股、ETF、模擬行情、富果資料轉換測試
+npm test           # 資金流、輪動、事件、選股、ETF、型態、模擬盤引擎、排行榜等單元測試
 npm run build      # 型別檢查 + 打包到 dist/
 ```
 
@@ -320,11 +313,15 @@ npm run build      # 型別檢查 + 打包到 dist/
 
 ```
 src/
-  data/       資料層：型別、MarketDataProvider 介面、mock 股票池與模擬行情、真實行情（fugle.ts 富果、twseMis.ts 證交所、liveProvider.ts）
+  data/       資料層：型別、MarketDataProvider 介面、mock 股票池與模擬行情、真實行情（fugle.ts 富果、twseMis.ts 證交所、liveProvider.ts）、
+              官方資料載入（candles.ts、chipSeries.ts、realFundamentals.ts）、型態勝率（patternStats.ts）、
+              模擬盤（simAccount.ts 帳號與存檔、simSync.ts 雲端同步、simBoard.ts 排行榜、simData.ts 每日行情與新聞、sha256.ts）
   domain/     資金流（metrics.ts）、資金輪動（rotation.ts）、事件偵測（events.ts）、五大選股（screens.ts）、ETF（etf.ts）、
-              技術指標（technicals.ts）、個股分析（analysis.ts）、新聞（news.ts）
-  ui/         玻璃熱力圖、事件通知、輪動條碼、選股頁、ETF 頁與各資訊面板
-  main.ts     組裝：provider → metrics → views / panels
+              技術指標（technicals.ts）、型態辨識（patterns.ts、candlesticks.ts）、個股分析（analysis.ts）、新聞（news.ts）、
+              模擬盤引擎（sim.ts）、偽即時行情（intraday.ts）、排行榜成績（simRank.ts）
+  ui/         玻璃熱力圖、事件通知、輪動條碼、選股頁、ETF 頁、個股頁與各資訊面板；模擬盤在 simPage.ts 與 sim/
+  main.ts     組裝：provider → metrics → views / panels，頁面切換、Service Worker 註冊
+public/       sw.js、sim-codes.json（開通碼雜湊）、sync-config.json（Firebase 公開設定）
 ../worker/    證交所即時行情的 Cloudflare Worker 轉接服務
 ```
 
