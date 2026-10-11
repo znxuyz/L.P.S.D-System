@@ -3,108 +3,97 @@
  *
  * - 時間：每個交易日 09:00～13:30，現實 1 秒＝盤中 1 分鐘（可選 1／3／5 倍），不能倒帶；
  *   暫停時不能交易；收盤後自動進入下一個交易日；也可以直接跳到隔天。
- * - 為了不讓玩家想起真實事件，畫面上看不到年月日：只顯示星期幾、時間與「第幾天」，日期一律顯示成亂碼。
- * - 新聞欄（亂碼日期＋標題）、今日排行（漲幅、跌幅、成交量、高價、低價）、現股／當沖／融資／融券下單。
- * 帳號、雲端同步、管理員檢視和之前一樣；狀態存在瀏覽器並同步到雲端。
+ * - 為了不讓玩家想起真實事件，畫面上看不到年月日：只顯示星期幾、時間與「第幾天」，日期一律顯示成亂碼；
+ *   一局結束時才在結束報告裡揭曉真實日期。
+ * - 新聞欄、今日排行、現股／當沖／融資／融券下單、停損停利、資金（薪資、信貸、質押）、收盤結算、朋友排行榜。
+ *
+ * 這個檔案是控制器（狀態、時鐘、雲端同步、事件）；各畫面的 HTML 在 ui/sim/ 底下：
+ * lobby.ts（登入、大廳、排行榜、開新局）、panels.ts（遊戲中的面板）、report.ts（結束報告）、admin.ts（管理員）、charts.ts（圖表）。
  */
-import { scaleBand, scaleLinear } from 'd3';
 import { loadOfficialCandles } from '../data/candles';
 import { loadTaiex } from '../data/chipSeries';
-import { loadNames, loadNews, loadSimMonth, newsMinute, type NewsItem, type SimMonth } from '../data/simData';
+import { loadNames, loadNews, loadSimMonth, type NewsItem, type SimMonth } from '../data/simData';
 import { loadStockDirectory, searchDirectory, type DirEntry } from '../data/stockDirectory';
 import { SESSION_MINUTES, clock, intradayPath, type IntradayPath } from '../domain/intraday';
-import { detectPatterns, type Bias } from '../domain/patterns';
+import { detectPatterns } from '../domain/patterns';
 import {
   KIND_NAME,
   LOT,
   MARGIN_LOAN,
   SHORT_DEPOSIT,
   beginDay,
+  benchValue,
   buildMarket,
   cancelOrder,
   closeDay,
+  debtOf,
   equityOf,
   feeOf,
+  investedOf,
   maintenance,
   migrate,
   newSim,
   placeOrder,
+  pledgeBorrow,
+  pledgeRelease,
+  pledgeRepay,
+  pledgedShares,
   priceNow,
+  repayLoan,
   reservedCash,
-  summarize,
+  setStop,
+  takeLoan,
   taxOf,
   tickTo,
   type ExRight,
   type Kind,
   type Market,
-  type Position,
   type Side,
   type SimState,
 } from '../domain/sim';
-import { loadCodes, loadSave, openVault, rememberPlayers, rememberSyncId, rememberUser, rememberedPlayers, rememberedSyncId, rememberedUser, syncIdFor, verifyCode, writeSave, type CodeEntry, type CodeList, type PlayerRef, type SimSave } from '../data/simAccount';
+import { boardStats, type Window } from '../domain/simRank';
+import {
+  loadCodes,
+  loadSave,
+  openVault,
+  rememberPlayers,
+  rememberSyncId,
+  rememberUser,
+  rememberedPlayers,
+  rememberedSyncId,
+  rememberedUser,
+  syncIdFor,
+  trimSave,
+  verifyCode,
+  writeSave,
+  type CodeEntry,
+  type CodeList,
+  type PlayerRef,
+  type SimSave,
+} from '../data/simAccount';
+import { pullBoard, pushBoard, type BoardEntry } from '../data/simBoard';
 import { loadSyncConfig, pullSave, pushSave, type SyncConfig } from '../data/simSync';
-import { sma, type Candle } from '../domain/technicals';
+import { type Candle } from '../domain/technicals';
 import { escapeHtml as esc, num, pct, price } from './format';
+import { adminHtml, playerDetailHtml, type PlayerSave } from './sim/admin';
+import { candleSvg, tickSvg } from './sim/charts';
+import { WARMUP, boardHtml, gateHtml, lobbyHtml, setupHtml, type BoardRow } from './sim/lobby';
+import { bankHtml, dayReportHtml, equityHtml, holdHtml, logHtml, newsHtml, stopHtml } from './sim/panels';
+import { recordOf, reportHtml, verdict } from './sim/report';
+import { BIAS, actionName, cls, garble, investedAt, money, pctOrDash, setHtml, weekday, type SimCtx } from './sim/util';
 
 /** 上次在模擬盤的哪個畫面（大廳／遊戲中），重新打開時用。 */
 const VIEW_KEY = 'lplc.sim.view';
 /** 交易日曆：0050 從 2003 年起每個交易日都有成交。 */
 const CALENDAR_CODE = '0050';
-/** 起點之前至少要有這麼多根日 K 給圖表與型態判斷用。 */
-const WARMUP = 60;
-const BARS = 120;
 /** 收盤後停留幾秒再進入下一個交易日。 */
 const CLOSE_PAUSE_MS = 2500;
+/** 排行榜：收盤後等這麼久才上傳（連續跳好幾天時只傳最後一次）；大廳裡的排行榜多久重新讀一次。 */
+const BOARD_PUSH_MS = 20_000;
+const BOARD_STALE_MS = 60_000;
 
 type RankKey = 'up' | 'down' | 'vol' | 'high' | 'low';
 const RANK_NAME: Record<RankKey, string> = { up: '漲幅', down: '跌幅', vol: '成交量', high: '高價', low: '低價' };
-
-function setHtml(el: HTMLElement, html: string): void {
-  if (el.dataset.html === html) return;
-  el.dataset.html = html;
-  el.innerHTML = html;
-}
-
-const cls = (v: number) => (v > 0 ? 'up' : v < 0 ? 'down' : '');
-const money = (v: number) => num(Math.round(v));
-const BIAS: Record<Bias, string> = { bull: '偏多', bear: '偏空', neutral: '中性' };
-const weekday = (date: string) => '日一二三四五六'[new Date(`${date}T00:00:00Z`).getUTCDay()];
-
-function hash(s: string): number {
-  let h = 2166136261;
-  for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
-  return h >>> 0;
-}
-
-/**
- * 日期的亂碼：「年、月、日」看得到，每個數字是一格不停跳動的報價燈號（像報價看板在跳），看不出實際日期。
- * 每格的數字順序、轉速、起始位置由日期雜湊決定（同一天每次一樣），翻動的數字本身沒有意義。
- */
-function garble(date: string): string {
-  let h = hash(`lplc-garble|${date}`);
-  const next = () => (h = Math.imul(h ^ (h >>> 13), 2654435761) >>> 0);
-  const cell = () => {
-    const digits = [...'0123456789'];
-    for (let i = digits.length - 1; i > 0; i--) {
-      const j = next() % (i + 1);
-      [digits[i], digits[j]] = [digits[j], digits[i]];
-    }
-    // 10 個數字疊在同一格、輪流亮起（不靠位移，所以每格永遠對齊）
-    const t = 0.9 + (next() % 1200) / 1000;
-    const phase = (next() % 1000) / 1000;
-    const b = digits.map((c, k) => `<b style="--d:${(-((phase + k / 10) % 1) * t).toFixed(3)}s">${c}</b>`).join('');
-    return `<i style="--t:${t.toFixed(2)}s">${b}</i>`;
-  };
-  const g = (n: number) => `<span class="gb-run">${Array.from({ length: n }, cell).join('')}</span>`;
-  return `<span class="gb" role="img" aria-label="日期已隱藏"><span aria-hidden="true">${g(4)}年${g(2)}月${g(2)}日</span></span>`;
-}
-
-/** 交易動作的名稱（依類別與買賣）。 */
-function actionName(kind: Kind, side: Side): string {
-  if (kind === 'margin') return side === 'buy' ? '融資買進' : '融資賣出';
-  if (kind === 'short') return side === 'sell' ? '融券賣出' : '融券回補';
-  return `${KIND_NAME[kind]}${side === 'buy' ? '買進' : '賣出'}`;
-}
 
 interface RankRow {
   code: string;
@@ -112,15 +101,19 @@ interface RankRow {
   path: IntradayPath;
 }
 
-export class SimPage {
+type View = 'gate' | 'lobby' | 'setup' | 'play' | 'admin' | 'report';
+
+export class SimPage implements SimCtx {
   private state: SimState | null = null;
   private codeList: CodeList | null | undefined;
   private user: CodeEntry | null = null;
   private save: SimSave = { current: null, history: [] };
-  private view: 'gate' | 'lobby' | 'setup' | 'play' | 'admin' = 'gate';
+  private view: View = 'gate';
+  /** 結束報告：看哪一份（sync = null 是自己的，否則是管理員在看某位玩家的）。 */
+  private reportRef: { sync: string | null; i: number } | null = null;
   /** 管理員（玩家 0）：解開的玩家清單、讀到的各玩家存檔、正在看的玩家。 */
   private players: PlayerRef[] | null = null;
-  private playerSaves = new Map<string, SimSave | null | 'error'>();
+  private playerSaves = new Map<string, PlayerSave>();
   private adminLoading = false;
   private adminPick: string | null = null;
   /** 網頁一打開就在模擬盤、而且上次正在玩：登入後直接回到那一局。 */
@@ -134,21 +127,29 @@ export class SimPage {
   /** 上次和雲端一致時的存檔時間；雲端比它新代表別台裝置改過。 */
   private syncedAt = 0;
   private pushTimer = 0;
+  // 朋友排行榜
+  private boardTab: Window = 'd5';
+  private boardRows: BoardRow[] | null = null;
+  private boardLoadedAt = 0;
+  private boardLoading = false;
+  private boardTimer = 0;
   private readonly candles = new Map<string, Candle[] | null>();
   private readonly loading = new Map<string, Promise<Candle[] | null>>();
-  private calendar: string[] | null | undefined;
+  calendar: string[] | null | undefined;
+  private calIndex = new Map<string, number>();
   private dir: DirEntry[] = [];
   private names: Record<string, string> = {};
-  private taiex: Map<string, number> | null = null;
+  taiex: Map<string, number> | null = null;
   private ex: ExRight[] = [];
   private exYears = new Set<number>();
-  private market: Market = buildMarket(new Map());
+  market: Market = buildMarket(new Map());
   private started = false;
-  // 下單面板
+  // 下單面板與資金面板
   private side: Side = 'buy';
   private kind: Kind = 'cash';
   private unit: 'lot' | 'share' = 'lot';
   private msg = '';
+  private bankMsg = '';
   private hints = true;
   // 時鐘
   private running = false;
@@ -158,6 +159,8 @@ export class SimPage {
   /** 收盤後要等到這個時間（performance.now）才進入下一天。 */
   private closedUntil = 0;
   private lastSavedMinute = -1;
+  /** 剛收盤的那一天（收盤結算面板閃一下提示）。 */
+  private freshDay = '';
   // 排行與新聞
   private rankKey: RankKey = 'up';
   private rankCache: { date: string; rows: RankRow[] } | null = null;
@@ -203,6 +206,7 @@ export class SimPage {
   hide(): void {
     this.stopLoop();
     if (this.state && this.view === 'play') this.persist();
+    this.flushBoard();
   }
 
   /**
@@ -221,7 +225,10 @@ export class SimPage {
       else this.render();
     });
     void Promise.all([
-      this.fetchCandles(CALENDAR_CODE).then((c) => (this.calendar = c?.map((x) => x.date) ?? null)),
+      this.fetchCandles(CALENDAR_CODE).then((c) => {
+        this.calendar = c?.map((x) => x.date) ?? null;
+        this.calIndex = new Map((this.calendar ?? []).map((d, i) => [d, i]));
+      }),
       loadStockDirectory().then((d) => (this.dir = d?.stocks ?? [])),
       loadNames().then((n) => (this.names = n)),
       loadTaiex().then((t) => (this.taiex = t)),
@@ -267,11 +274,11 @@ export class SimPage {
     this.market = buildMarket(series, this.ex);
   }
 
-  /** 目前用到的股票（觀看中、有部位、委託中）都要有日 K。 */
+  /** 目前用到的股票（觀看中、有部位、委託中、質押中）都要有日 K。 */
   private neededCodes(): string[] {
     const s = this.state;
     if (!s) return [];
-    return [...new Set([s.watch, ...s.pos.map((p) => p.code), ...s.orders.map((o) => o.code)])];
+    return [...new Set([s.watch, ...s.pos.map((p) => p.code), ...s.orders.map((o) => o.code), ...s.pledges.map((p) => p.code)])];
   }
 
   private async prepare(): Promise<void> {
@@ -296,8 +303,41 @@ export class SimPage {
     this.news = [...this.news, ...lists.flat()].sort((a, b) => (a[0] + a[1] < b[0] + b[1] ? -1 : 1));
   }
 
-  private nameOf(code: string): string {
+  nameOf(code: string): string {
     return this.names[code] ?? this.dir.find((d) => d.code === code)?.name ?? '';
+  }
+
+  private prevDay = (d: string): string | undefined => {
+    const cal = this.calendar;
+    if (!cal) return undefined;
+    const i = this.calIndex.get(d);
+    if (i != null) return i > 0 ? cal[i - 1] : undefined;
+    // 不是交易日：找它之前最後一個交易日
+    let lo = 0;
+    let hi = cal.length - 1;
+    if (!cal.length || cal[0] >= d) return undefined;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (cal[mid] < d) lo = mid;
+      else hi = mid - 1;
+    }
+    return cal[lo];
+  };
+
+  private index = (d: string): number | undefined => this.taiex?.get(d);
+
+  /** 同額投入大盤的對照組在 date 收盤的價值。 */
+  benchAt(s: SimState, date: string): number | null {
+    if (!this.taiex || !this.calendar) return null;
+    return benchValue(s, this.index, this.prevDay, date);
+  }
+
+  /** 對照組報酬：到最近一個已收盤的交易日（盤中不看今天，避免偷看）。 */
+  benchOf(s: SimState): number | null {
+    const lastDone = s.minute >= SESSION_MINUTES ? s.date : this.prevDay(s.date);
+    if (!lastDone || lastDone < s.settings.start) return s.equity.length ? null : 0;
+    const b = this.benchAt(s, lastDone);
+    return b == null ? null : b / investedAt(s, lastDone) - 1;
   }
 
   // ------------------------------------------------------------ 帳號
@@ -316,6 +356,8 @@ export class SimPage {
     this.syncedAt = 0;
     this.view = this.entryView();
     this.gateMsg = '';
+    this.boardRows = null;
+    this.boardLoadedAt = 0;
     void this.prepare();
     void this.pull();
   }
@@ -406,9 +448,64 @@ export class SimPage {
     return `<span class="sim-sync is-${this.syncState}">☁ ${label}</span>`;
   }
 
+  // ------------------------------------------------------------ 朋友排行榜
+
+  /** 收盤後過一陣子上傳自己的成績（連續跳好幾天只傳最後一次）。 */
+  private scheduleBoard(): void {
+    if (!this.canSync() || !this.user?.board) return;
+    window.clearTimeout(this.boardTimer);
+    this.boardTimer = window.setTimeout(() => this.flushBoard(), BOARD_PUSH_MS);
+  }
+
+  private flushBoard(): void {
+    if (!this.boardTimer) return;
+    window.clearTimeout(this.boardTimer);
+    this.boardTimer = 0;
+    const s = this.state;
+    if (!s || !s.equity.length || !this.canSync() || !this.taiex || !this.calendar) return;
+    const stats = boardStats(s, this.index, this.prevDay);
+    void pushBoard(this.sync!, this.syncId!, stats).then(
+      () => (this.boardLoadedAt = 0),
+      () => undefined,
+    );
+  }
+
+  private async loadBoard(): Promise<void> {
+    const list = this.codeList;
+    if (!this.sync || !list || this.boardLoading) return;
+    this.boardLoading = true;
+    const entries = list.codes.filter((c) => c.board);
+    const rows: BoardRow[] = entries.map((c) => ({ label: c.label, self: c.id === this.user?.id, entry: this.boardRows?.find((r) => r.label === c.label)?.entry }));
+    this.boardRows = rows;
+    this.renderLobbyBoard();
+    await Promise.all(
+      entries.map((c, i) =>
+        pullBoard(this.sync!, c.board!)
+          .then((e: BoardEntry | null) => (rows[i].entry = e))
+          .catch(() => (rows[i].entry = 'error')),
+      ),
+    );
+    this.boardLoading = false;
+    this.boardLoadedAt = Date.now();
+    this.renderLobbyBoard();
+  }
+
+  private boardSection(): string {
+    if (this.sync && Date.now() - this.boardLoadedAt > BOARD_STALE_MS && !this.boardLoading) queueMicrotask(() => void this.loadBoard());
+    return `<div id="sim-board">${boardHtml(this.sync ? this.boardRows ?? [] : null, this.boardTab, this.boardLoading)}</div>`;
+  }
+
+  private renderLobbyBoard(): void {
+    const el = this.root.querySelector<HTMLElement>('#sim-board');
+    if (el && this.view === 'lobby') setHtml(el, boardHtml(this.sync ? this.boardRows ?? [] : null, this.boardTab, this.boardLoading));
+  }
+
+  // ------------------------------------------------------------ 登入、登出、存檔
+
   private logout(): void {
     this.stopLoop();
     this.flush();
+    this.flushBoard();
     this.user = null;
     this.syncId = null;
     this.syncNote = '';
@@ -419,6 +516,7 @@ export class SimPage {
     this.players = null;
     this.playerSaves.clear();
     this.adminPick = null;
+    this.boardRows = null;
     this.view = 'gate';
     this.render();
   }
@@ -450,38 +548,24 @@ export class SimPage {
     if (!this.user) return;
     this.save.current = this.state;
     this.save.updatedAt = Date.now();
+    trimSave(this.save);
     writeSave(this.user.id, this.save);
     this.schedulePush();
     if (this.state) this.lastSavedMinute = this.state.minute;
   }
 
-  /** 把目前這一局的成績存進歷史紀錄（至少玩過一天才記）。 */
-  private archive(): void {
+  /** 把目前這一局存進歷史紀錄（含完整明細，至少玩過一天才記）。回傳是否有存。 */
+  private archive(): boolean {
     const s = this.state;
-    if (!s || !s.equity.length) return;
-    this.save.history.unshift({
-      start: s.settings.start,
-      end: s.equity[s.equity.length - 1][0],
-      days: s.equity.length,
-      capital: s.settings.capital,
-      equity: s.equity[s.equity.length - 1][1],
-      bench: this.benchOf(s),
-      trades: s.trades.length,
-      endedAt: new Date().toISOString(),
-    });
-    this.save.history = this.save.history.slice(0, 30);
-  }
-
-  /** 同期大盤：起始日前一天收盤 → 最近一個已收盤的交易日（盤中不看今天，避免偷看）。 */
-  private benchOf(s: SimState): number | null {
-    const cal = this.calendar;
-    const t = this.taiex;
-    if (!cal || !t) return null;
-    const i0 = cal.indexOf(s.settings.start);
-    const base = i0 > 0 ? t.get(cal[i0 - 1]) : undefined;
-    const lastDone = s.minute >= SESSION_MINUTES ? s.date : cal[cal.indexOf(s.date) - 1];
-    const end = lastDone ? t.get(lastDone) : undefined;
-    return base && end && lastDone >= s.settings.start ? end / base - 1 : s.equity.length ? null : 0;
+    if (!s || !s.equity.length) return false;
+    // 結束前把最後的成績傳到排行榜
+    if (this.canSync() && this.user?.board) {
+      this.boardTimer ||= -1;
+      this.flushBoard();
+    }
+    this.save.history.unshift(recordOf(s, this));
+    trimSave(this.save);
+    return true;
   }
 
   // ------------------------------------------------------------ 時鐘
@@ -533,7 +617,9 @@ export class SimPage {
     const s = this.state;
     if (!s || s.equity.at(-1)?.[0] === s.date) return;
     closeDay(s, this.market);
+    this.freshDay = s.date;
     this.persist();
+    this.scheduleBoard();
   }
 
   /** 進入下一個交易日（若今天還沒收盤就先收盤）。 */
@@ -556,7 +642,9 @@ export class SimPage {
     }
     beginDay(s, this.market, next);
     this.closedUntil = 0;
+    this.freshDay = '';
     this.msg = '';
+    this.bankMsg = '';
     this.persist();
     await this.prepare();
   }
@@ -573,6 +661,7 @@ export class SimPage {
     if (!cal?.length) return;
     const fd = new FormData(form);
     const capital = Math.max(10_000, Number(fd.get('capital')) || 1_000_000);
+    const monthly = Math.max(0, Math.round(Number(fd.get('monthly')) || 0));
     const discount = Math.min(1, Math.max(0.1, Number(fd.get('discount')) || 0.6));
     const minIdx = Math.min(WARMUP, cal.length - 1);
     const maxIdx = Math.max(minIdx, cal.length - 21);
@@ -584,8 +673,9 @@ export class SimPage {
       idx = Math.max(idx, minIdx);
     }
     this.archive();
-    this.state = newSim({ start: cal[idx], capital, discount }, this.state?.watch ?? '2330');
+    this.state = newSim({ start: cal[idx], capital, discount, monthly }, this.state?.watch ?? '2330');
     this.msg = '';
+    this.bankMsg = '';
     this.view = 'play';
     this.running = true;
     this.rankCache = null;
@@ -636,16 +726,72 @@ export class SimPage {
     this.render();
   }
 
+  /** 停損／停利的表單。 */
+  private stop(form: HTMLFormElement, clear = false): void {
+    const s = this.state;
+    if (!s) return;
+    const fd = new FormData(form);
+    const val = (k: string) => {
+      const v = String(fd.get(k) ?? '').trim();
+      return v && !clear ? Number(v) : undefined;
+    };
+    const kind = form.dataset.kind as Kind;
+    const dir = form.dataset.dir as 'long' | 'short';
+    const loss = val('loss');
+    const profit = val('profit');
+    const err = setStop(s, this.market, s.watch, kind, dir, loss, profit);
+    this.msg = err ?? (loss == null && profit == null ? `已取消 ${s.watch} 的停損／停利` : `已設定 ${s.watch} ${KIND_NAME[kind]}${loss != null ? `停損 ${loss}` : ''}${loss != null && profit != null ? '、' : ''}${profit != null ? `停利 ${profit}` : ''}`);
+    if (!err) this.persist();
+    this.render();
+  }
+
+  /** 資金面板的表單（信貸、質押）。 */
+  private bank(form: HTMLFormElement): void {
+    const s = this.state;
+    if (!s) return;
+    const fd = new FormData(form);
+    const n = (k: string) => Math.round(Number(fd.get(k)) || 0);
+    let err: string | null = null;
+    let ok = '';
+    switch (form.dataset.form) {
+      case 'loan':
+        err = takeLoan(s, n('amount'), n('months'));
+        ok = '信貸已入帳';
+        break;
+      case 'loan-repay':
+        err = repayLoan(s, Number(form.dataset.id), n('amount'));
+        ok = '已還款';
+        break;
+      case 'pledge':
+        err = pledgeBorrow(s, this.market, String(fd.get('code')), n('shares'), n('amount'));
+        ok = '質押完成';
+        break;
+      case 'pledge-repay':
+        err = pledgeRepay(s, form.dataset.code!, n('amount'));
+        ok = '已還款';
+        break;
+      case 'pledge-release':
+        err = pledgeRelease(s, this.market, form.dataset.code!, n('shares'));
+        ok = '已解除質押';
+        break;
+    }
+    this.bankMsg = err ?? ok;
+    if (!err) this.persist();
+    this.render();
+  }
+
   private reset(): void {
-    if (!confirm('結束這一局？成績會存進歷史紀錄。')) return;
+    if (!confirm('結束這一局？會揭曉這一局的真實日期，成績存進歷史紀錄。')) return;
     if (this.state && this.state.minute > 0 && this.state.equity.at(-1)?.[0] !== this.state.date) this.closeToday();
-    this.archive();
+    const saved = this.archive();
     this.state = null;
     this.running = false;
     this.msg = '';
     this.persist();
-    this.view = 'lobby';
+    this.reportRef = saved ? { sync: null, i: 0 } : null;
+    this.view = saved ? 'report' : 'lobby';
     this.render();
+    this.root.scrollIntoView({ block: 'start' });
   }
 
   // ------------------------------------------------------------ 畫面
@@ -658,12 +804,14 @@ export class SimPage {
       <div class="sim-head glass" id="sim-head"></div>
       <div class="sim-main">
         <div class="sim-chart glass" id="sim-chart"></div>
+        <div class="sim-dayrep-panel glass" id="sim-dayrep"></div>
         <div class="sim-hold glass" id="sim-hold"></div>
         <div class="sim-news glass" id="sim-news"></div>
         <div class="sim-equity glass" id="sim-equity"></div>
       </div>
       <div class="sim-aside">
         <div class="sim-order glass" id="sim-order"></div>
+        <div class="sim-bank glass" id="sim-bank"></div>
         <div class="sim-rank glass" id="sim-rank"></div>
         <div class="sim-log glass" id="sim-log"></div>
       </div>
@@ -687,64 +835,11 @@ export class SimPage {
       const el = (e.target as Element).closest<HTMLElement>('[data-sim]');
       if (!el) return;
       if (el.matches('tr[data-sim="watch"]') && Date.now() - this.rowDown < 800) return;
-      const a = el.dataset.sim!;
-      if (a === 'play') {
-        this.running = !this.running;
-        if (!this.running) this.persist();
-        this.msg = '';
-        this.render();
-      } else if (a.startsWith('speed')) {
-        this.speed = Number(a.slice(5)) as 1 | 3 | 5;
-        this.render();
-      } else if (a === 'nextday') void this.nextDay();
-      else if (a === 'reset') this.reset();
-      else if (a === 'lobby') {
-        if (this.state && this.view === 'play') this.persist();
-        this.view = 'lobby';
-        this.render();
-      } else if (a === 'resume') {
-        this.syncNote = '';
-        this.view = 'play';
-        this.running = true;
-        void this.prepare();
-      } else if (a === 'new') {
-        this.syncNote = '';
-        this.view = 'setup';
-        this.render();
-      } else if (a === 'logout') this.logout();
-      else if (a === 'admin' || a === 'admin-refresh') {
-        this.view = 'admin';
-        this.adminPick = null;
-        if (a === 'admin-refresh' || !this.playerSaves.size) void this.loadPlayers();
-        else this.render();
-      } else if (a === 'pick') {
-        this.adminPick = el.dataset.sync ?? null;
-        this.render();
-        this.root.scrollIntoView({ block: 'start' });
-      } else if (a === 'buy' || a === 'sell') {
-        this.side = a;
-        this.render();
-      } else if (a.startsWith('kind-')) {
-        this.kind = a.slice(5) as Kind;
-        this.render();
-      } else if (a === 'lot' || a === 'share') {
-        this.unit = a;
-        this.render();
-      } else if (a === 'cancel') {
-        cancelOrder(this.state!, Number(el.dataset.id));
-        this.persist();
-        this.render();
-      } else if (a === 'watch') void this.watch(el.dataset.code!);
-      else if (a.startsWith('rank-')) {
-        this.rankKey = a.slice(5) as RankKey;
-        this.renderPlay();
-      } else if (a === 'hints') {
-        this.hints = !this.hints;
-        this.render();
-      } else if (a === 'random-start') {
-        const form = root.querySelector<HTMLFormElement>('#sim-setup-form');
-        if (form) this.start(null, form);
-      } else if (a === 'all') this.fillMax();
+      this.action(el.dataset.sim!, el);
+    });
+    root.addEventListener('keydown', (e) => {
+      const el = (e.target as Element).closest<HTMLElement>('tr[data-sim="report"], tr[data-sim="pick"]');
+      if (el && e.key === 'Enter') this.action(el.dataset.sim!, el);
     });
     root.addEventListener('submit', (e) => {
       const form = e.target as HTMLFormElement;
@@ -753,6 +848,8 @@ export class SimPage {
       else if (form.id === 'sim-setup-form') this.start(String(new FormData(form).get('start') || ''), form);
       else if (form.id === 'sim-search') void this.watch(new FormData(form).get('q') as string);
       else if (form.id === 'sim-order-form') this.order(form);
+      else if (form.classList.contains('sim-stop')) this.stop(form);
+      else if (form.dataset.form) this.bank(form);
     });
     root.addEventListener('input', (e) => {
       if ((e.target as HTMLElement).closest('#sim-order-form')) this.renderEstimate();
@@ -777,11 +874,13 @@ export class SimPage {
     window.addEventListener('pagehide', () => {
       if (this.state && this.view === 'play') this.persist();
       this.flush();
+      this.flushBoard();
     });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
         if (this.state && this.view === 'play') this.persist();
         this.flush();
+        this.flushBoard();
       }
       // 回到這個分頁時看看別台裝置有沒有新進度（玩到一半不打斷）
       else if (this.user && this.view !== 'play') void this.pull();
@@ -802,6 +901,91 @@ export class SimPage {
     });
   }
 
+  private action(a: string, el: HTMLElement): void {
+    if (a === 'play') {
+      this.running = !this.running;
+      if (!this.running) this.persist();
+      this.msg = '';
+      this.render();
+    } else if (a.startsWith('speed')) {
+      this.speed = Number(a.slice(5)) as 1 | 3 | 5;
+      this.render();
+    } else if (a === 'nextday') void this.nextDay();
+    else if (a === 'reset') this.reset();
+    else if (a === 'lobby') {
+      if (this.state && this.view === 'play') this.persist();
+      this.view = 'lobby';
+      this.render();
+    } else if (a === 'resume') {
+      this.syncNote = '';
+      this.view = 'play';
+      this.running = true;
+      void this.prepare();
+    } else if (a === 'new') {
+      this.syncNote = '';
+      this.view = 'setup';
+      this.render();
+    } else if (a === 'logout') this.logout();
+    else if (a === 'admin' || a === 'admin-refresh') {
+      this.view = 'admin';
+      this.adminPick = null;
+      if (a === 'admin-refresh' || !this.playerSaves.size) void this.loadPlayers();
+      else this.render();
+    } else if (a === 'pick') {
+      this.adminPick = el.dataset.sync ?? null;
+      this.render();
+      this.root.scrollIntoView({ block: 'start' });
+    } else if (a === 'report') {
+      this.reportRef = { sync: el.dataset.sync ?? null, i: Number(el.dataset.i) };
+      this.view = 'report';
+      this.render();
+      this.root.scrollIntoView({ block: 'start' });
+    } else if (a === 'report-back') {
+      if (this.reportRef?.sync) {
+        this.adminPick = this.reportRef.sync;
+        this.view = 'admin';
+      } else this.view = 'lobby';
+      this.render();
+    } else if (a.startsWith('board-')) {
+      this.boardTab = a.slice(6) as Window;
+      this.renderLobbyBoard();
+    } else if (a === 'buy' || a === 'sell') {
+      this.side = a;
+      this.render();
+    } else if (a.startsWith('kind-')) {
+      this.kind = a.slice(5) as Kind;
+      this.render();
+    } else if (a === 'lot' || a === 'share') {
+      this.unit = a;
+      this.render();
+    } else if (a === 'cancel') {
+      cancelOrder(this.state!, Number(el.dataset.id));
+      this.persist();
+      this.render();
+    } else if (a === 'stop-clear') {
+      const form = el.closest<HTMLFormElement>('form.sim-stop');
+      if (form) this.stop(form, true);
+    } else if (a === 'loan-payoff') {
+      const s = this.state;
+      const l = s?.loans.find((x) => x.id === Number(el.dataset.id));
+      if (s && l) {
+        this.bankMsg = repayLoan(s, l.id, l.balance) ?? '信貸已全部還清';
+        this.persist();
+        this.render();
+      }
+    } else if (a === 'watch') void this.watch(el.dataset.code!);
+    else if (a.startsWith('rank-')) {
+      this.rankKey = a.slice(5) as RankKey;
+      this.renderPlay();
+    } else if (a === 'hints') {
+      this.hints = !this.hints;
+      this.render();
+    } else if (a === 'random-start') {
+      const form = this.root.querySelector<HTMLFormElement>('#sim-setup-form');
+      if (form) this.start(null, form);
+    } else if (a === 'all') this.fillMax();
+  }
+
   /** 「最多／全部」：依類別算出可以下的最大數量。 */
   private fillMax(): void {
     const s = this.state;
@@ -815,12 +999,15 @@ export class SimPage {
       (this.kind === 'margin' && this.side === 'sell') ||
       (this.kind === 'short' && this.side === 'buy') ||
       (this.kind === 'day' && holding('day', this.side === 'buy' ? 'short' : 'long') > 0);
-    if (closing) sh = holding(this.kind, this.kind === 'short' || (this.kind === 'day' && this.side === 'buy') ? 'short' : 'long');
-    else if (px) {
+    if (closing) {
+      sh = holding(this.kind, this.kind === 'short' || (this.kind === 'day' && this.side === 'buy') ? 'short' : 'long');
+      if (this.kind === 'cash') sh -= pledgedShares(s, s.watch);
+    } else if (px) {
       const cash = s.cash - reservedCash(s, this.market);
       const per = this.kind === 'margin' ? px * (1 - MARGIN_LOAN) : this.kind === 'short' ? px * SHORT_DEPOSIT : px;
       sh = Math.floor(cash / (per * 1.002));
     }
+    sh = Math.max(0, sh);
     qty.value = String(this.unit === 'lot' ? Math.floor(sh / LOT) : sh);
     this.renderEstimate();
   }
@@ -844,11 +1031,49 @@ export class SimPage {
     }
     this.root.classList.toggle('is-setup', this.view !== 'play');
     if (this.view !== 'play' || !s) {
-      setHtml($('sim-setup'), this.view === 'gate' ? this.gateHtml() : this.view === 'lobby' ? this.lobbyHtml() : this.view === 'admin' ? this.adminHtml() : this.setupHtml());
+      setHtml($('sim-setup'), this.setupView());
       if (this.view === 'gate') this.root.querySelector<HTMLInputElement>('#sim-code')?.focus({ preventScroll: true });
       return;
     }
     this.renderPlay();
+  }
+
+  private setupView(): string {
+    switch (this.view) {
+      case 'gate':
+        return gateHtml(this.codeList !== undefined, this.gateMsg, !!this.sync);
+      case 'lobby':
+        return lobbyHtml({
+          user: this.user!,
+          state: this.state,
+          save: this.save,
+          note: this.syncNote,
+          players: this.players?.length ?? 0,
+          board: this.boardSection(),
+          syncBadge: this.syncBadge(),
+        });
+      case 'admin': {
+        const synced = !!this.sync;
+        const pick = this.adminPick ? this.players?.find((p) => p.sync === this.adminPick) : null;
+        if (pick) return playerDetailHtml(this, pick, this.playerSaves.get(pick.sync));
+        return adminHtml(this, { synced, players: this.players, saves: this.playerSaves, loading: this.adminLoading });
+      }
+      case 'report':
+        return this.reportView();
+      default:
+        return setupHtml(this.calendar);
+    }
+  }
+
+  private reportView(): string {
+    const ref = this.reportRef;
+    const back = `<button type="button" class="btn" data-sim="report-back">← ${ref?.sync ? '回到玩家紀錄' : '回大廳'}</button>`;
+    const sv = ref?.sync ? this.playerSaves.get(ref.sync) : this.save;
+    const rec = sv && sv !== 'error' ? sv.history[ref?.i ?? -1] : undefined;
+    if (!rec) return `<p class="muted">找不到這一局的紀錄。</p><p class="sim-lobby-foot">${back}</p>`;
+    const who = ref?.sync ? this.players?.find((p) => p.sync === ref.sync)?.label ?? '' : '';
+    const w = Math.max(300, (this.root.querySelector<HTMLElement>('#sim-setup')?.clientWidth ?? 720) - 48);
+    return reportHtml(rec, w, back, who);
   }
 
   /** 遊戲中的各個面板（時鐘每走一分鐘就重畫一次）。 */
@@ -859,100 +1084,13 @@ export class SimPage {
     this.renderHead($('sim-head'), s);
     this.renderChart($('sim-chart'), s);
     this.renderOrder($('sim-order'), s);
+    this.renderBank($('sim-bank'), s);
     this.renderRank($('sim-rank'), s);
-    setHtml($('sim-news'), this.newsHtml(s));
-    setHtml($('sim-hold'), this.holdHtml(s));
-    setHtml($('sim-equity'), this.equityHtml(s, Math.max(280, $('sim-equity').clientWidth - 36)));
-    setHtml($('sim-log'), this.logHtml(s));
-  }
-
-  private gateHtml(): string {
-    if (this.codeList === undefined) return `<p class="muted">載入中⋯⋯</p>`;
-    return `
-      <p class="eyebrow">Laplace Replay</p>
-      <h2 class="sim-title">拉普拉斯模擬盤</h2>
-      <p class="sim-lead">請輸入開通碼。每個開通碼有自己的模擬帳戶與紀錄，下次用同一個開通碼就能接著玩。</p>
-      <form class="sim-form sim-gate" id="sim-gate-form" autocomplete="off">
-        <label>開通碼<input type="text" name="code" id="sim-code" placeholder="LPLC-XXXX-XXXX-…（共 40 碼）" spellcheck="false" autocapitalize="characters" required /></label>
-        <button type="submit" class="btn btn-accent">開通</button>
-      </form>
-      <p class="sim-msg" role="alert">${esc(this.gateMsg)}</p>
-      <p class="muted sim-note">${this.sync ? '紀錄會同步到雲端：換手機或電腦，用同一個開通碼登入就能接著玩。' : '紀錄存在這台裝置的瀏覽器；換手機、電腦或清除瀏覽器資料後不會跟著過去。'}</p>`;
-  }
-
-  private lobbyHtml(): string {
-    const s = this.state;
-    const label = esc(this.user?.label ?? '');
-    let resume = `<div class="sim-card sim-card-empty"><p class="muted">目前沒有進行中的模擬。</p></div>`;
-    if (s) {
-      const eq = s.equity.at(-1)?.[1] ?? s.settings.capital;
-      const ret = eq / s.settings.capital - 1;
-      resume = `<div class="sim-card">
-          <p class="eyebrow">接續上次</p>
-          <p class="sim-card-date num">第 ${s.day} 天・星期${weekday(s.date)} ${clock(s.minute)}</p>
-          <p class="muted num">${garble(s.date)}</p>
-          <p class="num">總資產 ${money(eq)}　<span class="${cls(ret)}">${pct(ret * 100)}</span></p>
-          <button type="button" class="btn btn-accent btn-block" data-sim="resume">接續上次的模擬 ▸</button>
-        </div>`;
-    }
-    const hist = this.save.history
-      .map((r) => {
-        const ret = r.equity / r.capital - 1;
-        return `<tr><td class="num">${r.days} 個交易日</td><td class="num">${money(r.capital)}</td><td class="num ${cls(ret)}">${pct(ret * 100)}</td>
-          <td class="num ${r.bench == null ? 'muted' : cls(r.bench)}">${r.bench == null ? '—' : pct(r.bench * 100)}</td><td class="num">${r.trades}</td></tr>`;
-      })
-      .join('');
-    return `
-      <p class="eyebrow">Laplace Replay</p>
-      <h2 class="sim-title">歡迎，${label}${this.user?.admin ? '<span class="sim-admin-tag">管理員</span>' : ''}</h2>
-      ${this.syncNote ? `<p class="sim-msg" role="status">${esc(this.syncNote)}</p>` : ''}
-      <div class="sim-lobby">
-        ${resume}
-        <div class="sim-card">
-          <p class="eyebrow">開新的模擬</p>
-          <p class="muted">選一個起始日期（或隨機）與本金重新開始。${s ? '目前這局的成績會存進下面的歷史紀錄。' : ''}</p>
-          <button type="button" class="btn btn-block" data-sim="new">開新的模擬</button>
-        </div>
-      </div>
-      ${
-        this.user?.admin
-          ? `<div class="sim-card sim-card-admin"><p class="eyebrow">管理員</p><p class="muted">查看所有玩家的持股、交易紀錄與練習紀錄（唯讀）。</p>
-              <button type="button" class="btn btn-block" data-sim="admin">查看玩家紀錄（${this.players?.length ?? 0} 位）</button></div>`
-          : ''
-      }
-      <h3 class="sim-sub">歷史紀錄</h3>
-      ${hist ? `<div class="sim-table-wrap"><table class="sim-table"><thead><tr><th>期間</th><th>本金</th><th>報酬</th><th>同期大盤</th><th>成交筆數</th></tr></thead><tbody>${hist}</tbody></table></div>` : '<p class="muted">還沒有完成的模擬。</p>'}
-      <p class="sim-lobby-foot">${this.syncBadge()}<button type="button" class="btn btn-sm" data-sim="logout">換開通碼／登出</button></p>`;
-  }
-
-  private setupHtml(): string {
-    const cal = this.calendar;
-    if (cal === undefined) return `<p class="muted">正在下載交易日曆⋯⋯</p>`;
-    if (!cal?.length) return `<p>還沒有歷史日 K 資料，暫時不能開始模擬盤。</p>`;
-    const min = cal[Math.min(WARMUP, cal.length - 1)];
-    const max = cal[Math.max(0, cal.length - 21)];
-    const def = cal[Math.max(WARMUP, cal.length - 250)];
-    return `
-      <p class="eyebrow">Laplace Replay</p>
-      <h2 class="sim-title">拉普拉斯模擬盤</h2>
-      <p class="sim-lead">回到過去的某一天，用模擬帳戶在盤中行情裡交易。時間會自己往前走（現實 1 秒＝盤中 1 分鐘），
-        你只看得到「現在」為止的走勢；進入之後畫面上不會出現年月日，只有星期幾和時間 —— 不靠記憶，你能贏過大盤嗎？</p>
-      <form class="sim-form" id="sim-setup-form">
-        <label>本金（元）<input type="number" name="capital" min="10000" step="10000" value="1000000" /></label>
-        <label>手續費折扣<input type="number" name="discount" min="0.1" max="1" step="0.01" value="0.6" /></label>
-        <button type="button" class="btn btn-accent" data-sim="random-start" title="隨機抽一個過去的日期，不會告訴你是哪一天">🎲 隨機日期開始</button>
-        <label>或指定起始日期<input type="date" name="start" id="sim-start" min="${min}" max="${max}" value="${def}" /></label>
-        <button type="submit" class="btn">從指定日期開始</button>
-        <button type="button" class="btn" data-sim="lobby">返回</button>
-      </form>
-      <ul class="sim-rules">
-        <li>每天 09:00 開盤、13:30 收盤，可選 1×／3×／5× 速度，可以暫停（暫停時不能交易）或直接跳到隔天，不能倒帶。</li>
-        <li>盤中走勢是依當天真實的開、高、低、收產生的模擬走勢；開高低收是真的，中間的跳動是模擬的。</li>
-        <li>市價單立刻以當下價格成交；限價單在價格碰到時成交，收盤前沒成交就取消。</li>
-        <li>交易類別：現股、現股當沖（證交稅減半，收盤未沖銷自動沖銷）、融資（自備 40%，年息 6.5%）、融券（保證金 90%，借券費 0.08%）；
-          整戶維持率低於 130% 提醒、低於 120% 收盤強制了結。</li>
-        <li>手續費 0.1425% × 折扣（整股最低 20 元、零股 1 元），賣出證交稅 0.3%（ETF 0.1%）；一價鎖漲停買不到、鎖跌停賣不掉；除權息自動處理。</li>
-      </ul>`;
+    setHtml($('sim-dayrep'), dayReportHtml(s, this.freshDay === s.date));
+    setHtml($('sim-news'), newsHtml(s, this.news));
+    setHtml($('sim-hold'), holdHtml(s, this));
+    setHtml($('sim-equity'), equityHtml(s, this, Math.max(280, $('sim-equity').clientWidth - 36)));
+    setHtml($('sim-log'), logHtml(s, this));
   }
 
   /** 標頭：時鐘與數字每分鐘更新，按鈕只在狀態改變時重畫（避免按到一半按鈕被換掉）。 */
@@ -964,12 +1102,13 @@ export class SimPage {
     const q = (id: string) => el.querySelector<HTMLElement>(`#${id}`)!;
     const m = this.market;
     const eq = equityOf(s, m);
-    const ret = eq / s.settings.capital - 1;
+    const ret = eq / investedOf(s) - 1;
     const bench = this.benchOf(s);
     const closed = s.minute >= SESSION_MINUTES;
     const end = this.isEnd(s);
     const status = end ? '資料已到最新' : closed ? '收盤' : this.running ? '盤中' : '暫停中・無法交易';
     const ratio = maintenance(s, m);
+    const debt = debtOf(s);
     setHtml(
       q('sim-date'),
       `<p class="eyebrow">Laplace Replay · 第 ${s.day} 天</p>
@@ -980,9 +1119,10 @@ export class SimPage {
     setHtml(
       q('sim-kpis'),
       `<div><dt>總資產</dt><dd class="num">${money(eq)}</dd></div>
-        <div><dt>報酬率</dt><dd class="num ${cls(ret)}">${pct(ret * 100)}</dd></div>
-        <div><dt>同期大盤</dt><dd class="num ${bench == null ? 'muted' : cls(bench)}">${bench == null ? '—' : pct(bench * 100)}</dd></div>
+        <div><dt>報酬率</dt><dd class="num ${cls(ret)}">${pctOrDash(ret)}</dd></div>
+        <div><dt>同額買大盤</dt><dd class="num ${bench == null ? 'muted' : cls(bench)}">${pctOrDash(bench)}</dd></div>
         <div><dt>可用現金</dt><dd class="num">${money(s.cash - reservedCash(s, m))}</dd></div>
+        ${debt ? `<div><dt>負債</dt><dd class="num">${money(debt)}</dd></div>` : ''}
         ${ratio != null ? `<div><dt>整戶維持率</dt><dd class="num ${ratio < 1.3 ? 'down' : ''}">${Math.round(ratio * 100)}%</dd></div>` : ''}`,
     );
     setHtml(
@@ -995,14 +1135,10 @@ export class SimPage {
         <button type="button" class="btn" data-sim="lobby">大廳</button>
         <button type="button" class="btn" data-sim="reset">結束這局</button>`,
     );
-    setHtml(q('sim-endbox'), end ? `<p class="sim-end">已經玩到最新的資料。${this.verdict(s)}</p>` : '');
-  }
-
-  private verdict(s: SimState): string {
-    const sum = summarize(s, this.market);
-    const bench = this.benchOf(s);
-    const vs = bench == null ? '' : sum.ret > bench ? `，贏過大盤 ${num((sum.ret - bench) * 100, 2)} 個百分點` : `，落後大盤 ${num((bench - sum.ret) * 100, 2)} 個百分點`;
-    return `${sum.days} 個交易日報酬 ${pct(sum.ret * 100)}${vs}；最大回檔 ${num(sum.maxDrawdown * 100, 1)}%，了結 ${sum.wins + sum.losses} 次、賺 ${sum.wins} 次，手續費＋稅 ${money(sum.fees)} 元。`;
+    setHtml(
+      q('sim-endbox'),
+      end ? `<p class="sim-end">已經玩到最新的資料。${verdict(s, m, bench)} <button type="button" class="btn btn-sm btn-accent" data-sim="reset">結束並看報告</button></p>` : '',
+    );
   }
 
   /** 觀看中股票：到昨天為止的日 K，加上今天到現在為止的 K 棒。 */
@@ -1038,6 +1174,7 @@ export class SimPage {
         </div>
         <div class="sim-k" id="sim-k"></div>
         <div class="sim-tick" id="sim-tick"></div>
+        <p class="sim-note muted sim-tick-note">分時走勢是<b>模擬</b>的：每天的開、高、低、收是真實資料，中間每分鐘的跳動依這四個價格推算，不是當天真正的走勢。</p>
         <div class="sim-hints" id="sim-hints"></div>`;
     }
     // 股票清單（約 2,000 筆）等瀏覽器有空時才建立，不卡住畫面
@@ -1063,75 +1200,9 @@ export class SimPage {
     const k = el.querySelector<HTMLElement>('#sim-k')!;
     if (all === undefined) setHtml(k, `<p class="muted sim-empty">下載 ${esc(s.watch)} 的日 K⋯⋯</p>`);
     else if (visible.length < 2) setHtml(k, `<p class="muted sim-empty">${esc(s.watch)} 在這一天以前沒有日 K（可能還沒上市）。</p>`);
-    else setHtml(k, this.chartSvg(visible, Math.max(320, k.clientWidth || 640), Math.max(240, k.clientHeight || 300)));
-    setHtml(el.querySelector<HTMLElement>('#sim-tick')!, path && pc ? this.tickSvg(path, pc, s.minute, Math.max(320, k.clientWidth || 640)) : '');
+    else setHtml(k, candleSvg(visible, Math.max(320, k.clientWidth || 640), Math.max(240, k.clientHeight || 300)));
+    setHtml(el.querySelector<HTMLElement>('#sim-tick')!, path && pc ? tickSvg(path, pc, s.minute, Math.max(320, k.clientWidth || 640)) : '');
     setHtml(el.querySelector<HTMLElement>('#sim-hints')!, visible.length >= 30 ? this.hintsHtml(visible) : '');
-  }
-
-  private chartSvg(visible: Candle[], w: number, h: number): string {
-    const n = Math.min(BARS, visible.length);
-    const off = visible.length - n;
-    const c = visible.slice(off);
-    const closes = visible.map((x) => x.close);
-    const ma20 = sma(closes, 20).slice(off);
-    const ma60 = sma(closes, 60).slice(off);
-    const pad = { l: 6, r: 52, t: 8, b: 10 };
-    const volH = Math.round((h - pad.t - pad.b) * 0.2);
-    const pb = h - pad.b - volH - 8;
-    const x = scaleBand<number>().domain(c.map((_, i) => i)).range([pad.l, w - pad.r]).padding(0.25);
-    const vals = [...c.flatMap((b) => [b.high, b.low]), ...ma20, ...ma60].filter((v): v is number => v != null);
-    const y = scaleLinear().domain([Math.min(...vals), Math.max(...vals)]).nice(5).range([pb, pad.t]);
-    const yv = scaleLinear().domain([0, Math.max(1, ...c.map((b) => b.volume))]).range([h - pad.b, h - pad.b - volH]);
-    const bw = x.bandwidth();
-    const cx = (i: number) => x(i)! + bw / 2;
-    let body = '';
-    c.forEach((b, i) => {
-      const k = b.close >= b.open ? 'sim-up' : 'sim-down';
-      const top = y(Math.max(b.open, b.close));
-      const bh = Math.max(1, Math.abs(y(b.open) - y(b.close)));
-      const today = i === c.length - 1 ? ' sim-today' : '';
-      body += `<line class="${k}${today}" x1="${cx(i).toFixed(1)}" x2="${cx(i).toFixed(1)}" y1="${y(b.high).toFixed(1)}" y2="${y(b.low).toFixed(1)}"></line>`;
-      body += `<rect class="${k}${today}" x="${x(i)!.toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}"></rect>`;
-      body += `<rect class="${k} sim-vol" x="${x(i)!.toFixed(1)}" y="${yv(b.volume).toFixed(1)}" width="${bw.toFixed(1)}" height="${(h - pad.b - yv(b.volume)).toFixed(1)}"></rect>`;
-    });
-    const path = (arr: (number | null)[]) => {
-      let d = '';
-      arr.forEach((v, i) => {
-        if (v != null) d += `${d ? 'L' : 'M'}${cx(i).toFixed(1)} ${y(v).toFixed(1)}`;
-      });
-      return d;
-    };
-    const ticks = y.ticks(5).map((t) => `<g><line class="sim-grid" x1="${pad.l}" x2="${w - pad.r}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"></line><text class="sim-axis" x="${w - pad.r + 6}" y="${(y(t) + 4).toFixed(1)}">${price(t)}</text></g>`).join('');
-    const lastC = c[c.length - 1].close;
-    // 不畫月份刻度（會洩漏日期）
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img" aria-label="日 K 線（只到現在）">
-      ${ticks}${body}
-      <path class="sim-ma20" d="${path(ma20)}"></path><path class="sim-ma60" d="${path(ma60)}"></path>
-      <line class="sim-last" x1="${pad.l}" x2="${w - pad.r}" y1="${y(lastC).toFixed(1)}" y2="${y(lastC).toFixed(1)}"></line>
-      <text class="sim-legend" x="${pad.l + 4}" y="${pad.t + 10}"><tspan class="sim-ma20t">— 月線 MA20</tspan>  <tspan class="sim-ma60t">— 季線 MA60</tspan></text>
-    </svg>`;
-  }
-
-  /** 今天的分時走勢（09:00～現在），虛線是昨收。 */
-  private tickSvg(path: IntradayPath, pc: number, minute: number, w: number): string {
-    const h = 120;
-    const pad = { l: 6, r: 52, t: 8, b: 16 };
-    const t = Math.min(SESSION_MINUTES, Math.floor(minute));
-    const pts = [...path.price.slice(0, t + 1)];
-    // 以昨收為中線、上下對稱（和看盤軟體的分時圖一樣）
-    const span = Math.max(pc * 0.01, ...pts.map((p) => Math.abs(p - pc)));
-    const y = scaleLinear().domain([pc - span, pc + span]).range([h - pad.b, pad.t]);
-    const x = (i: number) => pad.l + (i / SESSION_MINUTES) * (w - pad.l - pad.r);
-    const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p).toFixed(1)}`).join('');
-    const now = pts[pts.length - 1];
-    const marks = (w < 560 ? [0, 90, 180, 270] : [0, 60, 120, 180, 240, 270]).map((m) => `<text class="sim-axis" x="${x(m).toFixed(1)}" y="${h - 3}" text-anchor="${m === 0 ? 'start' : m === 270 ? 'end' : 'middle'}">${clock(m)}</text>`).join('');
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img" aria-label="今日分時走勢">
-      <line class="sim-pc" x1="${pad.l}" x2="${w - pad.r}" y1="${y(pc).toFixed(1)}" y2="${y(pc).toFixed(1)}"></line>
-      <text class="sim-axis" x="${w - pad.r + 6}" y="${(y(pc) + 4).toFixed(1)}">昨收</text>
-      <path class="sim-tickline ${now >= pc ? 'sim-up-line' : 'sim-down-line'}" d="${d}"></path>
-      <circle class="${now >= pc ? 'sim-up' : 'sim-down'}" cx="${x(t).toFixed(1)}" cy="${y(now).toFixed(1)}" r="3"></circle>
-      ${marks}
-    </svg>`;
   }
 
   private hintsHtml(visible: Candle[]): string {
@@ -1142,6 +1213,22 @@ export class SimPage {
     const list = patterns.slice(0, 5).map((p) => `<li><span class="tilt tilt-${p.bias}">${BIAS[p.bias]}</span> <b>${esc(p.name)}</b> <span class="muted">${esc(p.status)}</span></li>`).join('');
     return `<div class="sim-hints-row">${toggle}<small class="muted">只用到昨天收盤為止的資料判斷</small></div>
       ${list ? `<ul class="sim-pat">${list}</ul>` : '<p class="muted">目前沒有明顯的型態。</p>'}`;
+  }
+
+  /** 結構改變才整個重畫，避免輸入到一半的值被蓋掉。 */
+  private keyed(el: HTMLElement, key: string, html: () => string, keep: string[]): boolean {
+    if (el.dataset.key === key) return false;
+    const vals = keep.map((sel) => {
+      const i = el.querySelector<HTMLInputElement>(sel);
+      return i ? i.value : null;
+    });
+    el.dataset.key = key;
+    el.innerHTML = html();
+    keep.forEach((sel, i) => {
+      const inp = el.querySelector<HTMLInputElement>(sel);
+      if (inp && vals[i]) inp.value = vals[i]!;
+    });
+    return true;
   }
 
   private renderOrder(el: HTMLElement, s: SimState): void {
@@ -1159,7 +1246,7 @@ export class SimPage {
       .join('');
     const kinds: Kind[] = ['cash', 'day', 'margin', 'short'];
     const sideLabel = (side: Side) => (this.kind === 'short' ? (side === 'sell' ? '融券賣出' : '融券回補') : this.kind === 'margin' ? (side === 'buy' ? '融資買進' : '融資賣出') : side === 'buy' ? '買進' : '賣出');
-    const html = `
+    const html = () => `
       <h2 class="panel-title">下單 <small>${closed ? '已收盤' : this.running ? '盤中即時成交' : '暫停中不能交易'}</small></h2>
       <form class="sim-order-form" id="sim-order-form">
         <div class="seg sim-kinds" role="group" aria-label="交易類別">${kinds
@@ -1186,26 +1273,31 @@ export class SimPage {
         <button type="submit" class="btn ${this.side === 'buy' ? 'btn-buy' : 'btn-sell'} btn-block" ${disabled ? 'disabled' : ''}>${actionName(this.kind, this.side)}</button>
       </form>
       <p class="sim-msg" role="status">${esc(this.msg)}</p>
+      ${stopHtml(s)}
       <h3 class="sim-sub">委託中（限價單，收盤未成交自動取消）</h3>
       ${pend ? `<ul class="sim-orders">${pend}</ul>` : '<p class="muted">沒有委託。</p>'}`;
-    // 輸入框的值不要被重畫蓋掉：只在結構改變時整個重畫
-    const key = `${s.watch}|${this.side}|${this.kind}|${this.unit}|${have}|${disabled}|${this.msg}|${s.orders.map((o) => o.id).join(',')}`;
-    if (el.dataset.key !== key) {
-      const form = el.querySelector<HTMLFormElement>('#sim-order-form');
-      const qty = el.querySelector<HTMLInputElement>('#sim-qty')?.value;
-      const type = form ? new FormData(form).get('type') : null;
-      const lim = el.querySelector<HTMLInputElement>('#sim-limit')?.value;
-      el.dataset.key = key;
-      el.innerHTML = html;
-      if (qty) el.querySelector<HTMLInputElement>('#sim-qty')!.value = qty;
-      if (type === 'limit') {
-        el.querySelector<HTMLInputElement>('input[name=type][value=limit]')!.checked = true;
-        const li = el.querySelector<HTMLInputElement>('#sim-limit')!;
-        li.disabled = false;
-        if (lim) li.value = lim;
-      }
+    const stops = s.stops.filter((x) => x.code === s.watch).map((x) => `${x.kind}${x.dir}${x.loss}/${x.profit}`).join(',');
+    const key = `${s.watch}|${this.side}|${this.kind}|${this.unit}|${have}|${disabled}|${this.msg}|${s.orders.map((o) => o.id).join(',')}|${stops}`;
+    const form = el.querySelector<HTMLFormElement>('#sim-order-form');
+    const type = form ? new FormData(form).get('type') : null;
+    if (this.keyed(el, key, html, ['#sim-qty', '#sim-limit']) && type === 'limit') {
+      el.querySelector<HTMLInputElement>('input[name=type][value=limit]')!.checked = true;
+      el.querySelector<HTMLInputElement>('#sim-limit')!.disabled = false;
     }
     this.renderEstimate();
+  }
+
+  private renderBank(el: HTMLElement, s: SimState): void {
+    // 金額（市值、利息）每分鐘都在變，但只在結構改變時重畫，輸入框才不會被清掉
+    const key = JSON.stringify([
+      s.loans.map((l) => [l.id, Math.round(l.balance), l.left]),
+      s.pledges.map((p) => [p.code, p.shares, Math.round(p.loan)]),
+      s.pos.filter((p) => p.kind === 'cash').map((p) => [p.code, p.shares]),
+      s.watch,
+      this.bankMsg,
+      s.day,
+    ]);
+    this.keyed(el, key, () => bankHtml(s, this, this.bankMsg), []);
   }
 
   private renderEstimate(): void {
@@ -1305,112 +1397,6 @@ export class SimPage {
     );
   }
 
-  // ------------------------------------------------------------ 新聞
-
-  private newsHtml(s: SimState): string {
-    const head = '<h2 class="panel-title">新聞 <small>日期已隱藏</small></h2>';
-    // 今天的新聞要等到發布時間（開盤前 09:00、收盤後 13:30）才看得到
-    const visible = this.news.filter(([d, time]) => d < s.date || (d === s.date && newsMinute(time) <= s.minute));
-    const items = visible.slice(-40).reverse();
-    if (!items.length) return `${head}<p class="muted">還沒有新聞。</p>`;
-    return `${head}<ol class="sim-newslist">${items
-      .map(
-        ([d, , level, title]) => `<li class="sim-news-${level}"><span class="sim-news-date num">${garble(d)}（${weekday(d)}）</span><span class="sim-news-title">${esc(title)}</span></li>`,
-      )
-      .join('')}</ol>`;
-  }
-
-  // ------------------------------------------------------------ 部位、資產、紀錄
-
-  private posPnl(p: Position, s: SimState): { now: number | undefined; pnl: number; base: number } {
-    const now = priceNow(s, this.market, p.code);
-    if (now == null) return { now, pnl: 0, base: p.cost };
-    const mv = now * p.shares;
-    const fee = feeOf(mv, s.settings.discount, p.shares);
-    if (p.dir === 'long') {
-      const tax = taxOf(mv, p.code, p.kind === 'day');
-      return { now, pnl: mv - fee - tax - p.cost - (p.interest ?? 0), base: p.kind === 'margin' ? p.cost * (1 - MARGIN_LOAN) : p.cost };
-    }
-    return { now, pnl: p.cost - mv - fee, base: p.kind === 'short' ? p.deposit ?? p.cost : p.cost };
-  }
-
-  private holdHtml(s: SimState): string {
-    const rows = s.pos
-      .map((p) => {
-        const { now, pnl, base } = this.posPnl(p, s);
-        const avg = p.dir === 'long' ? p.cost / p.shares : p.cost / p.shares;
-        return `<tr data-sim="watch" data-code="${esc(p.code)}" tabindex="0">
-          <td><b>${esc(p.code)}</b> ${esc(this.nameOf(p.code))}</td>
-          <td><span class="sim-kind sim-kind-${p.kind}">${KIND_NAME[p.kind]}${p.dir === 'short' && p.kind === 'day' ? '空' : ''}</span></td>
-          <td class="num">${num(p.shares)}</td>
-          <td class="num">${price(avg)}</td>
-          <td class="num">${now != null ? price(now) : '—'}</td>
-          <td class="num ${cls(pnl)}">${money(pnl)}<br /><small>${pct((pnl / Math.max(1, base)) * 100)}</small></td>
-        </tr>`;
-      })
-      .join('');
-    return `<h2 class="panel-title">部位 <small>損益已扣掉了結時的手續費與稅${s.pos.some((p) => p.kind === 'margin') ? '、融資利息' : ''}</small></h2>
-      ${rows ? `<div class="sim-table-wrap"><table class="sim-table"><thead><tr><th>股票</th><th>類別</th><th>股數</th><th>成本</th><th>現價</th><th>損益</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">還沒有部位。看看排行或搜尋一檔股票，盤中下單吧。</p>'}`;
-  }
-
-  private equityHtml(s: SimState, w: number): string {
-    const sum = summarize(s, this.market);
-    const head = `<h2 class="panel-title">資產曲線 <small>每天收盤，對照同期加權指數</small></h2>
-      <dl class="sim-stats">
-        <div><dt>最大回檔</dt><dd class="num">${num(sum.maxDrawdown * 100, 1)}%</dd></div>
-        <div><dt>已實現損益</dt><dd class="num ${cls(sum.realized)}">${money(sum.realized)}</dd></div>
-        <div><dt>勝 / 敗</dt><dd class="num">${sum.wins} / ${sum.losses}</dd></div>
-        <div><dt>手續費＋稅</dt><dd class="num">${money(sum.fees)}</dd></div>
-      </dl>`;
-    const pts = s.equity;
-    if (pts.length < 2) return `${head}<p class="muted">收盤兩天以上就會畫出資產曲線。</p>`;
-    const h = 180;
-    const pad = { l: 4, r: 46, t: 8, b: 16 };
-    const cal = this.calendar ?? [];
-    const i0 = cal.indexOf(s.settings.start);
-    const t0 = i0 > 0 ? this.taiex?.get(cal[i0 - 1]) : undefined;
-    const bench = t0 ? pts.map(([d]) => (this.taiex?.get(d) ?? NaN) / t0) : [];
-    const mine = pts.map(([, v]) => v / s.settings.capital);
-    const all = [...mine, ...bench.filter(Number.isFinite), 1];
-    const y = scaleLinear().domain([Math.min(...all), Math.max(...all)]).nice(4).range([h - pad.b, pad.t]);
-    const x = (i: number) => pad.l + (i / (pts.length - 1)) * (w - pad.l - pad.r);
-    const line = (arr: number[]) => {
-      let d = '';
-      let pen = false;
-      arr.forEach((v, i) => {
-        if (!Number.isFinite(v)) return void (pen = false);
-        d += `${pen ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`;
-        pen = true;
-      });
-      return d;
-    };
-    const ticks = y.ticks(4).map((t) => `<line class="sim-grid" x1="${pad.l}" x2="${w - pad.r}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"></line><text class="sim-axis" x="${w - pad.r + 4}" y="${(y(t) + 4).toFixed(1)}">${pct((t - 1) * 100, 0)}</text>`).join('');
-    return `${head}<svg class="sim-eq" viewBox="0 0 ${w} ${h}" width="100%" role="img" aria-label="資產曲線">
-      ${ticks}<line class="sim-base" x1="${pad.l}" x2="${w - pad.r}" y1="${y(1).toFixed(1)}" y2="${y(1).toFixed(1)}"></line>
-      ${bench.length ? `<path class="sim-bench" d="${line(bench)}"></path>` : ''}<path class="sim-mine" d="${line(mine)}"></path>
-      <text class="sim-axis" x="${pad.l}" y="${h - 3}">第 1 天</text><text class="sim-axis" x="${w - pad.r}" y="${h - 3}" text-anchor="end">第 ${pts.length} 天</text>
-    </svg>
-    <p class="sim-eq-legend"><span class="sim-mine-t">━ 我的帳戶</span>　<span class="sim-bench-t">━ 加權指數</span></p>`;
-  }
-
-  private logHtml(s: SimState): string {
-    const items = [
-      ...s.trades.map((t) => ({
-        k: t.day * 1000 + t.minute,
-        when: `第 ${t.day} 天 ${clock(t.minute)}`,
-        html: `<span class="${t.side === 'buy' ? 'up' : 'down'}">${actionName(t.kind, t.side)}</span> <b>${esc(t.code)}</b> ${esc(this.nameOf(t.code))}
-          <span class="num">${num(t.shares)} 股 @ ${price(t.price)}</span>
-          ${t.pnl != null ? `<span class="num ${cls(t.pnl)}">損益 ${money(t.pnl)}</span>` : ''}
-          <small class="muted num">費 ${money(t.fee)}${t.tax ? `／稅 ${money(t.tax)}` : ''}</small>`,
-      })),
-      ...s.notes.map((n) => ({ k: n.day * 1000 + n.minute + 0.5, when: `第 ${n.day} 天 ${clock(n.minute)}`, html: `${n.code ? `<b>${esc(n.code)}</b> ${esc(this.nameOf(n.code))} ` : ''}<span class="muted">${esc(n.text)}</span>` })),
-    ]
-      .sort((a, b) => b.k - a.k)
-      .slice(0, 80);
-    return `<h2 class="panel-title">交易紀錄</h2>
-      ${items.length ? `<ol class="sim-logs">${items.map((i) => `<li><time class="num muted">${i.when}</time> ${i.html}</li>`).join('')}</ol>` : '<p class="muted">還沒有交易。</p>'}`;
-  }
-
   // ------------------------------------------------------------ 管理員
 
   /** 讀取所有玩家的雲端存檔（唯讀）。 */
@@ -1427,90 +1413,5 @@ export class SimPage {
     );
     this.adminLoading = false;
     this.render();
-  }
-
-  private adminHtml(): string {
-    const back = `<button type="button" class="btn btn-sm" data-sim="lobby">← 回大廳</button>`;
-    const head = `<p class="eyebrow">Laplace Replay · 管理員</p><h2 class="sim-title">玩家紀錄</h2>`;
-    if (!this.sync) return `${head}<p>還沒有設定雲端同步，看不到其他玩家的紀錄。</p>${back}`;
-    if (!this.players?.length) return `${head}<p>沒有可以查看的玩家（請重新輸入管理員開通碼登入一次）。</p>${back}`;
-    const pick = this.adminPick ? this.players.find((p) => p.sync === this.adminPick) : null;
-    if (pick) return this.playerDetailHtml(pick);
-    const rows = this.players
-      .map((p) => {
-        const sv = this.playerSaves.get(p.sync);
-        if (sv === undefined) return `<tr><td><b>${esc(p.label)}</b></td><td colspan="6" class="muted">${this.adminLoading ? '讀取中⋯⋯' : '—'}</td></tr>`;
-        if (sv === 'error') return `<tr><td><b>${esc(p.label)}</b></td><td colspan="6" class="muted">讀取失敗</td></tr>`;
-        if (!sv || (!sv.current && !sv.history.length)) return `<tr><td><b>${esc(p.label)}</b></td><td colspan="6" class="muted">還沒有玩過</td></tr>`;
-        const c = sv.current;
-        const eq = c ? c.equity.at(-1)?.[1] ?? c.settings.capital : null;
-        const ret = c && eq != null ? eq / c.settings.capital - 1 : null;
-        const bench = c ? this.benchOf(c) : null;
-        const updated = sv.updatedAt ? new Date(sv.updatedAt).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
-        return `<tr data-sim="pick" data-sync="${esc(p.sync)}" tabindex="0">
-          <td><b>${esc(p.label)}</b></td>
-          <td class="num">${c ? `${esc(c.settings.start)} → ${esc(c.date)} ${clock(c.minute)}<br /><small class="muted">第 ${c.day} 天</small>` : '<span class="muted">沒有進行中</span>'}</td>
-          <td class="num">${eq != null ? money(eq) : '—'}</td>
-          <td class="num ${ret == null ? '' : cls(ret)}">${ret == null ? '—' : pct(ret * 100)}</td>
-          <td class="num ${bench == null ? 'muted' : cls(bench)}">${bench == null ? '—' : pct(bench * 100)}</td>
-          <td class="num">${c?.trades.length ?? 0} 筆／${sv.history.length} 局</td>
-          <td class="num muted">${esc(updated)}</td></tr>`;
-      })
-      .join('');
-    return `${head}
-      <p class="sim-lead">所有玩家的雲端存檔（唯讀，管理員看得到真實日期）。點一位玩家可以看他的部位、每一筆交易與過去每一局的成績。</p>
-      <div class="sim-table-wrap"><table class="sim-table sim-admin-table"><thead><tr><th>玩家</th><th>進行中的模擬</th><th>總資產</th><th>報酬</th><th>同期大盤</th><th>交易／完成</th><th>最後更新</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <p class="sim-lobby-foot">${back}<button type="button" class="btn btn-sm" data-sim="admin-refresh" ${this.adminLoading ? 'disabled' : ''}>重新讀取</button></p>`;
-  }
-
-  private playerDetailHtml(p: PlayerRef): string {
-    const sv = this.playerSaves.get(p.sync);
-    const back = `<button type="button" class="btn btn-sm" data-sim="admin">← 所有玩家</button>`;
-    if (!sv || sv === 'error') return `<h2 class="sim-title">${esc(p.label)}</h2><p class="muted">沒有資料。</p>${back}`;
-    const c = sv.current;
-    let current = '<p class="muted">目前沒有進行中的模擬。</p>';
-    if (c) {
-      const eq = c.equity.at(-1)?.[1] ?? c.settings.capital;
-      const ret = eq / c.settings.capital - 1;
-      const bench = this.benchOf(c);
-      const holds = c.pos
-        .map((h) => `<tr><td><b>${esc(h.code)}</b> ${esc(this.nameOf(h.code))}</td><td>${KIND_NAME[h.kind]}${h.dir === 'short' && h.kind === 'day' ? '空' : ''}</td><td class="num">${num(h.shares)}</td><td class="num">${price(h.cost / h.shares)}</td><td class="num">${money(h.cost)}</td></tr>`)
-        .join('');
-      const log = [
-        ...c.trades.map((t) => ({
-          k: t.day * 1000 + t.minute,
-          when: `${t.date} ${clock(t.minute)}`,
-          html: `<span class="${t.side === 'buy' ? 'up' : 'down'}">${actionName(t.kind, t.side)}</span> <b>${esc(t.code)}</b> ${esc(this.nameOf(t.code))}
-            <span class="num">${num(t.shares)} 股 @ ${price(t.price)}</span>${t.pnl != null ? ` <span class="num ${cls(t.pnl)}">損益 ${money(t.pnl)}</span>` : ''}`,
-        })),
-        ...c.notes.map((n) => ({ k: n.day * 1000 + n.minute + 0.5, when: `${n.date} ${clock(n.minute)}`, html: `${n.code ? `<b>${esc(n.code)}</b> ${esc(this.nameOf(n.code))} ` : ''}<span class="muted">${esc(n.text)}</span>` })),
-      ].sort((a, b) => b.k - a.k);
-      const pending = c.orders.map((o) => `<li>${actionName(o.kind, o.side)} <b>${esc(o.code)}</b> ${num(o.shares)} 股 限價 ${o.limit}</li>`).join('');
-      current = `
-        <dl class="sim-kpis">
-          <div><dt>期間</dt><dd class="num">${esc(c.settings.start)} → ${esc(c.date)}</dd></div>
-          <div><dt>總資產（上次收盤）</dt><dd class="num">${money(eq)}</dd></div>
-          <div><dt>報酬率</dt><dd class="num ${cls(ret)}">${pct(ret * 100)}</dd></div>
-          <div><dt>同期大盤</dt><dd class="num ${bench == null ? 'muted' : cls(bench)}">${bench == null ? '—' : pct(bench * 100)}</dd></div>
-          <div><dt>現金</dt><dd class="num">${money(c.cash)}</dd></div>
-        </dl>
-        <h3 class="sim-sub">部位</h3>
-        ${holds ? `<div class="sim-table-wrap"><table class="sim-table"><thead><tr><th>股票</th><th>類別</th><th>股數</th><th>成本均價</th><th>成本合計</th></tr></thead><tbody>${holds}</tbody></table></div>` : '<p class="muted">沒有部位。</p>'}
-        ${pending ? `<h3 class="sim-sub">委託中</h3><ul class="sim-orders">${pending}</ul>` : ''}
-        <h3 class="sim-sub">交易紀錄（${c.trades.length} 筆）</h3>
-        ${log.length ? `<ol class="sim-logs sim-admin-log">${log.map((i) => `<li><time class="num muted">${esc(i.when)}</time> ${i.html}</li>`).join('')}</ol>` : '<p class="muted">還沒有交易。</p>'}`;
-    }
-    const hist = sv.history
-      .map((r) => {
-        const ret = r.equity / r.capital - 1;
-        return `<tr><td class="num">${esc(r.start)} → ${esc(r.end)}</td><td class="num">${r.days}</td><td class="num">${money(r.capital)}</td><td class="num ${cls(ret)}">${pct(ret * 100)}</td>
-          <td class="num ${r.bench == null ? 'muted' : cls(r.bench)}">${r.bench == null ? '—' : pct(r.bench * 100)}</td><td class="num">${r.trades}</td></tr>`;
-      })
-      .join('');
-    return `<p class="eyebrow">Laplace Replay · 管理員</p><h2 class="sim-title">${esc(p.label)}</h2>
-      <h3 class="sim-sub">進行中的模擬</h3>${current}
-      <h3 class="sim-sub">練習紀錄（完成 ${sv.history.length} 局）</h3>
-      ${hist ? `<div class="sim-table-wrap"><table class="sim-table"><thead><tr><th>期間</th><th>交易日</th><th>本金</th><th>報酬</th><th>同期大盤</th><th>成交筆數</th></tr></thead><tbody>${hist}</tbody></table></div>` : '<p class="muted">還沒有完成的模擬。</p>'}
-      <p class="sim-lobby-foot">${back}</p>`;
   }
 }

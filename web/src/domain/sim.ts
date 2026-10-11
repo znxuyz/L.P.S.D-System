@@ -12,6 +12,15 @@
  * 其他：手續費 0.1425% × 折扣（整股最低 20 元、零股 1 元）、一般賣出證交稅 0.3%（ETF 0.1%）；
  * 一價鎖漲停買不到、一價鎖跌停賣不掉；當天沒有成交資料（暫停交易）不能交易；
  * 除權息在開盤前處理：現股與融資領現金股利／配股，融券要付現金股利、配股則要多還股票。
+ *
+ * 停損／停利單：針對一個部位設定觸發價，盤中價格碰到時以當下價格（市價）了結整個部位；長效有效，直到觸發、取消或部位沒了。
+ * 資金（每個月第一個交易日開盤前處理）：
+ * - 薪資投入：每月固定投入（預設 2 萬，設定裡可以改，0 = 不投入）。
+ * - 信用貸款：額度 100 萬、年利率 3.5%，本息平均攤還；可以隨時提前還款（之後月付金重算）。
+ *   現金不夠扣款時，沒繳到的部分加 1% 違約金滾入本金。
+ * - 股票質押：拿現股向銀行借錢，最多借市值的 60%，年利率 2.5%（每個交易日計息，每月扣息）；
+ *   質押中的股票不能賣。維持率（質押股票市值 ÷ 借款＋利息）收盤低於 130% 提醒，低於 120% 強制賣出質押股票還款。
+ * 報酬率＝總資產 ÷ 累計投入（本金＋薪資）－ 1；貸款是負債，不算投入。
  */
 import { SESSION_MINUTES, intradayPath, type IntradayPath } from './intraday';
 import type { Candle } from './technicals';
@@ -24,6 +33,15 @@ export const SHORT_DEPOSIT = 0.9;
 export const SHORT_FEE = 0.0008;
 export const MAINT_CALL = 1.3;
 export const MAINT_FORCE = 1.2;
+export const SALARY = 20_000;
+export const LOAN_LIMIT = 1_000_000;
+export const LOAN_RATE = 0.035;
+export const LOAN_TERMS = [12, 24, 36, 60, 84] as const;
+export const LOAN_PENALTY = 0.01;
+export const PLEDGE_LTV = 0.6;
+export const PLEDGE_RATE = 0.025;
+export const PLEDGE_CALL = 1.3;
+export const PLEDGE_FORCE = 1.2;
 
 export type Side = 'buy' | 'sell';
 export type Kind = 'cash' | 'day' | 'margin' | 'short';
@@ -85,6 +103,61 @@ export interface SimSettings {
   capital: number;
   /** 手續費折扣（0.6 = 6 折）。 */
   discount: number;
+  /** 每月薪資投入（沒有 = 0）。 */
+  monthly?: number;
+}
+
+/** 停損／停利：盤中價格碰到就以市價了結整個部位。 */
+export interface StopOrder {
+  id: number;
+  code: string;
+  kind: Kind;
+  dir: 'long' | 'short';
+  /** 停損價（多方：跌到以下；空方：漲到以上）。 */
+  loss?: number;
+  /** 停利價（多方：漲到以上；空方：跌到以下）。 */
+  profit?: number;
+  /** 觸發了但成交不了（例如鎖跌停）時，那一天已經提醒過。 */
+  warned?: string;
+}
+
+/** 信用貸款（本息平均攤還）。 */
+export interface Loan {
+  id: number;
+  principal: number;
+  balance: number;
+  rate: number;
+  months: number;
+  /** 還剩幾期。 */
+  left: number;
+  /** 每月應繳。 */
+  payment: number;
+}
+
+/** 股票質押借款（每檔一筆）。 */
+export interface Pledge {
+  code: string;
+  shares: number;
+  loan: number;
+  /** 累計未繳利息。 */
+  interest: number;
+}
+
+/** 每天收盤的結算。 */
+export interface DayRec {
+  d: string;
+  /** 總資產。 */
+  eq: number;
+  /** 今天的已實現損益。 */
+  real: number;
+  /** 收盤時持有部位的未實現損益合計。 */
+  float: number;
+  /** 今天的手續費＋稅。 */
+  fee: number;
+  /** 今天投入的資金（薪資）。 */
+  flow: number;
+  /** 今天成交筆數。 */
+  n: number;
 }
 
 export interface SimState {
@@ -106,6 +179,13 @@ export interface SimState {
   equity: Array<[string, number]>;
   nextId: number;
   watch: string;
+  stops: StopOrder[];
+  loans: Loan[];
+  pledges: Pledge[];
+  /** 每天收盤的結算（舊存檔沒有）。 */
+  days: DayRec[];
+  /** 本金以外投入的資金 [日期, 金額]。 */
+  flows: Array<[string, number]>;
 }
 
 /** 除權息：[日期, 代號, 除權息前收盤, 參考價, 權值+息值, 權/息] */
@@ -153,14 +233,29 @@ export function newSim(settings: SimSettings, watch = '2330'): SimState {
     equity: [],
     nextId: 1,
     watch,
+    stops: [],
+    loans: [],
+    pledges: [],
+    days: [],
+    flows: [],
   };
+}
+
+/** 舊存檔沒有的欄位補上預設值。 */
+function withDefaults(s: SimState): SimState {
+  s.stops ??= [];
+  s.loans ??= [];
+  s.pledges ??= [];
+  s.days ??= [];
+  s.flows ??= [];
+  return s;
 }
 
 /** 舊版（每天收盤後下單、隔天開盤成交）的存檔轉成新版：視為那一天已收盤。 */
 export function migrate(raw: unknown): SimState | null {
   const s = raw as Partial<SimState> & { v?: number; holdings?: Record<string, { shares: number; cost: number }>; trades?: Array<Partial<Trade>>; notes?: Array<Partial<SimNote>> };
   if (!s || typeof s !== 'object') return null;
-  if (s.v === 2) return s as SimState;
+  if (s.v === 2) return withDefaults(s as SimState);
   if (s.v !== 1 || !s.settings || !s.date) return null;
   const dates = (s.equity ?? []).map((e) => e[0]);
   const dayOf = (d?: string) => Math.max(1, dates.indexOf(d ?? '') + 1);
@@ -178,6 +273,11 @@ export function migrate(raw: unknown): SimState | null {
     equity: s.equity ?? [],
     nextId: s.nextId ?? 1,
     watch: s.watch ?? '2330',
+    stops: [],
+    loans: [],
+    pledges: [],
+    days: [],
+    flows: [],
   };
 }
 
@@ -203,10 +303,37 @@ function posValue(p: Position, price: number): number {
   }
 }
 
+/** 總資產＝現金＋部位價值－貸款與質押借款（含未繳利息）。 */
 export function equityOf(s: SimState, m: Market): number {
   let v = s.cash;
   for (const p of s.pos) v += posValue(p, priceNow(s, m, p.code) ?? p.cost / Math.max(1, p.shares));
-  return v;
+  return v - debtOf(s);
+}
+
+/** 信貸餘額＋質押借款與未繳利息。 */
+export function debtOf(s: SimState): number {
+  let d = 0;
+  for (const l of s.loans) d += l.balance;
+  for (const p of s.pledges) d += p.loan + p.interest;
+  return d;
+}
+
+/** 累計投入＝本金＋薪資等投入。 */
+export function investedOf(s: SimState): number {
+  return s.settings.capital + s.flows.reduce((a, [, v]) => a + v, 0);
+}
+
+/** 一個部位現在了結的話，扣掉費用、稅、利息後的損益（未實現損益）；base 是投入的本錢。 */
+export function unrealizedOf(p: Position, s: SimState, m: Market): { now: number | undefined; pnl: number; base: number } {
+  const now = priceNow(s, m, p.code);
+  if (now == null) return { now, pnl: 0, base: p.cost };
+  const mv = now * p.shares;
+  const fee = feeOf(mv, s.settings.discount, p.shares);
+  if (p.dir === 'long') {
+    const tax = taxOf(mv, p.code, p.kind === 'day');
+    return { now, pnl: mv - fee - tax - p.cost - (p.interest ?? 0), base: p.kind === 'margin' ? p.cost * (1 - MARGIN_LOAN) : p.cost };
+  }
+  return { now, pnl: p.cost - mv - fee, base: p.kind === 'short' ? p.deposit ?? p.cost : p.cost };
 }
 
 /** 整戶擔保維持率（只算融資、融券），沒有信用部位時 null。 */
@@ -283,7 +410,9 @@ export function checkOrder(s: SimState, m: Market, o: Omit<SimOrder, 'id'>): str
     const dir = o.kind === 'short' || (o.kind === 'day' && o.side === 'buy') ? 'short' : 'long';
     const have = findPos(s, o.code, o.kind, dir)?.shares ?? 0;
     const pend = pendingShares(s, o.code, o.kind, o.side);
-    if (o.shares > have - pend) return `${KIND_NAME[o.kind]}可${o.side === 'buy' ? '回補' : '賣出'}股數不足（部位 ${have} 股，委託中 ${pend} 股）`;
+    const pledged = o.kind === 'cash' ? pledgedShares(s, o.code) : 0;
+    if (o.shares > have - pend - pledged)
+      return `${KIND_NAME[o.kind]}可${o.side === 'buy' ? '回補' : '賣出'}股數不足（部位 ${have} 股，委託中 ${pend} 股${pledged ? `，質押中 ${pledged} 股` : ''}）`;
   }
   const px = o.limit ?? priceNow(s, m, o.code) ?? 0;
   const need = cashNeed(s, m, o, px);
@@ -399,7 +528,6 @@ export function tickTo(s: SimState, m: Market, target: number): void {
   const end = Math.min(SESSION_MINUTES, target);
   for (let t = Math.floor(s.minute) + 1; t <= end; t++) {
     s.minute = t;
-    if (!s.orders.length) continue;
     for (const o of [...s.orders]) {
       const p = m.path(o.code, s.date)?.price[t];
       if (p == null || o.limit == null) continue;
@@ -409,8 +537,203 @@ export function tickTo(s: SimState, m: Market, target: number): void {
         if (err) note(s, o.code, `限價單未成交：${err}`);
       }
     }
+    if (s.stops.length) checkStops(s, m, t);
   }
   s.minute = Math.max(s.minute, end);
+}
+
+/** 第 t 分鐘：碰到停損／停利價的部位以當下價格了結。 */
+function checkStops(s: SimState, m: Market, t: number): void {
+  for (const st of [...s.stops]) {
+    const p = findPos(s, st.code, st.kind, st.dir);
+    if (!p) {
+      s.stops = s.stops.filter((x) => x !== st);
+      continue;
+    }
+    const px = m.path(st.code, s.date)?.price[t];
+    if (px == null) continue;
+    const long = st.dir === 'long';
+    const hitLoss = st.loss != null && (long ? px <= st.loss : px >= st.loss);
+    const hitProfit = st.profit != null && (long ? px >= st.profit : px <= st.profit);
+    if (!hitLoss && !hitProfit) continue;
+    const shares = p.shares - (st.kind === 'cash' ? pledgedShares(s, st.code) : 0) - pendingShares(s, st.code, st.kind, long ? 'sell' : 'buy');
+    const o: Omit<SimOrder, 'id'> = { code: st.code, side: long ? 'sell' : 'buy', kind: st.kind, shares };
+    const err = shares > 0 ? checkOrder(s, m, o) : st.kind === 'cash' && pledgedShares(s, st.code) ? '股票質押中，要先還款解除質押' : '沒有可以了結的股數';
+    const what = hitLoss ? '停損' : '停利';
+    if (err) {
+      if (st.warned !== s.date) note(s, st.code, `${what}價 ${hitLoss ? st.loss : st.profit} 已觸發，但無法成交：${err}`);
+      st.warned = s.date;
+      continue;
+    }
+    s.stops = s.stops.filter((x) => x !== st);
+    execute(s, m, { ...o, id: s.nextId++ }, px);
+    note(s, st.code, `${what}觸發（設定 ${hitLoss ? st.loss : st.profit}），以 ${px} 了結 ${shares.toLocaleString()} 股`);
+  }
+}
+
+/** 設定（或更新）某個部位的停損／停利價；兩個都沒有就是取消。回傳錯誤訊息或 null。 */
+export function setStop(s: SimState, m: Market, code: string, kind: Kind, dir: 'long' | 'short', loss?: number, profit?: number): string | null {
+  const p = findPos(s, code, kind, dir);
+  if (!p) return '沒有這個部位';
+  const now = priceNow(s, m, code);
+  if (loss != null && !(loss > 0)) return '停損價要大於 0';
+  if (profit != null && !(profit > 0)) return '停利價要大於 0';
+  if (now != null) {
+    const long = dir === 'long';
+    if (loss != null && (long ? loss >= now : loss <= now)) return `停損價要${long ? '低於' : '高於'}現價 ${now}`;
+    if (profit != null && (long ? profit <= now : profit >= now)) return `停利價要${long ? '高於' : '低於'}現價 ${now}`;
+  }
+  s.stops = s.stops.filter((x) => !(x.code === code && x.kind === kind && x.dir === dir));
+  if (loss != null || profit != null) s.stops.push({ id: s.nextId++, code, kind, dir, loss, profit });
+  return null;
+}
+
+export function stopOf(s: SimState, p: Position): StopOrder | undefined {
+  return s.stops.find((x) => x.code === p.code && x.kind === p.kind && x.dir === p.dir);
+}
+
+// ------------------------------------------------------------ 資金：薪資、信貸、質押
+
+export function pledgedShares(s: SimState, code: string): number {
+  return s.pledges.find((p) => p.code === code)?.shares ?? 0;
+}
+
+/** 本息平均攤還的每月應繳。 */
+export function annuity(balance: number, rate: number, months: number): number {
+  const r = rate / 12;
+  if (months <= 0) return Math.round(balance);
+  if (r === 0) return Math.round(balance / months);
+  return Math.round((balance * r) / (1 - (1 + r) ** -months));
+}
+
+export function takeLoan(s: SimState, amount: number, months: number): string | null {
+  if (!(amount >= 10_000) || !Number.isFinite(amount)) return '貸款金額至少 1 萬元';
+  if (!(LOAN_TERMS as readonly number[]).includes(months)) return '請選擇期數';
+  const used = s.loans.reduce((a, l) => a + l.balance, 0);
+  if (used + amount > LOAN_LIMIT) return `超過信貸額度（還可以借 ${Math.max(0, LOAN_LIMIT - used).toLocaleString()} 元）`;
+  amount = Math.round(amount);
+  s.loans.push({ id: s.nextId++, principal: amount, balance: amount, rate: LOAN_RATE, months, left: months, payment: annuity(amount, LOAN_RATE, months) });
+  s.cash += amount;
+  note(s, '', `信用貸款 ${amount.toLocaleString()} 元入帳（${months} 期，年利率 ${(LOAN_RATE * 100).toFixed(1)}%）`);
+  return null;
+}
+
+/** 提前還款（部分或全部）；之後的月付金依剩下的期數重算。 */
+export function repayLoan(s: SimState, id: number, amount: number): string | null {
+  const l = s.loans.find((x) => x.id === id);
+  if (!l) return '沒有這筆貸款';
+  amount = Math.round(Math.min(amount, l.balance));
+  if (!(amount > 0)) return '還款金額要大於 0';
+  if (amount > s.cash) return '現金不足';
+  s.cash -= amount;
+  l.balance -= amount;
+  if (l.balance < 1) {
+    s.loans = s.loans.filter((x) => x !== l);
+    note(s, '', `信用貸款已全部還清`);
+  } else {
+    l.payment = annuity(l.balance, l.rate, l.left);
+    note(s, '', `提前還款 ${amount.toLocaleString()} 元，剩餘本金 ${Math.round(l.balance).toLocaleString()} 元，月付金改為 ${l.payment.toLocaleString()} 元`);
+  }
+  return null;
+}
+
+/** 質押維持率＝質押股票市值 ÷（借款＋未繳利息）；沒有質押借款時 null。 */
+export function pledgeRatio(s: SimState, m: Market): number | null {
+  let value = 0;
+  let debt = 0;
+  for (const p of s.pledges) {
+    value += p.shares * (priceNow(s, m, p.code) ?? 0);
+    debt += p.loan + p.interest;
+  }
+  return debt > 0 ? value / debt : null;
+}
+
+/** 質押（可以只增加質押股數、只多借錢，或兩者都做）。 */
+export function pledgeBorrow(s: SimState, m: Market, code: string, shares: number, amount: number): string | null {
+  if (!Number.isInteger(shares) || shares < 0) return '質押股數要是正整數';
+  if (!(amount >= 0)) return '借款金額不正確';
+  if (!shares && !amount) return '請輸入質押股數或借款金額';
+  const pos = findPos(s, code, 'cash', 'long');
+  const pl = s.pledges.find((p) => p.code === code);
+  const free = (pos?.shares ?? 0) - (pl?.shares ?? 0) - pendingShares(s, code, 'cash', 'sell');
+  if (shares > free) return `可質押的現股不足（可質押 ${Math.max(0, free).toLocaleString()} 股；融資、當沖部位不能質押）`;
+  const px = priceNow(s, m, code);
+  if (!px) return '這檔現在沒有價格';
+  const total = (pl?.shares ?? 0) + shares;
+  const room = Math.floor(total * px * PLEDGE_LTV - (pl?.loan ?? 0) - (pl?.interest ?? 0));
+  if (amount > room) return `最多還可以借 ${Math.max(0, room).toLocaleString()} 元（市值的 ${PLEDGE_LTV * 100}%）`;
+  amount = Math.round(amount);
+  if (pl) {
+    pl.shares = total;
+    pl.loan += amount;
+  } else s.pledges.push({ code, shares: total, loan: amount, interest: 0 });
+  s.cash += amount;
+  note(s, code, `質押 ${total.toLocaleString()} 股${amount ? `，借款 ${amount.toLocaleString()} 元入帳` : ''}`);
+  return null;
+}
+
+/** 質押還款：先繳利息再還本金。 */
+export function pledgeRepay(s: SimState, code: string, amount: number): string | null {
+  const pl = s.pledges.find((p) => p.code === code);
+  if (!pl) return '沒有這筆質押';
+  amount = Math.round(Math.min(amount, pl.loan + pl.interest));
+  if (!(amount > 0)) return '還款金額要大於 0';
+  if (amount > s.cash) return '現金不足';
+  s.cash -= amount;
+  const toInterest = Math.min(amount, pl.interest);
+  pl.interest -= toInterest;
+  pl.loan -= amount - toInterest;
+  if (pl.loan < 1) pl.loan = 0;
+  note(s, code, `質押還款 ${amount.toLocaleString()} 元，剩餘借款 ${Math.round(pl.loan + pl.interest).toLocaleString()} 元`);
+  return null;
+}
+
+/** 解除質押：解除後剩下的股票市值要還夠擔保借款（不超過 60%）。 */
+export function pledgeRelease(s: SimState, m: Market, code: string, shares: number): string | null {
+  const pl = s.pledges.find((p) => p.code === code);
+  if (!pl) return '沒有這筆質押';
+  if (!Number.isInteger(shares) || shares <= 0 || shares > pl.shares) return `解除股數要在 1～${pl.shares.toLocaleString()} 股之間`;
+  const after = pl.shares - shares;
+  const debt = pl.loan + pl.interest;
+  const px = priceNow(s, m, code) ?? 0;
+  if (debt > 0 && debt > after * px * PLEDGE_LTV) return `還有借款 ${Math.round(debt).toLocaleString()} 元，解除後擔保不足，請先還款`;
+  pl.shares = after;
+  if (!pl.shares && debt <= 0) s.pledges = s.pledges.filter((p) => p !== pl);
+  note(s, code, `解除質押 ${shares.toLocaleString()} 股`);
+  return null;
+}
+
+/** 每個月第一個交易日開盤前：薪資入帳、信貸扣款、質押扣息。 */
+function monthStart(s: SimState): void {
+  const salary = Math.round(s.settings.monthly ?? 0);
+  if (salary > 0) {
+    s.cash += salary;
+    s.flows.push([s.date, salary]);
+    note(s, '', `本月薪資投入 ${salary.toLocaleString()} 元`);
+  }
+  for (const l of [...s.loans]) {
+    const interest = Math.round((l.balance * l.rate) / 12);
+    const due = Math.min(l.payment, Math.round(l.balance) + interest);
+    const paid = Math.max(0, Math.min(s.cash, due));
+    s.cash -= paid;
+    const penalty = paid < due ? Math.round((due - paid) * LOAN_PENALTY) : 0;
+    l.balance = l.balance + interest - paid + penalty;
+    l.left = Math.max(0, l.left - 1);
+    if (penalty) note(s, '', `信貸月付 ${due.toLocaleString()} 元只繳了 ${Math.round(paid).toLocaleString()} 元，未繳部分加 ${LOAN_PENALTY * 100}% 違約金滾入本金`);
+    else note(s, '', `信貸扣款 ${due.toLocaleString()} 元（利息 ${interest.toLocaleString()} 元），剩餘本金 ${Math.max(0, Math.round(l.balance)).toLocaleString()} 元`);
+    if (l.balance < 1) {
+      s.loans = s.loans.filter((x) => x !== l);
+      note(s, '', '信用貸款已全部還清');
+    } else l.payment = annuity(l.balance, l.rate, Math.max(1, l.left));
+  }
+  for (const p of s.pledges) {
+    const due = Math.round(p.interest);
+    if (!due) continue;
+    const paid = Math.max(0, Math.min(s.cash, due));
+    s.cash -= paid;
+    p.interest -= paid;
+    note(s, p.code, paid < due ? `質押利息 ${due.toLocaleString()} 元現金不足，只繳了 ${Math.round(paid).toLocaleString()} 元` : `質押利息扣款 ${due.toLocaleString()} 元`);
+  }
 }
 
 /** 收盤：取消剩下的委託、沖銷當沖部位、融資計息、檢查維持率，記下今天的總資產。 */
@@ -436,17 +759,46 @@ export function closeDay(s: SimState, m: Market): void {
   } else if (ratio != null && ratio < MAINT_CALL) {
     note(s, '', `整戶維持率 ${Math.round(ratio * 100)}% 低於 ${MAINT_CALL * 100}%，請減碼或補足，再跌可能被斷頭`);
   }
+  // 質押：計息、檢查維持率
+  for (const p of s.pledges) if (p.loan > 0) p.interest += (p.loan * PLEDGE_RATE) / 250;
+  const pr = pledgeRatio(s, m);
+  if (pr != null && pr < PLEDGE_FORCE) {
+    for (const pl of [...s.pledges]) {
+      const pos = findPos(s, pl.code, 'cash', 'long');
+      const shares = Math.min(pl.shares, pos?.shares ?? 0);
+      const price = priceNow(s, m, pl.code) ?? 0;
+      if (shares > 0) execute(s, m, { id: s.nextId++, code: pl.code, side: 'sell', kind: 'cash', shares }, price, true);
+      s.cash -= pl.loan + pl.interest;
+    }
+    s.pledges = [];
+    note(s, '', `質押維持率 ${Math.round(pr * 100)}% 低於 ${PLEDGE_FORCE * 100}%，質押股票已被強制賣出還款`);
+  } else if (pr != null && pr < PLEDGE_CALL) {
+    note(s, '', `質押維持率 ${Math.round(pr * 100)}% 低於 ${PLEDGE_CALL * 100}%，請還款或增加質押，再跌會被強制賣出`);
+  }
   s.minute = SESSION_MINUTES;
-  s.equity.push([s.date, Math.round(equityOf(s, m))]);
+  const eq = Math.round(equityOf(s, m));
+  s.equity.push([s.date, eq]);
+  const today = s.trades.filter((t) => t.date === s.date);
+  s.days.push({
+    d: s.date,
+    eq,
+    real: Math.round(today.reduce((a, t) => a + (t.pnl ?? 0), 0)),
+    float: Math.round(s.pos.reduce((a, p) => a + unrealizedOf(p, s, m).pnl, 0)),
+    fee: today.reduce((a, t) => a + t.fee + t.tax, 0),
+    flow: s.flows.filter(([d]) => d === s.date).reduce((a, [, v]) => a + v, 0),
+    n: today.length,
+  });
 }
 
 /** 進入下一個交易日的 09:00：先處理除權息。 */
 export function beginDay(s: SimState, m: Market, date: string): void {
   if (date <= s.date) return;
+  const newMonth = date.slice(0, 7) !== s.date.slice(0, 7);
   s.date = date;
   s.minute = 0;
   s.day += 1;
   s.orders = [];
+  if (newMonth) monthStart(s);
   for (const [, code, prev, ref, value, kind] of m.exRights(date)) {
     if (!(value > 0)) continue;
     for (const p of s.pos.filter((x) => x.code === code)) {
@@ -479,16 +831,24 @@ export interface SimSummary {
 
 export function summarize(s: SimState, m: Market): SimSummary {
   const equity = equityOf(s, m);
-  let peak = s.settings.capital;
+  // 回檔用扣掉薪資投入的報酬指數算（不然每次入帳都像是漲了一段）
+  const flowOn = new Map<string, number>();
+  for (const [d, v] of s.flows) flowOn.set(d, (flowOn.get(d) ?? 0) + v);
+  let idx = 1;
+  let prev = s.settings.capital;
+  let peak = 1;
   let mdd = 0;
-  for (const [, v] of s.equity) {
-    peak = Math.max(peak, v);
-    mdd = Math.max(mdd, peak > 0 ? 1 - v / peak : 0);
+  for (const [d, v] of s.equity) {
+    const base = prev + (flowOn.get(d) ?? 0);
+    if (base > 0) idx *= v / base;
+    prev = v;
+    peak = Math.max(peak, idx);
+    mdd = Math.max(mdd, 1 - idx / peak);
   }
   const closes = s.trades.filter((t) => t.pnl != null);
   return {
     equity,
-    ret: equity / s.settings.capital - 1,
+    ret: equity / investedOf(s) - 1,
     maxDrawdown: mdd,
     realized: closes.reduce((a, t) => a + (t.pnl ?? 0), 0),
     wins: closes.filter((t) => (t.pnl ?? 0) > 0).length,
@@ -530,4 +890,31 @@ export function buildMarket(series: Map<string, Candle[]>, ex: ExRight[] = []): 
       return paths.get(key)!;
     },
   };
+}
+
+/**
+ * 對照組：同樣的錢（本金＋每次投入）都在投入當天以前一天收盤買進加權指數，到 date 收盤值多少。
+ * index(d) = 那天的加權指數收盤、prevDay(d) = 前一個交易日；資料不夠時 null。
+ */
+export function benchValue(
+  s: SimState,
+  index: (d: string) => number | undefined,
+  prevDay: (d: string) => string | undefined,
+  date: string,
+): number | null {
+  const buy = (d: string) => {
+    const p = prevDay(d);
+    return p ? index(p) : undefined;
+  };
+  const t0 = buy(s.settings.start);
+  const t1 = index(date);
+  if (!t0 || !t1) return null;
+  let units = s.settings.capital / t0;
+  for (const [d, v] of s.flows) {
+    if (d > date) continue;
+    const t = buy(d);
+    if (!t) return null;
+    units += v / t;
+  }
+  return units * t1;
 }

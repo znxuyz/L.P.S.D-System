@@ -1317,7 +1317,7 @@ button.log-text:hover { color: var(--ink); }
 .sim-logs { margin-top: 10px; }
 .sim-logs li { line-height: 1.6; }
 @media (max-width: 980px) {
-  .sim { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'head' 'chart' 'order' 'hold' 'rank' 'news' 'equity' 'log'; }
+  .sim { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'head' 'chart' 'order' 'dayrep' 'hold' 'bank' 'rank' 'news' 'equity' 'log'; }
   .sim-main, .sim-aside { display: contents; }
   .sim-steps { margin-left: 0; }
 }
@@ -1419,4 +1419,63 @@ button.log-text:hover { color: var(--ink); }
 @media (prefers-reduced-motion: reduce) {
   .gb-run b { animation: none; filter: blur(2.5px); }
   .gb-run b:first-child { opacity: 0.9; }
+}
+
+/* 收盤結算、資金、停損停利 */
+.sim-dayrep-panel { grid-area: dayrep; }
+.sim-bank { grid-area: bank; }
+.sim-dayrep { margin-top: 10px; border-radius: var(--radius-sm); }
+.sim-dayrep.is-fresh { animation: sim-fresh 2.4s var(--ease) 1; }
+@keyframes sim-fresh {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  100% { box-shadow: 0 0 0 10px transparent; background: transparent; }
+}
+.sim-dayrep-main dd { font-size: 18px; }
+.sim-tick-note { margin: 0; }
+.sim-stop { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 8px; margin: 6px 0; font-size: 12px; color: var(--muted); }
+.sim-stop label { display: grid; gap: 3px; }
+.sim-stop input[type='number'] { width: 92px; padding: 5px 8px; }
+.sim-stop-label { flex-basis: 100%; color: var(--ink-2); }
+.sim-stopcell { font-size: 12px; line-height: 1.4; }
+.sim-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+.sim-inline input[type='number'] { width: 130px; padding: 5px 8px; }
+.sim-inline select { padding: 5px 8px; border-radius: var(--radius-sm); border: 1px solid var(--glass-line); background: rgba(255, 255, 255, 0.04); color: var(--ink); font: inherit; font-size: 13px; max-width: 100%; }
+.sim-inline select option { background: var(--bg); }
+.sim-pledge-form select { flex-basis: 100%; }
+.sim-bank-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 13px; }
+.sim-bank-list li { padding: 8px 10px; border: 1px solid var(--glass-line); border-radius: var(--radius-sm); }
+.sim-bank .sim-sub small, .sim-order .sim-sub small { font-weight: 400; letter-spacing: 0; }
+
+/* 朋友排行榜 */
+.sim-board { margin: 0 0 8px; }
+.sim-board-tabs { grid-template-columns: repeat(4, 1fr); margin: 4px 0 0; }
+.sim-board-tabs button { padding: 6px 4px; font-size: 12.5px; }
+.sim-board-table tbody tr { cursor: default; }
+.sim-board-table tr.is-me { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.sim-table tr.is-link { cursor: pointer; }
+.sim-link { color: var(--accent); font-size: 12px; }
+
+/* 結束報告 */
+.sim-reveal { margin: 0 0 6px; font-size: 22px; font-weight: 600; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.sim-reveal small { font-size: 13px; font-weight: 400; }
+.sim-verdict { margin: 0 0 14px; font-size: 15px; font-weight: 600; }
+.sim-report-kpis { margin: 4px 0 8px; }
+.sim-report-sec { margin-top: 14px; }
+.sim-report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 18px; }
+.sim-bar-real.is-up { fill: var(--up); }
+.sim-bar-real.is-down { fill: var(--down); }
+.sim-bar-unreal { opacity: 0.4; }
+.sim-bar-unreal.is-up { fill: var(--up); }
+.sim-bar-unreal.is-down { fill: var(--down); }
+.sim-bar-real-t { color: var(--ink); }
+.sim-bar-unreal-t { color: var(--muted); }
+.sim-dd { fill: color-mix(in srgb, var(--down) 30%, transparent); stroke: var(--down); stroke-width: 1; vector-effect: non-scaling-stroke; }
+@media (max-width: 720px) {
+  .sim-reveal { font-size: 18px; }
+  .sim-inline input[type='number'] { flex: 1 1 110px; width: auto; }
+}
+.sim-board-table th:nth-child(2), .sim-board-table td:nth-child(2) { text-align: left; }
+/* 窄螢幕：主欄與側欄拆開，面板依序排成一欄（要放在 .sim-main／.sim-aside 的 display: flex 之後才蓋得過去） */
+@media (max-width: 980px) {
+  .sim > .sim-main, .sim > .sim-aside { display: contents; }
 }
