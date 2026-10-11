@@ -177,6 +177,23 @@ export function bankHtml(s: SimState, ctx: SimCtx, msg: string): string {
       <div><dt>質押維持率</dt><dd class="num ${ratio != null && ratio < PLEDGE_CALL ? 'down' : ''}">${ratio == null ? '—' : `${Math.round(ratio * 100)}%`}</dd></div>
     </dl>
     <p class="sim-msg" role="status">${esc(msg)}</p>
+    <h3 class="sim-sub">定期定額 <small class="muted">每月第一個交易日（薪資入帳後）以開盤價買進，可以買零股</small></h3>
+    ${
+      s.dca.length
+        ? `<ul class="sim-bank-list">${s.dca
+            .map(
+              (p) => `<li class="sim-dca-row"><span><b>${esc(p.code)}</b> ${esc(ctx.nameOf(p.code))}　<span class="num">每月 ${money(p.amount)} 元</span></span>
+                <button type="button" class="btn btn-sm" data-sim="dca-off" data-code="${esc(p.code)}">取消</button></li>`,
+            )
+            .join('')}</ul>`
+        : ''
+    }
+    <form class="sim-inline" data-form="dca">
+      <input type="hidden" name="code" value="${esc(s.watch)}" />
+      <span class="sim-dca-target">每月買進 <b>${esc(s.watch)}</b> ${esc(ctx.nameOf(s.watch))}</span>
+      <input type="number" name="amount" min="1000" step="1000" placeholder="每月金額" aria-label="定期定額每月金額" required />
+      <button type="submit" class="btn btn-sm">${s.dca.some((p) => p.code === s.watch) ? '更新' : '設定'}</button>
+    </form>
     <h3 class="sim-sub">信用貸款 <small class="muted">額度 ${money(LOAN_LIMIT)}，已用 ${money(used)}；年利率 ${(LOAN_RATE * 100).toFixed(1)}%，本息平均攤還，每月第一個交易日扣款</small></h3>
     ${loans ? `<ul class="sim-bank-list">${loans}</ul>` : ''}
     <form class="sim-inline" data-form="loan">

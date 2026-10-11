@@ -3,7 +3,8 @@
  * API 金鑰不會寫進程式碼或 repo，所以公開的 GitHub Pages 網站不會外洩金鑰。
  */
 
-export type DataSource = 'mock' | 'fugle' | 'twse';
+/** close = 最近一個交易日的真實收盤資料（不需要金鑰，預設）；mock = 示意行情。 */
+export type DataSource = 'close' | 'mock' | 'fugle' | 'twse';
 
 export interface SourceSettings {
   source: DataSource;
@@ -21,10 +22,10 @@ export function loadSettings(): SourceSettings {
     const fugleKey = localStorage.getItem(FUGLE_KEY) ?? '';
     const misProxy = localStorage.getItem(PROXY_KEY) ?? '';
     const stored = localStorage.getItem(SOURCE_KEY);
-    const source: DataSource = stored === 'fugle' && fugleKey ? 'fugle' : stored === 'twse' && misProxy ? 'twse' : 'mock';
+    const source: DataSource = stored === 'fugle' && fugleKey ? 'fugle' : stored === 'twse' && misProxy ? 'twse' : stored === 'mock' ? 'mock' : 'close';
     return { source, fugleKey, misProxy };
   } catch {
-    return { source: 'mock', fugleKey: '', misProxy: '' };
+    return { source: 'close', fugleKey: '', misProxy: '' };
   }
 }
 

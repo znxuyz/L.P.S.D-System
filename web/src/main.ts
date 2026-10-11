@@ -1,6 +1,8 @@
 import './styles.css';
 import { MockMarketProvider } from './data/mockProvider';
 import { LiveProvider, type LiveStatus } from './data/liveProvider';
+import { CloseReplayProvider, loadCloseFile } from './data/closeProvider';
+import { applyEtfInfo, loadEtfInfo } from './data/etfInfo';
 import type { MarketDataProvider, PlaybackControl } from './data/provider';
 import { loadSettings, saveSettings, type SourceSettings } from './data/settings';
 import { sessionOpenMs } from './data/twse';
@@ -16,7 +18,7 @@ import { renderScreen, renderStrategyList } from './ui/screener';
 import { runScreen, strategyById, type StrategyId } from './domain/screens';
 import type { Fundamentals } from './data/types';
 import { computeEtfs, type EtfView } from './domain/etf';
-import { renderEtfCategories, renderEtfDetail, renderEtfTable, type EtfFilter } from './ui/etfPage';
+import { renderEtfCategories, renderEtfDetail, renderEtfTable, setEtfPriceSource, type EtfFilter } from './ui/etfPage';
 import { GlassMapView } from './ui/glassMapView';
 import { Toasts } from './ui/toasts';
 import { applyActiveEtfData, loadActiveEtfData } from './data/activeEtfData';
@@ -251,8 +253,8 @@ class App {
         history: this.history,
         daily: this.daily.get(this.analyzed),
         dailyStartedAt: this.dailyLoading.get(this.analyzed),
-        dailySource: this.live && this.settings.fugleKey ? 'fugle' : !this.live && this.stockCodes.has(this.analyzed) ? 'mock' : 'official',
-        live: this.live,
+        dailySource: this.live && this.settings.fugleKey ? 'fugle' : !this.realData && this.stockCodes.has(this.analyzed) ? 'mock' : 'official',
+        live: this.realData,
         realSrc: this.real?.label,
         chips: this.chipSeries.get(this.analyzed),
         taiex: this.taiex,
@@ -268,7 +270,7 @@ class App {
         this.universe,
         this.strategy,
         this.focus?.kind === 'stock' ? this.focus.id : null,
-        this.live ? (this.real?.note ?? '股價為真實行情；EPS、股利、法人與大戶籌碼、特殊事件目前仍是模擬資料，篩選結果僅供介面測試。') : undefined,
+        this.realData ? (this.real?.note ?? '股價為真實行情；EPS、股利、法人與大戶籌碼、特殊事件目前仍是模擬資料，篩選結果僅供介面測試。') : undefined,
       );
       renderDetail($('#screen-detail'), ctx);
     }
@@ -422,7 +424,7 @@ class App {
 
   private ensureDaily(code: string, prevClose?: number): void {
     if (this.daily.has(code) || this.dailyLoading.has(code)) return;
-    const simulated = !this.live && this.stockCodes.has(code);
+    const simulated = !this.realData && this.stockCodes.has(code);
     this.dailyLoading.set(code, Date.now());
     const load = async (): Promise<DailySeries> => {
       if (simulated) return this.provider.dailyCandles?.(code, prevClose) ?? { candles: [], source: 'none' };
@@ -609,6 +611,11 @@ class App {
     return this.provider instanceof LiveProvider;
   }
 
+  /** 股價是真實資料（即時行情或最近一個交易日的收盤）。 */
+  private get realData(): boolean {
+    return this.live || this.provider instanceof CloseReplayProvider;
+  }
+
   /** 設定選單的「資料來源」：模擬 / 富果 / 證交所，輸入金鑰或轉接網址。儲存後重新載入頁面。 */
   private bindSource(): void {
     const form = $<HTMLFormElement>('#source-form');
@@ -624,15 +631,15 @@ class App {
       for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-source]')) {
         btn.setAttribute('aria-pressed', String(btn.dataset.source === pending));
       }
-      form.hidden = pending === 'mock' || (this.formCollapsed && !this.sourceError);
+      form.hidden = pending === 'mock' || pending === 'close' || (this.formCollapsed && !this.sourceError);
       $('.field-proxy').hidden = pending !== 'twse';
       $('#fugle-key-label').textContent = pending === 'twse' ? '富果 API 金鑰（選填，用來算 20 日常態）' : '富果 API 金鑰';
     };
     for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-source]')) {
       btn.addEventListener('click', () => {
         const source = btn.dataset.source as SourceSettings['source'];
-        if (source === 'mock') {
-          if (this.settings.source !== 'mock') apply({ ...this.settings, source });
+        if (source === 'mock' || source === 'close') {
+          if (this.settings.source !== source) apply({ ...this.settings, source });
           return;
         }
         pending = source;
@@ -654,9 +661,19 @@ class App {
       if (pending === 'twse' && !/^https:\/\/\S+$/.test(misProxy)) return proxyInput.focus();
       apply({ source: pending, fugleKey, misProxy });
     });
-    $('#source-clear').addEventListener('click', () => apply({ source: 'mock', fugleKey: '', misProxy: '' }));
+    $('#source-clear').addEventListener('click', () => apply({ source: 'close', fugleKey: '', misProxy: '' }));
     chip.addEventListener('click', () => ($<HTMLDetailsElement>('details.menu').open = true));
     $('#playback').hidden = this.live;
+    if (this.provider instanceof CloseReplayProvider) {
+      const d = this.provider.date.slice(5).replace('-', '/');
+      chip.textContent = `收盤 ${d}`;
+      chip.title = `${this.provider.date} 的真實收盤資料（開高低收、成交量、成交額）。按「重新開盤」可以回放這一天，盤中走勢是依開高低收推算的模擬走勢。要看盤中即時行情請在選單設定富果或證交所。`;
+      chip.className = 'chip-source is-closed';
+    } else if (!this.live) {
+      chip.textContent = '模擬行情';
+      chip.title = '目前使用模擬行情，數字不代表實際市場';
+      chip.className = 'chip-source is-mock';
+    }
 
     if (this.provider instanceof LiveProvider) {
       const status = $('#source-status');
@@ -693,16 +710,25 @@ class App {
 async function main(): Promise<void> {
   const settings = loadSettings();
   // 先換上每日抓取的主動式 ETF 持股，股票池與行情都會用到
-  const etfData = await loadActiveEtfData();
+  // ETF 的真實淨值、規模、受益人數、配息、填息
+  const [etfData, etfInfo, closeFile] = await Promise.all([loadActiveEtfData(), loadEtfInfo(), settings.source === 'close' ? loadCloseFile() : Promise.resolve(null)]);
   if (etfData) applyActiveEtfData(MOCK_ETFS, etfData);
+  if (etfInfo) applyEtfInfo(MOCK_ETFS, etfInfo);
+  // 收盤資料讀不到（例如本機開發）時退回模擬行情
   const provider =
-    settings.source === 'mock'
-      ? new MockMarketProvider({ speed: 60 })
-      : new LiveProvider({ fugleKey: settings.fugleKey, misProxy: settings.source === 'twse' ? settings.misProxy : undefined });
+    settings.source === 'close' && closeFile
+      ? new CloseReplayProvider(closeFile)
+      : settings.source === 'mock' || settings.source === 'close'
+        ? new MockMarketProvider({ speed: 60 })
+        : new LiveProvider({ fugleKey: settings.fugleKey, misProxy: settings.source === 'twse' ? settings.misProxy : undefined });
+  if (provider instanceof CloseReplayProvider) {
+    for (const e of MOCK_ETFS) if (e.info?.nav && e.info.navDate === provider.date) provider.navAtClose.set(e.code, e.info.nav);
+  }
+  setEtfPriceSource(provider instanceof CloseReplayProvider ? 'close' : provider instanceof LiveProvider ? 'live' : 'mock', provider instanceof CloseReplayProvider ? provider.date : '');
   const universe = await provider.loadUniverse();
-  // 真實行情：股票池的本益比、殖利率、法人、大戶換成官方資料
+  // 真實行情（即時或收盤）：股票池的本益比、殖利率、法人、大戶換成官方資料
   let real: RealState | null = null;
-  if (provider instanceof LiveProvider) {
+  if (provider instanceof LiveProvider || provider instanceof CloseReplayProvider) {
     const [directory, chips, fin, pe] = await Promise.all([loadStockDirectory(), loadChips(), loadFinancials(), loadPeBands()]);
     const index = indexDirectory(directory);
     const cov = coverageOf({ directory, chips, fin, pe });
@@ -716,7 +742,7 @@ async function main(): Promise<void> {
       note: realNote(cov, chips, fin, pe),
       label: allReal ? '官方資料' : parts.length ? `${parts.join('、')}為官方資料，其餘模擬` : '模擬資料',
     };
-    provider.overlay = (code, f) => overlayReal(code, f, index, chips, fin, pe);
+    if (provider instanceof LiveProvider) provider.overlay = (code, f) => overlayReal(code, f, index, chips, fin, pe);
     for (const s of universe.stocks) if (s.fundamentals) overlayReal(s.code, s.fundamentals, index, chips, fin, pe);
   }
   new App(universe, provider, settings, real);

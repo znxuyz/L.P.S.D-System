@@ -41,8 +41,10 @@ import {
   priceNow,
   repayLoan,
   reservedCash,
+  setDca,
   setStop,
   takeLoan,
+  toggleFav,
   taxOf,
   tickTo,
   type ExRight,
@@ -92,8 +94,8 @@ const CLOSE_PAUSE_MS = 2500;
 const BOARD_PUSH_MS = 20_000;
 const BOARD_STALE_MS = 60_000;
 
-type RankKey = 'up' | 'down' | 'vol' | 'high' | 'low';
-const RANK_NAME: Record<RankKey, string> = { up: '漲幅', down: '跌幅', vol: '成交量', high: '高價', low: '低價' };
+type RankKey = 'up' | 'down' | 'vol' | 'high' | 'low' | 'fav';
+const RANK_NAME: Record<RankKey, string> = { up: '漲幅', down: '跌幅', vol: '成交量', high: '高價', low: '低價', fav: '自選' };
 
 interface RankRow {
   code: string;
@@ -278,7 +280,7 @@ export class SimPage implements SimCtx {
   private neededCodes(): string[] {
     const s = this.state;
     if (!s) return [];
-    return [...new Set([s.watch, ...s.pos.map((p) => p.code), ...s.orders.map((o) => o.code), ...s.pledges.map((p) => p.code)])];
+    return [...new Set([s.watch, ...s.pos.map((p) => p.code), ...s.orders.map((o) => o.code), ...s.pledges.map((p) => p.code), ...s.dca.map((p) => p.code)])];
   }
 
   private async prepare(): Promise<void> {
@@ -774,6 +776,13 @@ export class SimPage implements SimCtx {
         err = pledgeRelease(s, this.market, form.dataset.code!, n('shares'));
         ok = '已解除質押';
         break;
+      case 'dca': {
+        const code = String(fd.get('code'));
+        err = setDca(s, code, n('amount'));
+        ok = `已設定 ${code} 每月定期定額 ${n('amount').toLocaleString()} 元`;
+        if (!err) void this.fetchCandles(code);
+        break;
+      }
     }
     this.bankMsg = err ?? ok;
     if (!err) this.persist();
@@ -973,6 +982,22 @@ export class SimPage implements SimCtx {
         this.persist();
         this.render();
       }
+    } else if (a === 'dca-off') {
+      const s = this.state;
+      if (s) {
+        setDca(s, el.dataset.code!, 0);
+        this.bankMsg = `已取消 ${el.dataset.code} 的定期定額`;
+        this.persist();
+        this.render();
+      }
+    } else if (a === 'fav') {
+      const s = this.state;
+      if (s) {
+        const on = toggleFav(s, s.watch);
+        this.msg = on ? `已把 ${s.watch} 加入自選股（今日排行的「自選」分頁）` : `已把 ${s.watch} 移出自選股`;
+        this.persist();
+        this.render();
+      }
     } else if (a === 'watch') void this.watch(el.dataset.code!);
     else if (a.startsWith('rank-')) {
       this.rankKey = a.slice(5) as RankKey;
@@ -1166,6 +1191,7 @@ export class SimPage implements SimCtx {
       el.innerHTML = `
         <div class="sim-chart-head">
           <div class="sim-stock" id="sim-stock"></div>
+          <button type="button" class="sim-fav" id="sim-fav" data-sim="fav" aria-pressed="false" title="加入自選股">☆ 自選</button>
           <form class="sim-search" id="sim-search" role="search">
             <input name="q" id="sim-q" list="sim-dir" placeholder="代號或名稱，例如 2330" autocomplete="off" aria-label="查詢股票" />
             <button type="submit" class="btn">看這檔</button>
@@ -1184,6 +1210,13 @@ export class SimPage implements SimCtx {
       const fill = () => (dl.innerHTML = this.dir.map((d) => `<option value="${esc(`${d.code} ${d.name}`)}"></option>`).join(''));
       if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(fill, { timeout: 3000 });
       else setTimeout(fill, 500);
+    }
+    const fav = el.querySelector<HTMLButtonElement>('#sim-fav')!;
+    const isFav = s.fav.includes(s.watch);
+    if (fav.getAttribute('aria-pressed') !== String(isFav)) {
+      fav.setAttribute('aria-pressed', String(isFav));
+      fav.textContent = isFav ? '★ 自選' : '☆ 自選';
+      fav.title = isFav ? '移出自選股' : '加入自選股';
     }
     const visible = this.visibleBars(s) ?? [];
     const path = this.market.path(s.watch, s.date);
@@ -1372,8 +1405,11 @@ export class SimPage implements SimCtx {
       return { code: r.code, p, chg: r.pc ? p / r.pc - 1 : 0, vol: r.path.cumVolume[t] };
     });
     const key = this.rankKey;
+    if (key === 'fav' && !s.fav.length) return setHtml(body, '<p class="muted">還沒有自選股。看一檔股票時按圖表上方的「☆ 自選」加入。</p>');
     const sorted =
-      key === 'up'
+      key === 'fav'
+        ? s.fav.map((c) => list.find((r) => r.code === c)).filter((r): r is (typeof list)[number] => !!r)
+        : key === 'up'
         ? list.sort((a, b) => b.chg - a.chg)
         : key === 'down'
           ? list.sort((a, b) => a.chg - b.chg)
@@ -1383,7 +1419,7 @@ export class SimPage implements SimCtx {
               ? list.sort((a, b) => b.p - a.p)
               : list.sort((a, b) => a.p - b.p);
     const rows = sorted
-      .slice(0, 20)
+      .slice(0, key === 'fav' ? 100 : 20)
       .map(
         (r, i) => `<tr data-sim="watch" data-code="${esc(r.code)}" class="${r.code === s.watch ? 'is-watch' : ''}">
           <td class="num muted">${i + 1}</td><td><b>${esc(r.code)}</b> ${esc(this.nameOf(r.code))}</td>

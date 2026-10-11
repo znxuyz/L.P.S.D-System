@@ -86,8 +86,8 @@ node scripts/sim-code.mjs --enroll 玩家清單.txt
 
 | Workflow | 什麼時候跑 | 做什麼 |
 |---|---|---|
-| `update-data.yml` | 週一到五台北時間 18:37、22:07；另外每小時第 23 分回補舊資料 | 抓證交所、櫃買、公開資訊觀測站、集保、投信的資料，推到 `data` 分支；跑完自動觸發網站部署。三組來源平行跑，每次最多 50 分鐘，下次從斷點繼續。 |
-| `deploy-pages.yml` | push 到 `main`、資料更新完 | 拿 `data` 分支的資料，產生模擬盤每日行情（`sim-daily.ts`）與新聞（`sim-news.ts`），打包網站部署到 GitHub Pages。 |
+| `update-data.yml` | 週一到五台北時間 18:37、22:07；另外每小時第 23 分回補舊資料 | 抓證交所、櫃買、公開資訊觀測站、集保、投信的資料（含 ETF 淨值、規模、受益人數、配息：`etf-info.ts`），推到 `data` 分支；跑完自動觸發網站部署。三組來源平行跑，每次最多 50 分鐘，下次從斷點繼續。 |
+| `deploy-pages.yml` | push 到 `main`、資料更新完 | 拿 `data` 分支的資料，產生模擬盤每日行情（`sim-daily.ts`）、新聞（`sim-news.ts`）、首頁的收盤資料（`close-snapshot.ts`），打包網站部署到 GitHub Pages。 |
 | `deploy-firestore-rules.yml` | `firestore.rules` 有改動並合併到 `main` | 部署 Firestore 安全規則。 |
 
 想立刻重跑：GitHub → Actions → 選 workflow → Run workflow。
@@ -110,6 +110,8 @@ node scripts/sim-code.mjs --enroll 玩家清單.txt
 | 規則部署出現認證錯誤 | `FIREBASE_SERVICE_ACCOUNT` 沒設定或內容不完整（要貼整個 JSON）。 |
 | 排行榜一直「讀取中」或「讀取失敗」 | 網路問題，或那位玩家的 `board` 不在 `boards()` 清單裡。 |
 | 資料沒有更新 | 看 Actions 的 Update market data。官方網站偶爾會改格式或暫時擋連線；失敗的部分下一次排程會從斷點繼續。 |
+| 首頁一直顯示「模擬行情」 | 預設是「收盤」模式，讀不到 `data/close.json` 才會退回模擬。看 Deploy to GitHub Pages 的「產生模擬盤資料」步驟有沒有印出 `close.json：日期，N 檔`。 |
+| ETF 頁某些欄位一直標「模擬」 | 內扣費用率、被動式 ETF 成分股本來就沒有公開資料。其他欄位標模擬的話，看 Update market data 的 twse 紀錄裡 `ETF 淨值`、`e添富` 那幾行。上櫃 ETF（例如債券 ETF）沒有 e添富頁面，配息改用除權息資料。 |
 | 開通碼弄丟了 | 開通碼沒有存在任何地方，救不回來。發一組新的給他；舊的可以停用（雲端上的舊存檔無法搬到新帳號）。 |
 
 更細的網站功能與即時行情設定（富果、證交所轉接），見 [`web/README.md`](../web/README.md)。

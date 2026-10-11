@@ -56,7 +56,7 @@
             <span class="brand-main">資金熱力圖</span>
             <span class="brand-sim">LAPLACE 模擬盤</span>
           </div>
-          <button type="button" class="chip-source is-mock" id="source-chip" title="目前使用模擬行情，數字不代表實際市場">模擬行情</button>
+          <button type="button" class="chip-source is-closed" id="source-chip" title="資料來源">載入中</button>
         </div>
         <div class="pages" role="tablist" aria-label="頁面">
           <button type="button" role="tab" id="tab-map" data-page="map" aria-selected="true" aria-controls="page-map">熱力圖</button>
@@ -77,7 +77,8 @@
           <div class="menu-body glass">
             <p class="menu-label">資料來源</p>
             <div class="seg" role="group" aria-label="資料來源">
-              <button type="button" data-source="mock" aria-pressed="true">模擬</button>
+              <button type="button" data-source="close" aria-pressed="true" title="最近一個交易日的真實收盤資料，不需要金鑰">收盤</button>
+              <button type="button" data-source="mock" aria-pressed="false">模擬</button>
               <button type="button" data-source="fugle" aria-pressed="false">富果</button>
               <button type="button" data-source="twse" aria-pressed="false">證交所</button>
             </div>
