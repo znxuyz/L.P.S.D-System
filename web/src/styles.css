@@ -1479,3 +1479,23 @@ button.log-text:hover { color: var(--ink); }
 @media (max-width: 980px) {
   .sim > .sim-main, .sim > .sim-aside { display: contents; }
 }
+
+/* iPhone 瀏海／動態島：從主畫面打開時狀態列是透明的（black-translucent），內容要避開時間、電量那一列與底部橫條 */
+.app {
+  padding-top: calc(14px + env(safe-area-inset-top));
+  padding-right: max(14px, env(safe-area-inset-right));
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  padding-left: max(14px, env(safe-area-inset-left));
+}
+@media (max-width: 720px) {
+  .app {
+    padding-top: calc(12px + env(safe-area-inset-top));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    padding-left: max(16px, env(safe-area-inset-left));
+  }
+  .menu-body {
+    top: calc(64px + env(safe-area-inset-top));
+    max-height: calc(100dvh - 80px - env(safe-area-inset-top));
+  }
+}
