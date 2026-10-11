@@ -26,7 +26,9 @@ import { actionName, cls, garble, investedAt, money, pctOrDash, weekday, type Si
 export function newsHtml(s: SimState, news: NewsItem[]): string {
   const head = '<h2 class="panel-title">新聞 <small>日期已隱藏</small></h2>';
   // 今天的新聞要等到發布時間（開盤前 09:00、收盤後 13:30）才看得到
-  const visible = news.filter(([d, time]) => d < s.date || (d === s.date && newsMinute(time) <= s.minute));
+  // 盤前只看得到今天 09:00 以前發布的新聞
+  const now = s.pre ? -1 : s.minute;
+  const visible = news.filter(([d, time]) => d < s.date || (d === s.date && newsMinute(time) <= now));
   const items = visible.slice(-40).reverse();
   if (!items.length) return `${head}<p class="muted">還沒有新聞。</p>`;
   return `${head}<ol class="sim-newslist">${items

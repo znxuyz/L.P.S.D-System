@@ -1504,3 +1504,5 @@ button.log-text:hover { color: var(--ink); }
 .sim-dca-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .sim-dca-target { flex-basis: 100%; font-size: 13px; color: var(--ink-2); }
 .sim-rank-tabs button { white-space: nowrap; padding-left: 2px; padding-right: 2px; }
+.sim-status-pre { color: #9fd8ff; border-color: color-mix(in srgb, #9fd8ff 45%, transparent); }
+.sim-pre-note { margin: 0; padding: 14px 16px; border: 1px dashed var(--glass-line); border-radius: var(--radius-sm); font-size: 13px; line-height: 1.7; }

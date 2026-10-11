@@ -12,11 +12,13 @@ import {
   investedOf,
   migrate,
   newSim,
+  openDay,
   placeOrder,
   pledgeBorrow,
   pledgeRatio,
   pledgeRelease,
   pledgeRepay,
+  priceNow,
   repayLoan,
   setDca,
   setStop,
@@ -187,5 +189,47 @@ describe('定期定額、開盤停損、自選股', () => {
     expect(s.fav).toEqual(['2330']);
     expect(toggleFav(s, '2330')).toBe(false);
     expect(s.fav).toEqual([]);
+  });
+});
+
+describe('盤前委託與開盤撮合', () => {
+  const rows = [bar('2024-01-02', 100, 100, 100, 100), bar('2024-01-03', 105, 110, 95, 98), bar('2024-01-04', 110, 110, 110, 110)];
+
+  it('盤前看不到今天的價格，委託在開盤時以開盤價撮合', () => {
+    const m = buildMarket(new Map([['2330', rows]]));
+    const s = newSim({ start: '2024-01-02', capital: 1_000_000, discount: 1 });
+    closeDay(s, m);
+    beginDay(s, m, '2024-01-03', true);
+    expect(s.pre).toBe(true);
+    expect(priceNow(s, m, '2330')).toBe(100);
+    expect(placeOrder(s, m, { code: '2330', side: 'buy', kind: 'cash', shares: 1000 })).toBeNull();
+    expect(placeOrder(s, m, { code: '2330', side: 'buy', kind: 'cash', shares: 1000, limit: 106 })).toBeNull();
+    expect(placeOrder(s, m, { code: '2330', side: 'buy', kind: 'cash', shares: 1000, limit: 96 })).toBeNull();
+    expect(s.trades).toHaveLength(0);
+    expect(s.orders).toHaveLength(3);
+    openDay(s, m);
+    expect(s.pre).toBe(false);
+    // 市價、限價 106 以開盤價 105 成交；限價 96 留到盤中
+    expect(s.trades.map((t) => t.price)).toEqual([105, 105]);
+    expect(s.orders).toHaveLength(1);
+    expect(s.orders[0].limit).toBe(96);
+    tickTo(s, m, 270);
+    expect(s.trades.at(-1)!.price).toBe(96);
+  });
+
+  it('盤前買進，開盤一價鎖漲停時買不到', () => {
+    const m = buildMarket(new Map([['2330', [bar('2024-01-02', 100, 100, 100, 100), bar('2024-01-03', 110, 110, 110, 110)]]]));
+    const s = newSim({ start: '2024-01-02', capital: 1_000_000, discount: 1 });
+    closeDay(s, m);
+    beginDay(s, m, '2024-01-03', true);
+    expect(placeOrder(s, m, { code: '2330', side: 'buy', kind: 'cash', shares: 1000 })).toBeNull();
+    openDay(s, m);
+    expect(s.trades).toHaveLength(0);
+    expect(s.notes.at(-1)!.text).toMatch(/鎖漲停/);
+  });
+
+  it('新局可以從第一天的盤前開始', () => {
+    const s = newSim({ start: '2024-01-02', capital: 1, discount: 1 }, '2330', true);
+    expect(s.pre).toBe(true);
   });
 });

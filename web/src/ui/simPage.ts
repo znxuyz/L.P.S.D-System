@@ -33,6 +33,7 @@ import {
   maintenance,
   migrate,
   newSim,
+  openDay,
   placeOrder,
   pledgeBorrow,
   pledgeRelease,
@@ -88,6 +89,8 @@ import { BIAS, actionName, cls, garble, investedAt, money, pctOrDash, setHtml, w
 const VIEW_KEY = 'lplc.sim.view';
 /** 交易日曆：0050 從 2003 年起每個交易日都有成交。 */
 const CALENDAR_CODE = '0050';
+/** 每天要不要先停在盤前（關掉的話收盤後直接進入下一天的盤中）。 */
+const PRESTOP_KEY = 'lplc.sim.prestop';
 /** 收盤後停留幾秒再進入下一個交易日。 */
 const CLOSE_PAUSE_MS = 2500;
 /** 排行榜：收盤後等這麼久才上傳（連續跳好幾天時只傳最後一次）；大廳裡的排行榜多久重新讀一次。 */
@@ -153,6 +156,14 @@ export class SimPage implements SimCtx {
   private msg = '';
   private bankMsg = '';
   private hints = true;
+  /** 每天先停在盤前。 */
+  private preStop = (() => {
+    try {
+      return localStorage.getItem(PRESTOP_KEY) !== '0';
+    } catch {
+      return true;
+    }
+  })();
   // 時鐘
   private running = false;
   private speed: 1 | 3 | 5 = 1;
@@ -592,7 +603,7 @@ export class SimPage implements SimCtx {
     const s = this.state;
     const prevTs = this.lastTs;
     this.lastTs = ts;
-    if (!s || this.view !== 'play' || !this.running || document.hidden || !document.querySelector('.app.page-sim')) return;
+    if (!s || this.view !== 'play' || !this.running || s.pre || document.hidden || !document.querySelector('.app.page-sim')) return;
     if (!prevTs) return;
     const dt = Math.min(1000, ts - prevTs);
     if (s.minute >= SESSION_MINUTES) {
@@ -630,6 +641,8 @@ export class SimPage implements SimCtx {
     const cal = this.calendar;
     if (!s || !cal) return;
     await Promise.all(this.neededCodes().map((c) => this.fetchCandles(c)));
+    // 盤前直接跳到隔天：先開盤撮合盤前委託，再走完今天
+    if (s.pre) openDay(s, this.market);
     if (s.minute < SESSION_MINUTES || s.equity.at(-1)?.[0] !== s.date) {
       tickTo(s, this.market, SESSION_MINUTES);
       this.closeToday();
@@ -642,13 +655,29 @@ export class SimPage implements SimCtx {
       this.render();
       return;
     }
-    beginDay(s, this.market, next);
+    beginDay(s, this.market, next, this.preStop);
     this.closedUntil = 0;
     this.freshDay = '';
     this.msg = '';
     this.bankMsg = '';
     this.persist();
     await this.prepare();
+  }
+
+  /** 開盤：盤前委託、定期定額以開盤價撮合，時間開始從 09:00 往前走。 */
+  private async open(): Promise<void> {
+    const s = this.state;
+    if (!s?.pre) return;
+    await Promise.all(this.neededCodes().map((c) => this.fetchCandles(c)));
+    if (!s.pre) return;
+    const before = s.trades.length;
+    openDay(s, this.market);
+    const filled = s.trades.length - before;
+    this.msg = filled ? `開盤：${filled} 筆盤前委託以開盤價成交` : '';
+    this.running = true;
+    this.lastSavedMinute = 0;
+    this.persist();
+    this.render();
   }
 
   private isEnd(s: SimState): boolean {
@@ -675,7 +704,7 @@ export class SimPage implements SimCtx {
       idx = Math.max(idx, minIdx);
     }
     this.archive();
-    this.state = newSim({ start: cal[idx], capital, discount, monthly }, this.state?.watch ?? '2330');
+    this.state = newSim({ start: cal[idx], capital, discount, monthly }, this.state?.watch ?? '2330', this.preStop);
     this.msg = '';
     this.bankMsg = '';
     this.view = 'play';
@@ -707,7 +736,7 @@ export class SimPage implements SimCtx {
   private order(form: HTMLFormElement): void {
     const s = this.state;
     if (!s) return;
-    if (!this.running) {
+    if (!this.running && !s.pre) {
       this.msg = '暫停中不能交易，請先按「繼續」';
       return this.render();
     }
@@ -723,7 +752,11 @@ export class SimPage implements SimCtx {
     const before = s.trades.length;
     const err = placeOrder(s, this.market, { code: s.watch, side: this.side, kind: this.kind, shares, limit });
     const filled = s.trades.length > before;
-    this.msg = err ?? `${actionName(this.kind, this.side)} ${s.watch} ${num(shares)} 股${filled ? `，已成交 @ ${price(s.trades[s.trades.length - 1].price)}` : `，限價 ${limit} 掛單中`}`;
+    this.msg =
+      err ??
+      `${actionName(this.kind, this.side)} ${s.watch} ${num(shares)} 股${
+        s.pre ? `${limit ? `，限價 ${limit}` : '，市價'}，開盤時以開盤價撮合` : filled ? `，已成交 @ ${price(s.trades[s.trades.length - 1].price)}` : `，限價 ${limit} 掛單中`
+      }`;
     if (!err) this.persist();
     this.render();
   }
@@ -901,8 +934,11 @@ export class SimPage implements SimCtx {
       if (t.closest('input,textarea,select,button') || document.querySelector('.laplace-intro')) return;
       if (e.key === ' ') {
         e.preventDefault();
-        this.running = !this.running;
-        this.render();
+        if (this.state.pre) void this.open();
+        else {
+          this.running = !this.running;
+          this.render();
+        }
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         void this.nextDay();
@@ -911,7 +947,16 @@ export class SimPage implements SimCtx {
   }
 
   private action(a: string, el: HTMLElement): void {
-    if (a === 'play') {
+    if (a === 'open') void this.open();
+    else if (a === 'prestop') {
+      this.preStop = !this.preStop;
+      try {
+        localStorage.setItem(PRESTOP_KEY, this.preStop ? '1' : '0');
+      } catch {
+        /* 存不了就只在這次有效 */
+      }
+      this.render();
+    } else if (a === 'play') {
       this.running = !this.running;
       if (!this.running) this.persist();
       this.msg = '';
@@ -1131,14 +1176,14 @@ export class SimPage implements SimCtx {
     const bench = this.benchOf(s);
     const closed = s.minute >= SESSION_MINUTES;
     const end = this.isEnd(s);
-    const status = end ? '資料已到最新' : closed ? '收盤' : this.running ? '盤中' : '暫停中・無法交易';
+    const status = end ? '資料已到最新' : s.pre ? '盤前・可以先掛單' : closed ? '收盤' : this.running ? '盤中' : '暫停中・無法交易';
     const ratio = maintenance(s, m);
     const debt = debtOf(s);
     setHtml(
       q('sim-date'),
       `<p class="eyebrow">Laplace Replay · 第 ${s.day} 天</p>
-        <p class="sim-day num">星期${weekday(s.date)} <b class="sim-clock">${clock(s.minute)}</b>
-          <span class="sim-status sim-status-${end ? 'end' : closed ? 'closed' : this.running ? 'run' : 'pause'}">${status}</span></p>
+        <p class="sim-day num">星期${weekday(s.date)} <b class="sim-clock">${s.pre ? '08:30' : clock(s.minute)}</b>
+          <span class="sim-status sim-status-${end ? 'end' : s.pre ? 'pre' : closed ? 'closed' : this.running ? 'run' : 'pause'}">${status}</span></p>
         <p class="sim-garble num" title="日期已隱藏">${garble(s.date)}</p>`,
     );
     setHtml(
@@ -1152,11 +1197,16 @@ export class SimPage implements SimCtx {
     );
     setHtml(
       q('sim-steps'),
-      `<button type="button" class="btn ${this.running ? '' : 'btn-accent'}" data-sim="play" ${end ? 'disabled' : ''} title="快捷鍵：空白鍵">${this.running ? '⏸ 暫停' : '▶ 繼續'}</button>
+      `${
+        s.pre
+          ? '<button type="button" class="btn btn-accent" data-sim="open" title="快捷鍵：空白鍵">🔔 開盤</button>'
+          : `<button type="button" class="btn ${this.running ? '' : 'btn-accent'}" data-sim="play" ${end ? 'disabled' : ''} title="快捷鍵：空白鍵">${this.running ? '⏸ 暫停' : '▶ 繼續'}</button>`
+      }
         <div class="seg sim-speed" role="group" aria-label="時間流速">${([1, 3, 5] as const)
           .map((v) => `<button type="button" data-sim="speed${v}" aria-pressed="${this.speed === v}">${v}×</button>`)
           .join('')}</div>
         <button type="button" class="btn" data-sim="nextday" ${end ? 'disabled' : ''} title="快捷鍵：→">⏭ 直接到隔天</button>
+        <button type="button" class="btn" data-sim="prestop" aria-pressed="${this.preStop}" title="開啟時每天先停在盤前（08:30），可以先掛單，按「開盤」才開始">盤前停留：${this.preStop ? '開' : '關'}</button>
         <button type="button" class="btn" data-sim="lobby">大廳</button>
         <button type="button" class="btn" data-sim="reset">結束這局</button>`,
     );
@@ -1172,7 +1222,7 @@ export class SimPage implements SimCtx {
     if (!all) return null;
     const past = all.filter((c) => c.date < s.date);
     const path = this.market.path(s.watch, s.date);
-    if (!path) return past;
+    if (!path || s.pre) return past;
     const t = Math.min(SESSION_MINUTES, Math.floor(s.minute));
     let hi = -Infinity;
     let lo = Infinity;
@@ -1223,18 +1273,29 @@ export class SimPage implements SimCtx {
     const pc = this.market.prevClose(s.watch, s.date);
     const now = priceNow(s, this.market, s.watch);
     const chg = now != null && pc ? now / pc - 1 : 0;
-    const today = path ? visible[visible.length - 1] : null;
+    const today = path && !s.pre ? visible[visible.length - 1] : null;
     setHtml(
       el.querySelector<HTMLElement>('#sim-stock')!,
       `<b>${esc(s.watch)}</b> ${esc(name)}
        ${now != null ? `<span class="num sim-px ${cls(chg)}">${price(now)}</span> <span class="num ${cls(chg)}">${chg >= 0 ? '▲' : '▼'} ${pct(chg * 100)}</span>` : ''}
-       ${today ? `<small class="muted num">開 ${price(today.open)} 高 ${price(today.high)} 低 ${price(today.low)} 量 ${num(today.volume)} 張</small>` : all ? '<small class="muted">今天沒有交易</small>' : ''}`,
+       ${
+         s.pre
+           ? '<small class="muted">盤前・價格為昨收，09:00 開盤後才有今天的行情</small>'
+           : today
+             ? `<small class="muted num">開 ${price(today.open)} 高 ${price(today.high)} 低 ${price(today.low)} 量 ${num(today.volume)} 張</small>`
+             : all
+               ? '<small class="muted">今天沒有交易</small>'
+               : ''
+       }`,
     );
     const k = el.querySelector<HTMLElement>('#sim-k')!;
     if (all === undefined) setHtml(k, `<p class="muted sim-empty">下載 ${esc(s.watch)} 的日 K⋯⋯</p>`);
     else if (visible.length < 2) setHtml(k, `<p class="muted sim-empty">${esc(s.watch)} 在這一天以前沒有日 K（可能還沒上市）。</p>`);
     else setHtml(k, candleSvg(visible, Math.max(320, k.clientWidth || 640), Math.max(240, k.clientHeight || 300)));
-    setHtml(el.querySelector<HTMLElement>('#sim-tick')!, path && pc ? tickSvg(path, pc, s.minute, Math.max(320, k.clientWidth || 640)) : '');
+    setHtml(
+      el.querySelector<HTMLElement>('#sim-tick')!,
+      s.pre ? '<p class="muted sim-pre-note">盤前（08:30～09:00）：可以先下市價或限價單，按「🔔 開盤」後以開盤價集合競價撮合。</p>' : path && pc ? tickSvg(path, pc, s.minute, Math.max(320, k.clientWidth || 640)) : '',
+    );
     setHtml(el.querySelector<HTMLElement>('#sim-hints')!, visible.length >= 30 ? this.hintsHtml(visible) : '');
   }
 
@@ -1268,19 +1329,19 @@ export class SimPage implements SimCtx {
     const mine = s.pos.filter((p) => p.code === s.watch);
     const have = mine.map((p) => `${KIND_NAME[p.kind]}${p.dir === 'short' ? '空' : ''} ${num(p.shares)} 股`).join('、') || '沒有部位';
     const closed = s.minute >= SESSION_MINUTES;
-    const disabled = !this.running || closed;
+    const disabled = (!this.running && !s.pre) || closed;
     const pend = s.orders
       .map(
         (o) => `<li><span class="${o.side === 'buy' ? 'up' : 'down'}">${actionName(o.kind, o.side)}</span>
           <b>${esc(o.code)}</b> ${esc(this.nameOf(o.code))} <span class="num">${num(o.shares)} 股</span>
-          <span class="muted">限價 ${o.limit}</span>
+          <span class="muted">${o.limit != null ? `限價 ${o.limit}` : '市價（開盤撮合）'}</span>
           <button type="button" class="btn btn-sm" data-sim="cancel" data-id="${o.id}">取消</button></li>`,
       )
       .join('');
     const kinds: Kind[] = ['cash', 'day', 'margin', 'short'];
     const sideLabel = (side: Side) => (this.kind === 'short' ? (side === 'sell' ? '融券賣出' : '融券回補') : this.kind === 'margin' ? (side === 'buy' ? '融資買進' : '融資賣出') : side === 'buy' ? '買進' : '賣出');
     const html = () => `
-      <h2 class="panel-title">下單 <small>${closed ? '已收盤' : this.running ? '盤中即時成交' : '暫停中不能交易'}</small></h2>
+      <h2 class="panel-title">下單 <small>${s.pre ? '盤前委託・開盤時以開盤價撮合' : closed ? '已收盤' : this.running ? '盤中即時成交' : '暫停中不能交易'}</small></h2>
       <form class="sim-order-form" id="sim-order-form">
         <div class="seg sim-kinds" role="group" aria-label="交易類別">${kinds
           .map((k) => `<button type="button" data-sim="kind-${k}" aria-pressed="${this.kind === k}">${KIND_NAME[k]}</button>`)
@@ -1307,10 +1368,10 @@ export class SimPage implements SimCtx {
       </form>
       <p class="sim-msg" role="status">${esc(this.msg)}</p>
       ${stopHtml(s)}
-      <h3 class="sim-sub">委託中（限價單，收盤未成交自動取消）</h3>
+      <h3 class="sim-sub">委託中（${s.pre ? '開盤時撮合；限價沒碰到的留到盤中' : '限價單，收盤未成交自動取消'}）</h3>
       ${pend ? `<ul class="sim-orders">${pend}</ul>` : '<p class="muted">沒有委託。</p>'}`;
     const stops = s.stops.filter((x) => x.code === s.watch).map((x) => `${x.kind}${x.dir}${x.loss}/${x.profit}`).join(',');
-    const key = `${s.watch}|${this.side}|${this.kind}|${this.unit}|${have}|${disabled}|${this.msg}|${s.orders.map((o) => o.id).join(',')}|${stops}`;
+    const key = `${s.watch}|${!!s.pre}|${this.side}|${this.kind}|${this.unit}|${have}|${disabled}|${this.msg}|${s.orders.map((o) => o.id).join(',')}|${stops}`;
     const form = el.querySelector<HTMLFormElement>('#sim-order-form');
     const type = form ? new FormData(form).get('type') : null;
     if (this.keyed(el, key, html, ['#sim-qty', '#sim-limit']) && type === 'limit') {
@@ -1397,6 +1458,7 @@ export class SimPage implements SimCtx {
     );
     const body = el.querySelector<HTMLElement>('#sim-rank-body')!;
     const cache = this.rankCache;
+    if (s.pre) return setHtml(body, '<p class="muted">盤前，09:00 開盤後才有今日排行。</p>');
     if (!cache || cache.date !== s.date) return setHtml(body, '<p class="muted">計算今日排行⋯⋯</p>');
     if (!cache.rows.length) return setHtml(body, '<p class="muted">這一天沒有全市場資料。</p>');
     const t = Math.min(SESSION_MINUTES, Math.floor(s.minute));
