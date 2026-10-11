@@ -76,17 +76,19 @@ function hash(s: string): number {
   return h >>> 0;
 }
 
-/** 日期的亂碼：同一天每次一樣，但看不出是哪一天（不是逐字替換，沒辦法解回去）。 */
+/** 日期的亂碼：「年、月、日」看得到，數字是亂碼；同一天每次一樣，但看不出是哪一天（不是逐字替換，沒辦法解回去）。 */
 function garble(date: string): string {
   const glyphs = '▓▒░▚▞▙▛▜▟▖▗▘▝◩◪⌧';
   let h = hash(`lplc-garble|${date}`);
-  let out = '';
-  for (let i = 0; i < 8; i++) {
-    out += glyphs[h % glyphs.length];
-    h = Math.imul(h ^ (h >>> 13), 2654435761) >>> 0;
-    if (i === 3 || i === 5) out += '-';
-  }
-  return out;
+  const g = (n: number) => {
+    let out = '';
+    for (let i = 0; i < n; i++) {
+      out += glyphs[h % glyphs.length];
+      h = Math.imul(h ^ (h >>> 13), 2654435761) >>> 0;
+    }
+    return out;
+  };
+  return `${g(4)}年${g(2)}月${g(2)}日`;
 }
 
 /** 交易動作的名稱（依類別與買賣）。 */
@@ -1305,7 +1307,7 @@ export class SimPage {
     if (!items.length) return `${head}<p class="muted">還沒有新聞。</p>`;
     return `${head}<ol class="sim-newslist">${items
       .map(
-        ([d, , level, title]) => `<li class="sim-news-${level}"><span class="sim-news-date num">${garble(d)}・${weekday(d)}</span><span class="sim-news-title">${esc(title)}</span></li>`,
+        ([d, , level, title]) => `<li class="sim-news-${level}"><span class="sim-news-date num">${garble(d)}（${weekday(d)}）</span><span class="sim-news-title">${esc(title)}</span></li>`,
       )
       .join('')}</ol>`;
   }
