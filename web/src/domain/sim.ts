@@ -23,7 +23,10 @@
  * - 定期定額：每月第一個交易日（薪資入帳後）以開盤價買進設定的金額，可以買零股。
  * 報酬率＝總資產 ÷ 累計投入（本金＋薪資）－ 1；貸款是負債，不算投入。
  *
- * 開盤：09:00 是集合競價，開盤前就觸發的停損／停利單以開盤價成交（一價鎖跌停時賣不掉，會提醒）。
+ * 盤前（08:30～09:00）：每天先停在盤前，可以先下單（市價或限價），按「開盤」後以開盤集合競價撮合：
+ * 市價單、買進限價 ≥ 開盤價、賣出限價 ≤ 開盤價的單子都以開盤價成交，其他限價單留到盤中繼續等。
+ * 盤前看不到今天的價格（現價＝昨收），一價鎖漲跌停在開盤時才判斷。
+ * 開盤前就觸發的停損／停利單也以開盤價成交（一價鎖跌停時賣不掉，會提醒）；定期定額在開盤時買進。
  */
 import { SESSION_MINUTES, intradayPath, type IntradayPath } from './intraday';
 import type { Candle } from './technicals';
@@ -198,6 +201,10 @@ export interface SimState {
   dca: DcaPlan[];
   /** 自選股。 */
   fav: string[];
+  /** 盤前（還沒開盤）。 */
+  pre?: boolean;
+  /** 這個月的定期定額要在開盤時買進。 */
+  dcaDue?: boolean;
 }
 
 /** 除權息：[日期, 代號, 除權息前收盤, 參考價, 權值+息值, 權/息] */
@@ -230,7 +237,8 @@ export function lockedLimit(bar: Candle, prevClose: number | undefined): -1 | 0 
   return r >= 0.09 ? 1 : r <= -0.09 ? -1 : 0;
 }
 
-export function newSim(settings: SimSettings, watch = '2330'): SimState {
+/** 開新的一局（preOpen = true：第一天也從盤前開始）。 */
+export function newSim(settings: SimSettings, watch = '2330', preOpen = false): SimState {
   return {
     v: 2,
     settings,
@@ -252,6 +260,7 @@ export function newSim(settings: SimSettings, watch = '2330'): SimState {
     flows: [],
     dca: [],
     fav: [],
+    pre: preOpen,
   };
 }
 
@@ -303,6 +312,8 @@ export function migrate(raw: unknown): SimState | null {
 
 /** 現在的價格：今天有成交用盤中路徑，否則用最近收盤。 */
 export function priceNow(s: SimState, m: Market, code: string): number | undefined {
+  // 盤前還不知道今天的價格
+  if (s.pre) return m.prevClose(code, s.date);
   const p = m.path(code, s.date);
   if (p) return p.price[Math.min(SESSION_MINUTES, Math.max(0, Math.floor(s.minute)))];
   return m.prevClose(code, s.date);
@@ -414,7 +425,8 @@ export function checkOrder(s: SimState, m: Market, o: Omit<SimOrder, 'id'>): str
   if (o.limit !== undefined && !(o.limit > 0)) return '限價要大於 0';
   const bar = m.bar(o.code, s.date);
   if (!bar) return '這檔股票今天沒有交易（可能暫停交易或還沒上市）';
-  const lock = lockedLimit(bar, m.prevClose(o.code, s.date));
+  // 盤前還不知道會不會鎖漲跌停，開盤撮合時才判斷
+  const lock = s.pre ? 0 : lockedLimit(bar, m.prevClose(o.code, s.date));
   if (o.side === 'buy' && lock === 1) return '今天一價鎖漲停，買不到';
   if (o.side === 'sell' && lock === -1) return '今天一價鎖跌停，賣不掉';
   if ((o.kind === 'margin' || o.kind === 'short') && isEtf(o.code) && /[LRU]$/.test(o.code)) return '槓桿、反向 ETF 不能信用交易';
@@ -443,6 +455,11 @@ export function placeOrder(s: SimState, m: Market, o: Omit<SimOrder, 'id'>): str
   const err = checkOrder(s, m, o);
   if (err) return err;
   const order: SimOrder = { ...o, id: s.nextId++ };
+  // 盤前的單子先排著，開盤時一起撮合
+  if (s.pre) {
+    s.orders.push(order);
+    return null;
+  }
   const now = priceNow(s, m, o.code)!;
   const marketable = o.limit === undefined || (o.side === 'buy' ? now <= o.limit : now >= o.limit);
   if (marketable) return execute(s, m, order, now);
@@ -844,8 +861,11 @@ export function closeDay(s: SimState, m: Market): void {
   });
 }
 
-/** 進入下一個交易日的 09:00：先處理除權息。 */
-export function beginDay(s: SimState, m: Market, date: string): void {
+/**
+ * 進入下一個交易日：先處理除權息與月初資金。
+ * preOpen = true 時停在盤前，等 openDay() 開盤；否則直接開盤（09:00）。
+ */
+export function beginDay(s: SimState, m: Market, date: string, preOpen = false): void {
   if (date <= s.date) return;
   const newMonth = date.slice(0, 7) !== s.date.slice(0, 7);
   s.date = date;
@@ -869,12 +889,43 @@ export function beginDay(s: SimState, m: Market, date: string): void {
       }
     }
   }
-  // 月初：薪資、信貸、質押利息，然後定期定額（在除權息之後，除息日當天買進的不會領到股利）
+  // 月初：薪資、信貸、質押利息（在除權息之後）；定期定額在開盤時買進
   if (newMonth) {
     monthStart(s);
+    s.dcaDue = true;
+  }
+  s.pre = true;
+  if (!preOpen) openDay(s, m);
+}
+
+/**
+ * 開盤（09:00 集合競價）：定期定額、盤前委託以開盤價撮合，開盤前就觸發的停損／停利以開盤價成交。
+ * 不在盤前時不做事。
+ */
+export function openDay(s: SimState, m: Market): void {
+  if (!s.pre) return;
+  s.pre = false;
+  s.minute = 0;
+  if (s.dcaDue) {
+    s.dcaDue = false;
     runDca(s, m);
   }
-  // 開盤集合競價：開盤前就觸發的停損／停利以開盤價成交
+  const pending = s.orders;
+  s.orders = [];
+  for (const o of pending) {
+    const open = m.path(o.code, s.date)?.price[0];
+    if (open == null) {
+      note(s, o.code, '盤前委託未成交：這檔今天沒有交易');
+      continue;
+    }
+    const hit = o.limit == null || (o.side === 'buy' ? open <= o.limit : open >= o.limit);
+    if (!hit) {
+      s.orders.push(o);
+      continue;
+    }
+    const err = checkOrder(s, m, o) ?? execute(s, m, o, open);
+    note(s, o.code, err ? `盤前委託未成交：${err}` : `盤前委託以開盤價 ${open} 成交`);
+  }
   if (s.stops.length) checkStops(s, m, 0);
 }
 
