@@ -59,7 +59,7 @@ export function simGuideSteps(root: HTMLElement, showPane?: (pane: string) => vo
     {
       target: $('#sim-k'),
       title: '日 K 線',
-      body: `每一根是一天：<b>紅色收漲、綠色收跌</b>，上下的細線是最高、最低價。藍線是月線（20 日均線）、橘線是季線（60 日均線），下面是成交量。<br>
+      body: `每一根是一天：<b>紅色收漲、綠色收跌</b>，上下的細線是最高、最低價。三條線是指數移動平均線：<b>藍 EMA20</b>（約一個月）、<b>橘 EMA60</b>（約一季）、<b>紫 EMA120</b>（約半年），下面是成交量。<br>
         最右邊那根是今天到目前為止的走勢；<b>看不到未來</b>。`,
     },
     {
@@ -156,6 +156,11 @@ export function simGuideSteps(root: HTMLElement, showPane?: (pane: string) => vo
       target: $('#sim-log'),
       title: '交易紀錄',
       body: '每一筆成交、配息、貸款扣款、停損觸發等事件都記在這裡，用「第幾天幾點」標示。',
+    },
+    {
+      target: $('#sim-steps [data-sim="learn"]'),
+      title: '股市入門',
+      body: '看不懂 K 棒、均線、成交量？按這裡（手機是上方的「📘 入門」分頁）看白話說明與示意圖，還有可以拉動開高低收的 K 棒實驗室。<b>打開時會自動暫停</b>，回到看盤再繼續。',
     },
     {
       title: '準備好了！',

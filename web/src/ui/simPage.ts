@@ -86,6 +86,7 @@ import { recordOf, reportHtml, verdict } from './sim/report';
 import { askGuide, runGuide } from './sim/guide';
 import { simGuideSteps } from './sim/guideSteps';
 import { pickRandomStart } from '../domain/simScenarios';
+import { renderLearnPage } from './learnPage';
 import { BIAS, actionName, cls, garble, investedAt, money, pctOrDash, setHtml, weekday, type SimCtx } from './sim/util';
 
 /** 上次在模擬盤的哪個畫面（大廳／遊戲中），重新打開時用。 */
@@ -124,6 +125,7 @@ const SIM_TABS = [
   { id: 'money', icon: '💰', title: '資金' },
   { id: 'rank', icon: '🏆', title: '排行' },
   { id: 'news', icon: '📰', title: '新聞' },
+  { id: 'learn', icon: '📘', title: '入門' },
 ] as const;
 type SimTab = (typeof SIM_TABS)[number]['id'];
 const TAB_KEY = 'lplc.sim.tab';
@@ -188,6 +190,8 @@ export class SimPage implements SimCtx {
   })();
   // 時鐘
   private running = false;
+  /** 打開股市入門時自動暫停的（回到看盤時自動繼續）。 */
+  private pausedForLearn = false;
 
   /** 模擬盤正在播放（這時候不自動更新網頁）。 */
   get busy(): boolean {
@@ -207,7 +211,9 @@ export class SimPage implements SimCtx {
   /** 手機版目前的分頁。 */
   private tab: SimTab = (() => {
     try {
-      return (localStorage.getItem(TAB_KEY) as SimTab | null) ?? 'trade';
+      // 股市入門不記：重新打開時回到看盤
+      const t = localStorage.getItem(TAB_KEY) as SimTab | null;
+      return t && t !== 'learn' ? t : 'trade';
     } catch {
       return 'trade';
     }
@@ -693,7 +699,20 @@ export class SimPage implements SimCtx {
   /** 手機版的分頁（桌機版全部並排，分頁列不顯示）。 */
   private setTab(tab: SimTab, scroll: boolean): void {
     if (!SIM_TABS.some((t) => t.id === tab)) tab = 'trade';
+    const wasLearn = this.tab === 'learn';
     this.tab = tab;
+    if (tab === 'learn') {
+      renderLearnPage(this.root.querySelector<HTMLElement>('#sim-learn .learn')!, 'sim-learn');
+      // 看股市入門時先暫停，回到看盤再繼續
+      if (scroll && this.running) {
+        this.running = false;
+        this.pausedForLearn = true;
+        this.persist();
+      }
+    } else if (wasLearn && this.pausedForLearn) {
+      this.pausedForLearn = false;
+      if (this.state && this.view === 'play' && !this.isEnd(this.state)) this.running = true;
+    }
     this.root.dataset.tab = tab;
     const bar = this.root.querySelector<HTMLElement>('#sim-tabs');
     for (const b of bar?.querySelectorAll<HTMLElement>('[data-sim-tab]') ?? []) {
@@ -706,7 +725,7 @@ export class SimPage implements SimCtx {
     } catch {
       /* 存不了就算了 */
     }
-    if (!scroll || !bar) return;
+    if (!scroll) return;
     // 分頁列已經黏在上面（往下捲過了）時，回到這個分頁的開頭
     const head = this.root.querySelector<HTMLElement>('#sim-head');
     const top = head ? head.getBoundingClientRect().bottom + window.scrollY : 0;
@@ -1023,6 +1042,7 @@ export class SimPage implements SimCtx {
         <div class="sim-rank glass" id="sim-rank" data-pane="rank"></div>
         <div class="sim-log glass" id="sim-log" data-pane="hold"></div>
       </div>
+      <div class="sim-learn" id="sim-learn" data-pane="learn"><div class="learn"></div></div>
       <div class="sim-setup glass" id="sim-setup"></div>`;
     // 頂端列「離開」旁邊顯示玩家名稱
     document.querySelector('#sim-who')?.addEventListener('click', () => {
@@ -1222,6 +1242,8 @@ export class SimPage implements SimCtx {
     else if (a.startsWith('rank-')) {
       this.rankKey = a.slice(5) as RankKey;
       this.renderPlay();
+    } else if (a === 'learn') {
+      this.setTab(this.tab === 'learn' ? 'trade' : 'learn', true);
     } else if (a === 'hints') {
       this.hints = !this.hints;
       this.render();
@@ -1390,7 +1412,8 @@ export class SimPage implements SimCtx {
         <button type="button" class="btn" data-sim="prestop" aria-pressed="${this.preStop}" title="開啟時每天先停在盤前（08:30），可以先掛單，按「開盤」才開始">盤前停留：${this.preStop ? '開' : '關'}</button>
         <button type="button" class="btn" data-sim="lobby">大廳</button>
         <button type="button" class="btn" data-sim="reset">結束這局</button>
-        <button type="button" class="btn" data-sim="guide" title="一步一步介紹每個區塊與下單方式">❓ 新手指引</button>`,
+        <button type="button" class="btn" data-sim="guide" title="一步一步介紹每個區塊與下單方式">❓ 新手指引</button>
+        <button type="button" class="btn" data-sim="learn" title="K 棒、K 線、均線、成交量等基本知識（打開時自動暫停）">${this.tab === 'learn' ? '📈 回到看盤' : '📘 股市入門'}</button>`,
     );
     setHtml(
       q('sim-endbox'),
