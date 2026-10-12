@@ -107,12 +107,12 @@ export function reportHtml(r: SimRecord, w: number, back: string, who = ''): str
   const totalReal = real.reduce((a, b) => a + b, 0);
   return `${head}${stats}
     <section class="sim-report-sec"><h3 class="sim-sub">報酬率走勢 <small class="muted">對照組＝同樣的錢都在同一天買進加權指數</small></h3>
-      ${returnChart([{ cls: 'sim-bench', values: bench }, { cls: 'sim-mine', values: mine }], w, 220, dates)}
+      ${returnChart([{ cls: 'sim-bench', values: bench }, { cls: 'sim-mine', values: mine }], w, 220, dates) || '<p class="muted">至少要玩兩個交易日才畫得出走勢。</p>'}
       <p class="sim-eq-legend"><span class="sim-mine-t">━ 我的帳戶</span>　<span class="sim-bench-t">━ 同額買大盤</span></p></section>
     <section class="sim-report-sec"><h3 class="sim-sub">每日損益 <small class="muted">已實現合計 <b class="${cls(totalReal)}">${money(totalReal)}</b></small></h3>
       ${pnlBars(real, unreal, w, 180, dates)}
       <p class="sim-eq-legend"><span class="sim-bar-real-t">■ 已實現</span>　<span class="sim-bar-unreal-t">■ 未實現（變動）</span></p></section>
-    <section class="sim-report-sec"><h3 class="sim-sub">回檔 <small class="muted">扣掉薪資投入後，從前高跌了多少</small></h3>${drawdownChart(dd, w, 130, dates)}</section>
+    <section class="sim-report-sec"><h3 class="sim-sub">回檔 <small class="muted">扣掉薪資投入後，從前高跌了多少</small></h3>${drawdownChart(dd, w, 130, dates) || '<p class="muted">至少要玩兩個交易日才算得出回檔。</p>'}</section>
     <div class="sim-report-grid">${table('賺最多的股票', best)}${table('賠最多的股票', worst)}</div>
     <p class="sim-lobby-foot">${back}</p>`;
 }
