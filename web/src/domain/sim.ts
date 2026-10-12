@@ -223,6 +223,8 @@ export interface SimState {
   dcaDue?: boolean;
   /** 破產了：這一局結束，不能再交易。 */
   bankrupt?: Bankrupt;
+  /** 已經處理過的分割／減資（"代號|日期"）。 */
+  splitsDone?: string[];
 }
 
 /** 除權息：[日期, 代號, 除權息前收盤, 參考價, 權值+息值, 權/息] */
@@ -926,6 +928,65 @@ function checkRuin(s: SimState, m: Market): void {
   );
 }
 
+/** 套用一次分割／減資：持股與質押股數 ×k，停損停利價 ÷k；extra 指定時只把這麼多股（分割前買的）換算。 */
+function applySplit(s: SimState, code: string, date: string, k: number, only?: number): void {
+  const key = `${code}|${date}`;
+  s.splitsDone = [...(s.splitsDone ?? []).filter((x) => x !== key), key];
+  let touched = false;
+  for (const p of s.pos.filter((x) => x.code === code && x.dir === 'long')) {
+    const base = only == null ? p.shares : Math.min(p.shares, only);
+    if (base <= 0) continue;
+    p.shares = Math.max(1, p.shares + Math.round(base * (k - 1)));
+    if (only != null) only -= base;
+    touched = true;
+  }
+  for (const p of s.pos.filter((x) => x.code === code && x.dir === 'short' && only == null)) {
+    p.shares = Math.max(1, Math.round(p.shares * k));
+    touched = true;
+  }
+  for (const pl of s.pledges.filter((x) => x.code === code)) pl.shares = Math.round(pl.shares * k);
+  for (const st of s.stops.filter((x) => x.code === code)) {
+    if (st.loss != null) st.loss = Math.round((st.loss / k) * 100) / 100;
+    if (st.profit != null) st.profit = Math.round((st.profit / k) * 100) / 100;
+  }
+  if (touched)
+    note(
+      s,
+      code,
+      k > 1 && Number.isInteger(k)
+        ? `股票分割：一股拆成 ${k} 股，持股數量 ×${k}，總成本不變（均價變成 1/${k}）`
+        : `${k < 1 ? '減資或反分割' : '面額變更'}：持股依價格換算為原本的 ${k.toFixed(4)} 倍，總成本不變`,
+    );
+}
+
+/**
+ * 補上舊存檔漏掉的分割（分割處理加上去之前已經過了分割日的局）。
+ * 用成交紀錄判斷：分割前買的股數如果還沒乘上倍數，就補上；已經換算過的不會重複。回傳補了幾筆。
+ */
+export function repairSplits(s: SimState, m: Market): number {
+  const done = new Set(s.splitsDone ?? []);
+  let fixed = 0;
+  for (const code of new Set(s.pos.filter((p) => p.dir === 'long').map((p) => p.code))) {
+    for (const [date, k] of m.splitsOf(code)) {
+      if (date > s.date || done.has(`${code}|${date}`)) continue;
+      const net = (before: boolean) =>
+        s.trades
+          .filter((t) => t.code === code && (t.kind === 'cash' || t.kind === 'margin') && (t.date < date) === before)
+          .reduce((a, t) => a + (t.side === 'buy' ? t.shares : -t.shares), 0);
+      const pre = net(true);
+      const post = net(false);
+      const held = s.pos.filter((p) => p.code === code && p.dir === 'long').reduce((a, p) => a + p.shares, 0);
+      // 分割前沒有持股，或是股數已經是換算後的樣子：不用補
+      const missed = pre > 0 && Math.abs(held - (pre + post)) < Math.abs(held - (pre * k + post));
+      if (missed) {
+        applySplit(s, code, date, k, pre);
+        fixed++;
+      } else s.splitsDone = [...(s.splitsDone ?? []), `${code}|${date}`];
+    }
+  }
+  return fixed;
+}
+
 /**
  * 進入下一個交易日：先處理除權息與月初資金。
  * preOpen = true 時停在盤前，等 openDay() 開盤；否則直接開盤（09:00）。
@@ -937,27 +998,8 @@ export function beginDay(s: SimState, m: Market, date: string, preOpen = false):
   s.minute = 0;
   s.day += 1;
   s.orders = [];
-  // 股票分割、面額變更、減資：股數換算，總成本不變，停損停利價跟著換算
-  for (const [code, k] of m.splits(date)) {
-    let touched = false;
-    for (const p of s.pos.filter((x) => x.code === code)) {
-      p.shares = Math.max(1, Math.round(p.shares * k));
-      touched = true;
-    }
-    for (const pl of s.pledges.filter((x) => x.code === code)) pl.shares = Math.round(pl.shares * k);
-    for (const st of s.stops.filter((x) => x.code === code)) {
-      if (st.loss != null) st.loss = Math.round((st.loss / k) * 100) / 100;
-      if (st.profit != null) st.profit = Math.round((st.profit / k) * 100) / 100;
-    }
-    if (touched)
-      note(
-        s,
-        code,
-        k > 1 && Number.isInteger(k)
-          ? `股票分割：一股拆成 ${k} 股，持股數量 ×${k}，總成本不變（股價跟著變成約 1/${k}）`
-          : `${k < 1 ? '減資或反分割' : '面額變更'}：持股依價格換算為原本的 ${k.toFixed(4)} 倍，總成本不變`,
-      );
-  }
+  // 股票分割、面額變更、減資：股數換算，總成本不變（均價跟著變），停損停利價跟著換算
+  for (const [code, k] of m.splits(date)) applySplit(s, code, date, k);
   for (const [, code, prev, ref, value, kind] of m.exRights(date)) {
     if (!(value > 0)) continue;
     for (const p of s.pos.filter((x) => x.code === code)) {
