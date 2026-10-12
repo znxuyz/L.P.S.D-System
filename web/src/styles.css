@@ -1553,3 +1553,27 @@ button.log-text:hover { color: var(--ink); }
 .app.page-sim .glass { -webkit-backdrop-filter: none; backdrop-filter: none; background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)), rgba(12, 17, 36, 0.92); }
 body:has(.app.page-sim) .aurora i { animation-play-state: paused; }
 .sim-newslist li { content-visibility: auto; contain-intrinsic-size: auto 56px; }
+
+/* 手機版修正 */
+/* iPhone 的日期欄有自己的最小寬度，會撐出去蓋到旁邊的按鈕；改成跟著容器寬度 */
+input[type='date'] { -webkit-appearance: none; appearance: none; min-width: 0; max-width: 100%; box-sizing: border-box; }
+input[type='date']::-webkit-date-and-time-value { text-align: left; }
+@media (max-width: 720px) {
+  /* 輸入框字小於 16px 時，iPhone 點下去會自動放大整個畫面 */
+  input:not([type='radio']):not([type='checkbox']), select, textarea { font-size: 16px !important; }
+  /* 開新局表單：日期一整行，按鈕平分一行，不會擠在一起 */
+  .sim-form label:has(input[type='date']) { flex: 1 1 100%; }
+  .sim-form .btn { flex: 1 1 auto; }
+  .sim-form input { width: 100%; }
+}
+/* 狀態標籤不要從中間斷開：太長就整個換到下一行 */
+.sim-status { display: inline-block; white-space: nowrap; }
+/* 表格：表頭不要一個字一行；手機上表格比畫面寬時右邊淡出，提示還可以往右滑（右側留白，滑到底時最後一欄不會被淡出蓋住） */
+.sim-table th { white-space: nowrap; }
+@media (max-width: 720px) {
+  .sim-table-wrap, .scr-table-wrap {
+    padding-right: 28px;
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+  }
+}

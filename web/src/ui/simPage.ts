@@ -1246,7 +1246,7 @@ export class SimPage implements SimCtx {
     const rec = sv && sv !== 'error' ? sv.history[ref?.i ?? -1] : undefined;
     if (!rec) return `<p class="muted">找不到這一局的紀錄。</p><p class="sim-lobby-foot">${back}</p>`;
     const who = ref?.sync ? this.players?.find((p) => p.sync === ref.sync)?.label ?? '' : '';
-    const w = Math.max(300, (this.root.querySelector<HTMLElement>('#sim-setup')?.clientWidth ?? 720) - 48);
+    const w = Math.max(240, (this.root.querySelector<HTMLElement>('#sim-setup')?.clientWidth ?? 720) - 48);
     return reportHtml(rec, w, back, who);
   }
 
@@ -1266,7 +1266,7 @@ export class SimPage implements SimCtx {
     setHtml($('sim-news'), this.cached('news', newsKey, () => newsHtml(s, this.news)));
     setHtml($('sim-hold'), holdHtml(s, this));
     // 資產曲線每天收盤才變、交易紀錄有新的一筆才變
-    const ew = Math.max(280, (this.sizes.ew || 640) - 36);
+    const ew = Math.max(240, (this.sizes.ew || 640) - 36);
     const named = Object.keys(this.names).length > 0;
     setHtml($('sim-equity'), this.cached('equity', `${s.settings.start}|${s.equity.length}|${s.trades.length}|${ew}|${!!this.taiex}|${!!this.calendar}`, () => equityHtml(s, this, ew)));
     setHtml($('sim-log'), this.cached('log', `${s.settings.start}|${s.trades.length}|${s.notes.length}|${named}`, () => logHtml(s, this)));
@@ -1354,7 +1354,7 @@ export class SimPage implements SimCtx {
           <div class="sim-stock" id="sim-stock"></div>
           <button type="button" class="sim-fav" id="sim-fav" data-sim="fav" aria-pressed="false" title="加入自選股">☆ 自選</button>
           <form class="sim-search" id="sim-search" role="search">
-            <input name="q" id="sim-q" list="sim-dir" placeholder="代號或名稱，例如 2330" autocomplete="off" aria-label="查詢股票" />
+            <input name="q" id="sim-q" list="sim-dir" placeholder="代號或名稱" autocomplete="off" aria-label="查詢股票" />
             <button type="submit" class="btn">看這檔</button>
             <datalist id="sim-dir"></datalist>
           </form>
@@ -1410,14 +1410,14 @@ export class SimPage implements SimCtx {
     }
     if (all === undefined) setHtml(k, `<p class="muted sim-empty">下載 ${esc(s.watch)} 的日 K⋯⋯</p>`);
     else if (visible.length < 2) setHtml(k, `<p class="muted sim-empty">${esc(s.watch)} 在這一天以前沒有日 K（可能還沒上市）。</p>`);
-    else if (chartDue) setHtml(k, candleSvg(visible, Math.max(320, this.sizes.kw || 640), Math.max(240, this.sizes.kh || 300)));
+    else if (chartDue) setHtml(k, candleSvg(visible, Math.max(240, this.sizes.kw || 640), Math.max(220, this.sizes.kh || 300)));
     setHtml(
       el.querySelector<HTMLElement>('#sim-tick')!,
       s.pre
         ? '<p class="muted sim-pre-note">盤前（08:30～09:00）：可以先下市價或限價單，按「🔔 開盤」後以開盤價集合競價撮合。</p>'
         : path && pc
           ? chartDue
-            ? tickSvg(path, pc, s.minute, Math.max(320, this.sizes.kw || 640))
+            ? tickSvg(path, pc, s.minute, Math.max(240, this.sizes.kw || 640))
             : (el.querySelector<HTMLElement>('#sim-tick')!.dataset.html ?? '')
           : '',
     );

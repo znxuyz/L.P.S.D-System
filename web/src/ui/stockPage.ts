@@ -307,7 +307,7 @@ function renderHead(el: HTMLElement, code: string, s: StockMetrics | undefined, 
       <div class="sa-id"></div>
       <div class="sa-quote"></div>
       <form class="sa-search" id="sa-search" role="search">
-        <input type="search" id="sa-q" list="sa-stocks" placeholder="輸入代號或名稱，例如 2330、聯一光" aria-label="搜尋股票" autocomplete="off" />
+        <input type="search" id="sa-q" list="sa-stocks" placeholder="代號或名稱，例如 2330" aria-label="搜尋股票" autocomplete="off" />
         <datalist id="sa-stocks"></datalist>
         <button type="submit" class="btn btn-accent">分析</button>
       </form>`;
@@ -652,7 +652,7 @@ function renderKChart(el: HTMLElement, code: string, all: Candle[], tech: TechRe
   const N = kView.count;
   const off = all.length - kView.right - N;
   const candles = all.slice(off, off + N);
-  const w = Math.max(320, el.clientWidth);
+  const w = Math.max(240, el.clientWidth);
   const h = Math.max(260, el.clientHeight);
   const pad = { l: 8, r: 56, t: 10, b: 22 };
   kLayout = { plotL: pad.l, plotW: Math.max(1, w - pad.l - pad.r), total: all.length };
