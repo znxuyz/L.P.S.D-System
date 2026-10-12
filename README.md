@@ -108,7 +108,7 @@
 
 ## 技術架構
 
-- **前端**：Vite＋TypeScript＋d3，純靜態網頁，部署在 GitHub Pages。Service Worker 讓網頁可以離線打開、從主畫面秒開。
+- **前端**：Vite＋TypeScript＋d3，純靜態網頁，部署在 GitHub Pages。Service Worker 讓網頁可以離線打開、從主畫面秒開。部署時產生 `version.json`，網頁打開、從背景叫回來、每 15 分鐘會比對一次，有新版就自動重新載入（加到主畫面的 App 也會更新；模擬盤播放中不打斷，暫停後才更新）。
 - **資料管線**：`scripts/*.ts`（Node 直接執行 TypeScript）由 `.github/workflows/update-data.yml` 排程執行，結果推到 `data` 分支。
 - **模擬盤雲端存檔**：Firebase Firestore 免費方案，用 REST API（不載入 Firebase SDK）。安全規則只接受白名單上的帳號，排行榜用雜湊鏈驗證只有本人寫得進去。
 - **證交所轉接**：`worker/twse-proxy.js`（Cloudflare Workers 免費方案，自行部署，選用）。
