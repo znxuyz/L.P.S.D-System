@@ -25,6 +25,7 @@ import { applyActiveEtfData, loadActiveEtfData } from './data/activeEtfData';
 import { MOCK_ETFS } from './data/mockEtfs';
 import { renderStockPage, type ExternalStock } from './ui/stockPage';
 import { SimPage } from './ui/simPage';
+import { renderLearnPage } from './ui/learnPage';
 import { laplaceBusy, playLaplaceIntro, playLaplaceOutro } from './ui/laplaceIntro';
 import { industryIdOf, loadStockDirectory, searchDirectory, type StockDirectory } from './data/stockDirectory';
 import { externalFundamentals } from './data/mockUniverse';
@@ -75,7 +76,7 @@ try {
   /* 無痕模式等情況讀不到，就從熱力圖開始 */
 }
 
-const PAGES = ['map', 'intel', 'screen', 'etf', 'stock', 'sim'] as const;
+const PAGES = ['map', 'intel', 'screen', 'etf', 'stock', 'learn', 'sim'] as const;
 type Page = (typeof PAGES)[number];
 
 function pageFromHash(): Page {
@@ -305,6 +306,7 @@ class App {
     } catch {
       /* 存不了就算了 */
     }
+    if (page === 'learn') renderLearnPage($('#page-learn'));
     if (page === 'sim') this.sim.show();
     else {
       this.beforeSim = page;
