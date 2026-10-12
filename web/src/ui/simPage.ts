@@ -176,6 +176,11 @@ export class SimPage implements SimCtx {
   })();
   // 時鐘
   private running = false;
+
+  /** 模擬盤正在播放（這時候不自動更新網頁）。 */
+  get busy(): boolean {
+    return !!this.state && this.view === 'play' && this.running;
+  }
   private speed: 1 | 3 | 5 = 1;
   private raf = 0;
   private lastTs = 0;

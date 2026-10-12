@@ -1,13 +1,14 @@
 /*
  * 離線快取（Service Worker）：讓從手機主畫面打開時不必每次重新下載。
  *
- * - 網頁本身（index.html）：先連網拿最新版，3 秒內沒回應或離線就用存好的。
+ * - 網頁本身（index.html）：先連網拿最新版（略過瀏覽器快取），3 秒內沒回應或離線就用存好的。
+ * - version.json（自動更新用）：不經過這裡，一定連網。
  * - 程式與樣式（assets/ 檔名帶雜湊，內容不會變）：存好就直接用。
  * - 資料（data/*.json、圖示等）：先用存好的立刻顯示，同時在背景更新，下次打開就是新的。
  * - 開通碼清單、同步設定：先連網，失敗才用存好的（新增開通碼要馬上生效）。
  * - 其他網站（證交所、富果、Firebase、字型）：不經過這裡。
  */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL = `lplc-shell-${VERSION}`;
 const ASSETS = `lplc-assets-${VERSION}`;
 const DATA = `lplc-data-${VERSION}`;
@@ -56,11 +57,12 @@ const keyOf = (request) => {
   return url.toString();
 };
 
-async function networkFirst(request, cacheName, timeoutMs) {
+async function networkFirst(request, cacheName, timeoutMs, fresh = false) {
   const key = keyOf(request);
   try {
     const response = await Promise.race([
-      fetch(request),
+      // 網頁本身要跟伺服器確認有沒有新版（不用瀏覽器快取的舊網頁）
+      fresh ? fetch(request.url, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(request),
       new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
     ]);
     await put(cacheName, key, response.clone());
@@ -103,8 +105,9 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  if (url.pathname.endsWith('/version.json')) return;
   if (request.mode === 'navigate') {
-    event.respondWith(networkFirst(request, SHELL, 3000));
+    event.respondWith(networkFirst(request, SHELL, 3000, true));
   } else if (url.pathname.includes('/assets/')) {
     event.respondWith(cacheFirst(request, ASSETS));
   } else if (NETWORK_FIRST.test(url.pathname)) {

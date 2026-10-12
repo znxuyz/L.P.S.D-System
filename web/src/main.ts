@@ -25,6 +25,7 @@ import { applyActiveEtfData, loadActiveEtfData } from './data/activeEtfData';
 import { MOCK_ETFS } from './data/mockEtfs';
 import { renderStockPage, type ExternalStock } from './ui/stockPage';
 import { SimPage } from './ui/simPage';
+import { startUpdateCheck } from './data/appUpdate';
 import { renderLearnPage } from './ui/learnPage';
 import { laplaceBusy, playLaplaceIntro, playLaplaceOutro } from './ui/laplaceIntro';
 import { industryIdOf, loadStockDirectory, searchDirectory, type StockDirectory } from './data/stockDirectory';
@@ -290,6 +291,11 @@ class App {
     this.map.setFocus(this.focus);
     if (this.provider instanceof LiveProvider) this.provider.setFocus(this.focus?.kind === 'stock' ? this.focus.id : null);
     this.renderPanels();
+  }
+
+  /** 現在重新載入不會打斷操作嗎（模擬盤播放中不行）。 */
+  canReload(): boolean {
+    return !(this.page === 'sim' && this.sim.busy);
   }
 
   private showPage(page: Page): void {
@@ -747,11 +753,13 @@ async function main(): Promise<void> {
     if (provider instanceof LiveProvider) provider.overlay = (code, f) => overlayReal(code, f, index, chips, fin, pe);
     for (const s of universe.stocks) if (s.fundamentals) overlayReal(s.code, s.fundamentals, index, chips, fin, pe);
   }
-  new App(universe, provider, settings, real);
+  const app = new App(universe, provider, settings, real);
   // 離線快取：從手機主畫面打開時直接用存好的程式與資料，不必每次重新下載
   if (import.meta.env.PROD && 'serviceWorker' in navigator) {
     void navigator.serviceWorker.register('sw.js').catch(() => undefined);
   }
+  // 主畫面 App 從背景叫回來時不會重新載入：自己檢查有沒有新版，有就更新
+  if (import.meta.env.PROD) startUpdateCheck(() => app.canReload());
 }
 
 void main();
