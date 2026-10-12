@@ -488,38 +488,103 @@ function drawKline(root: HTMLElement, n: number): void {
   for (const b of root.querySelectorAll<HTMLElement>('[data-kline]')) b.classList.toggle('is-on', b.dataset.kline === String(n));
 }
 
+/** 分類：手機上一次只顯示一類，上方分頁切換。 */
+const GROUPS: { id: string; icon: string; title: string; sections: string[] }[] = [
+  { id: 'basic', icon: '📖', title: '基本', sections: ['basic', 'order'] },
+  { id: 'kbar', icon: '🕯️', title: 'K 棒', sections: ['kbar', 'lab', 'shapes'] },
+  { id: 'kline', icon: '📈', title: 'K 線圖', sections: ['kline', 'ma', 'volume'] },
+  { id: 'tech', icon: '🔺', title: '型態指標', sections: ['pattern', 'indicator'] },
+  { id: 'fund', icon: '🏢', title: '基本面籌碼', sections: ['fund', 'chips'] },
+  { id: 'etf', icon: '🧺', title: 'ETF', sections: ['etf'] },
+];
+const TAB_KEY = 'lplc.learn.tab';
+
 let rendered = false;
+
+function showGroup(root: HTMLElement, id: string, scroll: boolean): void {
+  const gi = Math.max(0, GROUPS.findIndex((g) => g.id === id));
+  const g = GROUPS[gi];
+  for (const el of root.querySelectorAll<HTMLElement>('[data-learn-group]')) el.hidden = el.dataset.learnGroup !== g.id;
+  const bar = root.querySelector<HTMLElement>('.learn-tabs')!;
+  for (const b of bar.querySelectorAll<HTMLElement>('[data-learn-tab]')) {
+    const on = b.dataset.learnTab === g.id;
+    b.setAttribute('aria-selected', String(on));
+    // 手機上分頁列可以左右滑：把選到的分頁捲到中間（只捲分頁列，不動整頁）
+    if (on) bar.scrollLeft = b.offsetLeft - (bar.clientWidth - b.offsetWidth) / 2;
+  }
+  bar.classList.toggle('is-end', bar.scrollLeft + bar.clientWidth >= bar.scrollWidth - 2);
+  const prev = GROUPS[gi - 1];
+  const next = GROUPS[gi + 1];
+  root.querySelector('.learn-pager')!.innerHTML = `
+    ${prev ? `<button type="button" class="btn" data-learn-tab="${prev.id}">← ${prev.icon} ${prev.title}</button>` : '<span></span>'}
+    ${next ? `<button type="button" class="btn btn-accent" data-learn-tab="${next.id}">下一課：${next.icon} ${next.title} →</button>` : '<span></span>'}`;
+  try {
+    localStorage.setItem(TAB_KEY, g.id);
+  } catch {
+    /* 存不了就算了 */
+  }
+  if (scroll) {
+    // 回到這一類的最上面（分頁列下面）
+    const top = root.getBoundingClientRect().top + window.scrollY - 8;
+    if (window.scrollY > top) window.scrollTo({ top });
+  }
+}
 
 /** 第一次切到這頁時畫出來（之後不重畫，保留捲動位置與實驗室的值）。 */
 export function renderLearnPage(root: HTMLElement): void {
   if (rendered) return;
   rendered = true;
+  // 編號照分類順序（1、2、3…一路往下）
+  const order = GROUPS.flatMap((g) => g.sections);
+  const byId = new Map(SECTIONS.map((s) => [s.id, { s, n: order.indexOf(s.id) + 1 }]));
   root.innerHTML = `
-    <nav class="learn-toc glass" aria-label="目錄">
-      <p class="eyebrow">股市入門</p>
-      ${SECTIONS.map((s, i) => `<button type="button" data-learn-go="${s.id}"><span>${i + 1}</span>${s.title}</button>`).join('')}
+    <nav class="learn-tabs glass" role="tablist" aria-label="股市入門分類">
+      ${GROUPS.map((g) => `<button type="button" role="tab" data-learn-tab="${g.id}" aria-selected="false"><span aria-hidden="true">${g.icon}</span>${g.title}</button>`).join('')}
     </nav>
     <div class="learn-main">
-      <header class="learn-hero glass">
-        <p class="eyebrow">Learn</p>
-        <h2>股市入門</h2>
-        <p>從「K 棒是什麼」開始，一步一步看懂 K 線圖、均線、成交量、型態、指標、基本面與籌碼。圖都是示意，可以搭配「個股分析」看真實股票，或到模擬盤實際練習。</p>
-      </header>
-      ${SECTIONS.map((s, i) => `<section class="learn-card glass" id="learn-sec-${s.id}" aria-labelledby="learn-h-${s.id}"><h3 id="learn-h-${s.id}"><span class="learn-no">${i + 1}</span>${s.title}</h3>${s.html()}</section>`).join('')}
+      ${GROUPS.map(
+        (g) => `<div class="learn-group" data-learn-group="${g.id}" role="tabpanel" hidden>
+          ${
+            g.id === 'basic'
+              ? `<header class="learn-hero glass">
+            <p class="eyebrow">Learn</p>
+            <h2>股市入門</h2>
+            <p>從「K 棒是什麼」開始，一步一步看懂 K 線圖、均線、成交量、型態、指標、基本面與籌碼。上面的分頁可以直接切換，圖都是示意；可以搭配「個股分析」看真實股票，或到模擬盤實際練習。</p>
+          </header>`
+              : ''
+          }
+          ${g.sections
+            .map((id) => {
+              const { s, n } = byId.get(id)!;
+              return `<section class="learn-card glass" id="learn-sec-${s.id}" aria-labelledby="learn-h-${s.id}"><h3 id="learn-h-${s.id}"><span class="learn-no">${n}</span>${s.title}</h3>${s.html()}</section>`;
+            })
+            .join('')}
+        </div>`,
+      ).join('')}
+      <div class="learn-pager"></div>
       <p class="muted learn-foot">以上是常見的看法與經驗法則，不構成投資建議。任何訊號都可能失準，請控制風險。</p>
     </div>`;
   updateLab(root);
   drawKline(root, 1);
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem(TAB_KEY);
+  } catch {
+    /* 沒有就從第一類開始 */
+  }
+  showGroup(root, saved ?? GROUPS[0].id, false);
   if (labBound) return;
   labBound = true;
+  const bar = root.querySelector<HTMLElement>('.learn-tabs')!;
+  bar.addEventListener('scroll', () => bar.classList.toggle('is-end', bar.scrollLeft + bar.clientWidth >= bar.scrollWidth - 2), { passive: true });
   root.addEventListener('input', (e) => {
     if ((e.target as HTMLElement).dataset.lab) updateLab(root);
   });
   root.addEventListener('click', (e) => {
     const t = e.target as Element;
-    const go = t.closest<HTMLElement>('[data-learn-go]');
-    if (go) {
-      root.querySelector(`#learn-sec-${go.dataset.learnGo}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const tab = t.closest<HTMLElement>('[data-learn-tab]');
+    if (tab) {
+      showGroup(root, tab.dataset.learnTab!, true);
       return;
     }
     const pre = t.closest<HTMLElement>('[data-lab-preset]');
