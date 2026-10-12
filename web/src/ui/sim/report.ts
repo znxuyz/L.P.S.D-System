@@ -22,6 +22,7 @@ export function recordOf(s: SimState, ctx: SimCtx): SimRecord {
     endedAt: new Date().toISOString(),
     invested,
     detail: { equity: s.equity, days: s.days, trades: s.trades, flows: s.flows, bench },
+    bankrupt: s.bankrupt ? { date: s.bankrupt.date, day: s.bankrupt.day } : undefined,
   };
 }
 
@@ -47,7 +48,8 @@ export function reportHtml(r: SimRecord, w: number, back: string, who = ''): str
   const excess = r.bench == null ? null : ret - r.bench;
   const det = r.detail;
   const head = `<p class="eyebrow">Laplace Replay · 結束報告${who ? ` · ${esc(who)}` : ''}</p>
-    <h2 class="sim-title">這一局揭曉</h2>
+    <h2 class="sim-title">這一局揭曉${r.bankrupt ? '<span class="sim-ruin-tag">💥 破產</span>' : ''}</h2>
+    ${r.bankrupt ? `<p class="sim-msg sim-ruin-note">第 ${r.bankrupt.day} 天（${esc(r.bankrupt.date)}）收盤時破產，所有部位被強制了結。</p>` : ''}
     <p class="sim-reveal num">${esc(r.start)}（${weekday(r.start)}）<span class="muted">→</span> ${esc(r.end)}（${weekday(r.end)}）<small class="muted">共 ${r.days} 個交易日</small></p>
     ${excess != null ? `<p class="sim-verdict ${cls(excess)}">${excess >= 0 ? `贏過大盤 ${num(excess * 100, 2)} 個百分點` : `落後大盤 ${num(-excess * 100, 2)} 個百分點`}</p>` : ''}`;
   let stats = `<dl class="sim-kpis sim-report-kpis">

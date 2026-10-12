@@ -58,7 +58,7 @@ export function boardHtml(rows: BoardRow[] | null, tab: Window, loading: boolean
       const status = r.entry === undefined ? (loading ? '讀取中' : '—') : r.entry === 'error' ? '讀取失敗' : !r.e ? '還沒有成績' : !has ? '天數不足' : '';
       return `<tr class="${r.self ? 'is-me' : ''}">
         <td class="num">${has ? rank : '—'}</td>
-        <td><b>${esc(r.label)}</b>${r.self ? ' <small class="muted">（我）</small>' : ''}</td>
+        <td><b>${esc(r.label)}</b>${r.self ? ' <small class="muted">（我）</small>' : ''}${r.e?.stats.bankrupt ? ' <span class="sim-ruin-tag is-sm">💥 破產</span>' : ''}</td>
         ${status ? `<td colspan="4" class="muted">${status}</td>` : `<td class="num ${cls(r.x ?? 0)}">${pctOrDash(r.x)}</td><td class="num ${cls(r.ret ?? 0)}">${pctOrDash(r.ret)}</td><td class="num">${r.e!.stats.days}</td><td class="num muted">${ago(r.e!.updatedAt)}</td>`}
       </tr>`;
     })
@@ -73,7 +73,7 @@ export function lobbyHtml(o: { user: CodeEntry; state: SimState | null; save: Si
     const eq = s.equity.at(-1)?.[1] ?? s.settings.capital;
     const ret = eq / investedOf(s) - 1;
     resume = `<div class="sim-card">
-        <p class="eyebrow">接續上次</p>
+        <p class="eyebrow">接續上次${s.bankrupt ? ' <span class="sim-ruin-tag is-sm">💥 破產</span>' : ''}</p>
         <p class="sim-card-date num">第 ${s.day} 天・星期${weekday(s.date)} ${clock(s.minute)}</p>
         <p class="muted num">${garble(s.date)}</p>
         <p class="num">總資產 ${money(eq)}　<span class="${cls(ret)}">${pctOrDash(ret)}</span></p>
@@ -84,7 +84,7 @@ export function lobbyHtml(o: { user: CodeEntry; state: SimState | null; save: Si
     .map((r, i) => {
       const ret = r.equity / (r.invested ?? r.capital) - 1;
       return `<tr${r.detail ? ` data-sim="report" data-i="${i}" tabindex="0" class="is-link"` : ''}>
-        <td class="num">${esc(r.start)} → ${esc(r.end)}<br /><small class="muted">${r.days} 個交易日</small></td>
+        <td class="num">${esc(r.start)} → ${esc(r.end)}<br /><small class="muted">${r.days} 個交易日</small>${r.bankrupt ? ' <span class="sim-ruin-tag is-sm">💥 破產</span>' : ''}</td>
         <td class="num">${money(r.invested ?? r.capital)}</td><td class="num ${cls(ret)}">${pctOrDash(ret)}</td>
         <td class="num ${r.bench == null ? 'muted' : cls(r.bench)}">${pctOrDash(r.bench)}</td><td class="num">${r.trades}</td>
         <td>${r.detail ? '<span class="sim-link">報告 ▸</span>' : '<span class="muted">—</span>'}</td></tr>`;
@@ -129,6 +129,12 @@ export function setupHtml(cal: string[] | null | undefined): string {
       <label>本金（元）<input type="number" name="capital" min="10000" step="10000" value="1000000" /></label>
       <label>每月薪資投入（元）<input type="number" name="monthly" min="0" step="1000" value="${SALARY}" /></label>
       <label>手續費折扣<input type="number" name="discount" min="0.1" max="1" step="0.01" value="0.6" /></label>
+      <label>破產條件<select name="ruin">
+        <option value="1" selected>總資產歸零就破產</option>
+        <option value="0.8">虧掉投入的 80% 就破產</option>
+        <option value="0.5">虧掉投入的 50% 就破產（嚴格）</option>
+        <option value="0">不會破產</option>
+      </select></label>
       <button type="button" class="btn btn-accent" data-sim="random-start" title="隨機抽一個過去的日期，不會告訴你是哪一天">🎲 隨機日期開始</button>
       <label>或指定起始日期<input type="date" name="start" id="sim-start" min="${min}" max="${max}" value="${def}" /></label>
       <button type="submit" class="btn">從指定日期開始</button>
@@ -142,6 +148,7 @@ export function setupHtml(cal: string[] | null | undefined): string {
         整戶維持率低於 130% 提醒、低於 120% 收盤強制了結。</li>
       <li>資金：每月第一個交易日薪資入帳；信用貸款（額度 100 萬、年利率 3.5%、本息平均攤還）；股票質押（現股最多借六成、年利率 2.5%）。
         報酬率＝總資產 ÷ 累計投入（本金＋薪資）－ 1，貸款算負債。</li>
+      <li><b>破產</b>：每天收盤檢查，總資產跌到破產條件以下時，所有部位以收盤價強制了結並償還借款，這一局直接結束（可以在上面選條件）。</li>
       <li>手續費 0.1425% × 折扣（整股最低 20 元、零股 1 元），賣出證交稅 0.3%（ETF 0.1%）；一價鎖漲停買不到、鎖跌停賣不掉；除權息自動處理。</li>
     </ul>`;
 }

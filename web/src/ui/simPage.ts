@@ -678,6 +678,11 @@ export class SimPage implements SimCtx {
     if (!s || s.equity.at(-1)?.[0] === s.date) return;
     closeDay(s, this.market);
     this.freshDay = s.date;
+    if (s.bankrupt) {
+      // 破產：這一局結束，時間停住，等玩家看結束報告
+      this.running = false;
+      this.msg = '';
+    }
     this.persist();
     this.scheduleBoard();
   }
@@ -686,7 +691,7 @@ export class SimPage implements SimCtx {
   private async nextDay(): Promise<void> {
     const s = this.state;
     const cal = this.calendar;
-    if (!s || !cal) return;
+    if (!s || !cal || s.bankrupt) return;
     await Promise.all(this.neededCodes().map((c) => this.fetchCandles(c)));
     // 盤前直接跳到隔天：先開盤撮合盤前委託，再走完今天
     if (s.pre) openDay(s, this.market);
@@ -765,7 +770,7 @@ export class SimPage implements SimCtx {
   /** 開盤：盤前委託、定期定額以開盤價撮合，時間開始從 09:00 往前走。 */
   private async open(): Promise<void> {
     const s = this.state;
-    if (!s?.pre) return;
+    if (!s?.pre || s.bankrupt) return;
     await Promise.all(this.neededCodes().map((c) => this.fetchCandles(c)));
     if (!s.pre) return;
     const before = s.trades.length;
@@ -778,7 +783,9 @@ export class SimPage implements SimCtx {
     this.render();
   }
 
+  /** 這一局不能再往前走了：玩到最新資料，或破產。 */
   private isEnd(s: SimState): boolean {
+    if (s.bankrupt) return true;
     const cal = this.calendar ?? [];
     return cal.length > 0 && s.date >= cal[cal.length - 1] && s.minute >= SESSION_MINUTES;
   }
@@ -791,6 +798,8 @@ export class SimPage implements SimCtx {
     const fd = new FormData(form);
     const capital = Math.max(10_000, Number(fd.get('capital')) || 1_000_000);
     const monthly = Math.max(0, Math.round(Number(fd.get('monthly')) || 0));
+    const ruinRaw = Number(fd.get('ruin'));
+    const ruinLoss = [0, 0.5, 0.8, 1].includes(ruinRaw) ? ruinRaw : 1;
     const discount = Math.min(1, Math.max(0.1, Number(fd.get('discount')) || 0.6));
     const minIdx = Math.min(WARMUP, cal.length - 1);
     const maxIdx = Math.max(minIdx, cal.length - 21);
@@ -802,7 +811,7 @@ export class SimPage implements SimCtx {
       idx = Math.max(idx, minIdx);
     }
     this.archive();
-    this.state = newSim({ start: cal[idx], capital, discount, monthly }, this.state?.watch ?? '2330', this.preStop);
+    this.state = newSim({ start: cal[idx], capital, discount, monthly, ruinLoss }, this.state?.watch ?? '2330', this.preStop);
     this.msg = '';
     this.bankMsg = '';
     this.view = 'play';
@@ -921,7 +930,7 @@ export class SimPage implements SimCtx {
   }
 
   private reset(): void {
-    if (!confirm('結束這一局？會揭曉這一局的真實日期，成績存進歷史紀錄。')) return;
+    if (!this.state?.bankrupt && !confirm('結束這一局？會揭曉這一局的真實日期，成績存進歷史紀錄。')) return;
     if (this.state && this.state.minute > 0 && this.state.equity.at(-1)?.[0] !== this.state.date) this.closeToday();
     const saved = this.archive();
     this.state = null;
@@ -1286,14 +1295,14 @@ export class SimPage implements SimCtx {
     const bench = this.benchOf(s);
     const closed = s.minute >= SESSION_MINUTES;
     const end = this.isEnd(s);
-    const status = end ? '資料已到最新' : s.pre ? '盤前・可以先掛單' : closed ? '收盤' : this.running ? '盤中' : '暫停中・無法交易';
+    const status = s.bankrupt ? '💥 破產' : end ? '資料已到最新' : s.pre ? '盤前・可以先掛單' : closed ? '收盤' : this.running ? '盤中' : '暫停中・無法交易';
     const ratio = maintenance(s, m);
     const debt = debtOf(s);
     setHtml(
       q('sim-date'),
       `<p class="eyebrow">Laplace Replay · 第 ${s.day} 天</p>
         <p class="sim-day num">星期${weekday(s.date)} <b class="sim-clock">${s.pre ? '08:30' : clock(s.minute)}</b>
-          <span class="sim-status sim-status-${end ? 'end' : s.pre ? 'pre' : closed ? 'closed' : this.running ? 'run' : 'pause'}">${status}</span></p>
+          <span class="sim-status sim-status-${s.bankrupt ? 'ruin' : end ? 'end' : s.pre ? 'pre' : closed ? 'closed' : this.running ? 'run' : 'pause'}">${status}</span></p>
         <p class="sim-garble num" title="日期已隱藏">${garble(s.date)}</p>`,
     );
     setHtml(
@@ -1309,7 +1318,7 @@ export class SimPage implements SimCtx {
       q('sim-steps'),
       `${
         s.pre
-          ? '<button type="button" class="btn btn-accent" data-sim="open" title="快捷鍵：空白鍵">🔔 開盤</button>'
+          ? `<button type="button" class="btn btn-accent" data-sim="open" ${end ? 'disabled' : ''} title="快捷鍵：空白鍵">🔔 開盤</button>`
           : `<button type="button" class="btn ${this.running ? '' : 'btn-accent'}" data-sim="play" ${end ? 'disabled' : ''} title="快捷鍵：空白鍵">${this.running ? '⏸ 暫停' : '▶ 繼續'}</button>`
       }
         <div class="seg sim-speed" role="group" aria-label="時間流速">${([1, 3, 5] as const)
@@ -1323,7 +1332,13 @@ export class SimPage implements SimCtx {
     );
     setHtml(
       q('sim-endbox'),
-      end ? `<p class="sim-end">已經玩到最新的資料。${verdict(s, m, bench)} <button type="button" class="btn btn-sm btn-accent" data-sim="reset">結束並看報告</button></p>` : '',
+      s.bankrupt
+        ? `<div class="sim-end sim-ruin"><b>💥 破產了</b>
+            <p>第 ${s.bankrupt.day} 天收盤，${(s.settings.ruinLoss ?? 1) >= 1 ? '總資產歸零' : `虧損超過累計投入的 ${Math.round((s.settings.ruinLoss ?? 1) * 100)}%`}。所有部位已用收盤價強制了結並償還借款，剩下 ${money(s.bankrupt.equity)} 元，這一局到這裡結束。</p>
+            <button type="button" class="btn btn-accent" data-sim="reset">看結束報告（揭曉日期）</button></div>`
+        : end
+          ? `<p class="sim-end">已經玩到最新的資料。${verdict(s, m, bench)} <button type="button" class="btn btn-sm btn-accent" data-sim="reset">結束並看報告</button></p>`
+          : '',
     );
   }
 

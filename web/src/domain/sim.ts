@@ -111,6 +111,19 @@ export interface SimSettings {
   discount: number;
   /** 每月薪資投入（沒有 = 0）。 */
   monthly?: number;
+  /**
+   * 破產條件：收盤時虧損達到累計投入的這個比例就破產（1 = 總資產歸零、0.8、0.5；0 = 不會破產）。
+   * 沒設定（舊存檔）視為 1。
+   */
+  ruinLoss?: number;
+}
+
+/** 破產時的狀態。 */
+export interface Bankrupt {
+  date: string;
+  day: number;
+  /** 破產時（強制了結後）的總資產。 */
+  equity: number;
 }
 
 /** 停損／停利：盤中價格碰到就以市價了結整個部位。 */
@@ -205,6 +218,8 @@ export interface SimState {
   pre?: boolean;
   /** 這個月的定期定額要在開盤時買進。 */
   dcaDue?: boolean;
+  /** 破產了：這一局結束，不能再交易。 */
+  bankrupt?: Bankrupt;
 }
 
 /** 除權息：[日期, 代號, 除權息前收盤, 參考價, 權值+息值, 權/息] */
@@ -420,6 +435,7 @@ function pendingShares(s: SimState, code: string, kind: Kind, side: Side): numbe
 
 /** 下單前檢查；回傳錯誤訊息或 null。 */
 export function checkOrder(s: SimState, m: Market, o: Omit<SimOrder, 'id'>): string | null {
+  if (s.bankrupt) return '已經破產，這一局結束了';
   if (s.minute >= SESSION_MINUTES) return '已經收盤，請等下一個交易日開盤';
   if (!Number.isInteger(o.shares) || o.shares <= 0) return '股數要是正整數';
   if (o.limit !== undefined && !(o.limit > 0)) return '限價要大於 0';
@@ -849,6 +865,7 @@ export function closeDay(s: SimState, m: Market): void {
   s.minute = SESSION_MINUTES;
   // 提醒只留最近 500 則（成交紀錄全部保留），存檔才不會越來越大
   if (s.notes.length > 600) s.notes = s.notes.slice(-500);
+  checkRuin(s, m);
   const eq = Math.round(equityOf(s, m));
   s.equity.push([s.date, eq]);
   const today = s.trades.filter((t) => t.date === s.date);
@@ -863,12 +880,51 @@ export function closeDay(s: SimState, m: Market): void {
   });
 }
 
+/** 破產門檻：總資產低於這個金額就破產（null = 不會破產）。 */
+export function ruinLine(s: SimState): number | null {
+  const loss = s.settings.ruinLoss ?? 1;
+  if (!(loss > 0)) return null;
+  return investedOf(s) * (1 - loss);
+}
+
+/**
+ * 收盤檢查破產：總資產跌到門檻以下時，所有部位以收盤價強制了結、還清信貸與質押借款（還不完就是負資產），
+ * 取消委託、停損停利與定期定額，這一局結束。
+ */
+function checkRuin(s: SimState, m: Market): void {
+  const line = ruinLine(s);
+  if (s.bankrupt || line == null) return;
+  const before = equityOf(s, m);
+  if (before > line) return;
+  for (const p of [...s.pos]) {
+    const price = priceNow(s, m, p.code) ?? p.cost / Math.max(1, p.shares);
+    execute(s, m, { id: s.nextId++, code: p.code, side: p.dir === 'long' ? 'sell' : 'buy', kind: p.kind, shares: p.shares }, price, true);
+  }
+  s.pos = [];
+  s.cash -= debtOf(s);
+  s.loans = [];
+  s.pledges = [];
+  s.orders = [];
+  s.stops = [];
+  s.dca = [];
+  const equity = Math.round(s.cash);
+  s.bankrupt = { date: s.date, day: s.day, equity };
+  const loss = s.settings.ruinLoss ?? 1;
+  note(
+    s,
+    '',
+    loss >= 1
+      ? `💥 破產：總資產 ${Math.round(before).toLocaleString()} 元已經歸零，所有部位以收盤價強制了結並償還借款，這一局結束`
+      : `💥 破產：虧損超過累計投入的 ${Math.round(loss * 100)}%（總資產 ${Math.round(before).toLocaleString()} 元），所有部位以收盤價強制了結並償還借款，這一局結束`,
+  );
+}
+
 /**
  * 進入下一個交易日：先處理除權息與月初資金。
  * preOpen = true 時停在盤前，等 openDay() 開盤；否則直接開盤（09:00）。
  */
 export function beginDay(s: SimState, m: Market, date: string, preOpen = false): void {
-  if (date <= s.date) return;
+  if (date <= s.date || s.bankrupt) return;
   const newMonth = date.slice(0, 7) !== s.date.slice(0, 7);
   s.date = date;
   s.minute = 0;

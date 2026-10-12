@@ -18,6 +18,8 @@ export interface BoardStats {
   r: Record<Window, number | null>;
   /** 各區間的超額報酬（減掉同期大盤）。 */
   x: Record<Window, number | null>;
+  /** 這一局破產了。 */
+  bankrupt?: boolean;
 }
 
 export function boardStats(s: SimState, index: (d: string) => number | undefined, prevDay: (d: string) => string | undefined): BoardStats {
@@ -44,5 +46,5 @@ export function boardStats(s: SimState, index: (d: string) => number | undefined
     const b = benchValue(s, index, prevDay, d1);
     if (b != null) x.all = r.all - (b / inv - 1);
   }
-  return { days: eq.length, r, x };
+  return { days: eq.length, r, x, ...(s.bankrupt ? { bankrupt: true } : {}) };
 }
