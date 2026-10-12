@@ -1,8 +1,14 @@
 /** 模擬盤新手指引的每一步（功能說明＋下單的操作步驟）。 */
 import type { GuideStep } from './guide';
 
-export function simGuideSteps(root: HTMLElement): GuideStep[] {
-  const $ = (sel: string) => () => root.querySelector(sel);
+export function simGuideSteps(root: HTMLElement, showPane?: (pane: string) => void): GuideStep[] {
+  // 手機版面板分在不同分頁：框到哪個區塊，就先切到那個分頁
+  const $ = (sel: string) => () => {
+    const el = root.querySelector(sel);
+    const pane = el?.closest<HTMLElement>('[data-pane]')?.dataset.pane;
+    if (pane && showPane) showPane(pane);
+    return el;
+  };
   return [
     {
       title: '歡迎來到拉普拉斯模擬盤',

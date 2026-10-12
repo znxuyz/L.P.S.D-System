@@ -116,6 +116,17 @@ interface RankRow {
 
 type View = 'gate' | 'lobby' | 'setup' | 'play' | 'admin' | 'report';
 
+/** 手機版分頁：一次只看一類，不用一路往下滑。 */
+const SIM_TABS = [
+  { id: 'trade', icon: '📈', title: '交易' },
+  { id: 'hold', icon: '💼', title: '持股' },
+  { id: 'money', icon: '💰', title: '資金' },
+  { id: 'rank', icon: '🏆', title: '排行' },
+  { id: 'news', icon: '📰', title: '新聞' },
+] as const;
+type SimTab = (typeof SIM_TABS)[number]['id'];
+const TAB_KEY = 'lplc.sim.tab';
+
 export class SimPage implements SimCtx {
   private state: SimState | null = null;
   private codeList: CodeList | null | undefined;
@@ -192,6 +203,14 @@ export class SimPage implements SimCtx {
   private dirty = false;
   /** 圖表大小：只在視窗大小改變時量（每次重畫都去讀寬度會強迫整頁重新排版）。 */
   private sizes = { kw: 0, kh: 0, ew: 0 };
+  /** 手機版目前的分頁。 */
+  private tab: SimTab = (() => {
+    try {
+      return (localStorage.getItem(TAB_KEY) as SimTab | null) ?? 'trade';
+    } catch {
+      return 'trade';
+    }
+  })();
   /** K 線與分時圖每秒最多重畫一次（換股票、換日立即重畫）。 */
   private chartKey = '';
   private chartAt = 0;
@@ -666,7 +685,35 @@ export class SimPage implements SimCtx {
   private measure(): void {
     const k = this.root.querySelector<HTMLElement>('#sim-k');
     const e = this.root.querySelector<HTMLElement>('#sim-equity');
-    this.sizes = { kw: k?.clientWidth ?? 0, kh: k?.clientHeight ?? 0, ew: e?.clientWidth ?? 0 };
+    // 手機上切到別的分頁時圖表是隱藏的（寬度 0），沿用上次量到的大小
+    this.sizes = { kw: k?.clientWidth || this.sizes.kw, kh: k?.clientHeight || this.sizes.kh, ew: e?.clientWidth || this.sizes.ew };
+  }
+
+  /** 手機版的分頁（桌機版全部並排，分頁列不顯示）。 */
+  private setTab(tab: SimTab, scroll: boolean): void {
+    if (!SIM_TABS.some((t) => t.id === tab)) tab = 'trade';
+    this.tab = tab;
+    this.root.dataset.tab = tab;
+    const bar = this.root.querySelector<HTMLElement>('#sim-tabs');
+    for (const b of bar?.querySelectorAll<HTMLElement>('[data-sim-tab]') ?? []) {
+      const on = b.dataset.simTab === tab;
+      b.setAttribute('aria-selected', String(on));
+      if (on && bar) bar.scrollLeft = b.offsetLeft - (bar.clientWidth - b.offsetWidth) / 2;
+    }
+    try {
+      localStorage.setItem(TAB_KEY, tab);
+    } catch {
+      /* 存不了就算了 */
+    }
+    if (!scroll || !bar) return;
+    // 分頁列已經黏在上面（往下捲過了）時，回到這個分頁的開頭
+    const head = this.root.querySelector<HTMLElement>('#sim-head');
+    const top = head ? head.getBoundingClientRect().bottom + window.scrollY : 0;
+    if (window.scrollY > top) window.scrollTo({ top });
+    this.measure();
+    this.chartKey = '';
+    this.panelCache.clear();
+    this.render();
   }
 
   /** 內容的關鍵值沒變就沿用上次產生的 HTML。 */
@@ -733,7 +780,9 @@ export class SimPage implements SimCtx {
     const wasRunning = this.running;
     this.running = false;
     this.render();
-    runGuide(simGuideSteps(this.root), () => {
+    const tabBefore = this.tab;
+    runGuide(simGuideSteps(this.root, (tab) => this.setTab(tab as SimTab, false)), () => {
+      this.setTab(tabBefore, false);
       this.guiding = false;
       this.running = wasRunning;
       this.render();
@@ -956,18 +1005,21 @@ export class SimPage implements SimCtx {
     root.dataset.ready = '1';
     root.innerHTML = `
       <div class="sim-head glass" id="sim-head"></div>
+      <nav class="sim-tabs glass" id="sim-tabs" role="tablist" aria-label="模擬盤畫面">
+        ${SIM_TABS.map((t) => `<button type="button" role="tab" data-sim-tab="${t.id}" aria-selected="false"><span aria-hidden="true">${t.icon}</span>${t.title}</button>`).join('')}
+      </nav>
       <div class="sim-main">
-        <div class="sim-chart glass" id="sim-chart"></div>
-        <div class="sim-dayrep-panel glass" id="sim-dayrep"></div>
-        <div class="sim-hold glass" id="sim-hold"></div>
-        <div class="sim-news glass" id="sim-news"></div>
-        <div class="sim-equity glass" id="sim-equity"></div>
+        <div class="sim-chart glass" id="sim-chart" data-pane="trade"></div>
+        <div class="sim-dayrep-panel glass" id="sim-dayrep" data-pane="hold"></div>
+        <div class="sim-hold glass" id="sim-hold" data-pane="hold"></div>
+        <div class="sim-news glass" id="sim-news" data-pane="news"></div>
+        <div class="sim-equity glass" id="sim-equity" data-pane="money"></div>
       </div>
       <div class="sim-aside">
-        <div class="sim-order glass" id="sim-order"></div>
-        <div class="sim-bank glass" id="sim-bank"></div>
-        <div class="sim-rank glass" id="sim-rank"></div>
-        <div class="sim-log glass" id="sim-log"></div>
+        <div class="sim-order glass" id="sim-order" data-pane="trade"></div>
+        <div class="sim-bank glass" id="sim-bank" data-pane="money"></div>
+        <div class="sim-rank glass" id="sim-rank" data-pane="rank"></div>
+        <div class="sim-log glass" id="sim-log" data-pane="hold"></div>
       </div>
       <div class="sim-setup glass" id="sim-setup"></div>`;
     // 頂端列「離開」旁邊顯示玩家名稱
@@ -985,7 +1037,10 @@ export class SimPage implements SimCtx {
       this.rowDown = Date.now();
       void this.watch(row.dataset.code!);
     });
+    this.setTab(this.tab, false);
     root.addEventListener('click', (e) => {
+      const tab = (e.target as Element).closest<HTMLElement>('[data-sim-tab]');
+      if (tab) return this.setTab(tab.dataset.simTab as SimTab, true);
       const el = (e.target as Element).closest<HTMLElement>('[data-sim]');
       if (!el) return;
       if (el.matches('tr[data-sim="watch"]') && Date.now() - this.rowDown < 800) return;
