@@ -86,6 +86,7 @@ import { recordOf, reportHtml, verdict } from './sim/report';
 import { askGuide, runGuide } from './sim/guide';
 import { simGuideSteps } from './sim/guideSteps';
 import { pickRandomStart } from '../domain/simScenarios';
+import { adjustForSplits } from '../domain/splits';
 import { renderLearnPage } from './learnPage';
 import { fundHtml, techHtml } from './sim/analysis';
 import { loadChipSeries, type ChipSeries } from '../data/chipSeries';
@@ -1399,8 +1400,7 @@ export class SimPage implements SimCtx {
     }
     const fund = this.funds.get(code);
     const chips = this.chipData.get(code);
-    const past = this.candles.get(code)?.filter((c) => c.date < s.date);
-    const prevClose = past?.length ? past[past.length - 1].close : null;
+    const prevClose = this.market.prevClose(code, s.date) ?? null;
     const q = (id: string) => this.root.querySelector<HTMLElement>(`#${id}`)!;
     setHtml(
       q('sim-fund'),
@@ -1481,7 +1481,12 @@ export class SimPage implements SimCtx {
   private visibleBars(s: SimState): Candle[] | null {
     const all = this.candles.get(s.watch);
     if (!all) return null;
-    const past = all.filter((c) => c.date < s.date);
+    // 已經發生的分割／減資：以前的 K 棒還原成現在的基準（未來的不能用，否則等於偷看）
+    const past = adjustForSplits(
+      all.filter((c) => c.date < s.date),
+      this.market.splitsOf(s.watch),
+      s.date,
+    );
     const path = this.market.path(s.watch, s.date);
     if (!path || s.pre) return past;
     const t = Math.min(SESSION_MINUTES, Math.floor(s.minute));

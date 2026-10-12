@@ -8,8 +8,9 @@
  *   { codes: [代號…], days: { "2025-07-25": [[開, 高, 低, 收, 張, 昨收] 或 0（當天沒成交）, …] } }
  * 不連網，幾秒鐘就跑完。
  */
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { detectSplits } from '../web/src/domain/splits.ts';
 
 type Row = [string, number, number, number, number, number];
 
@@ -19,10 +20,21 @@ const codes = files.map((f) => f.slice(0, -5));
 /** 月份 → 日期 → 每檔一列 */
 const months = new Map<string, Map<string, Array<number[] | 0>>>();
 
+// 除權息的日子（分割判斷要排除）
+const exDays = new Map<string, Set<string>>();
+const exDir = join(dir, 'exrights');
+if (existsSync(exDir))
+  for (const f of readdirSync(exDir).filter((f) => /^\d{4}\.json$/.test(f)))
+    for (const r of JSON.parse(readFileSync(join(exDir, f), 'utf8')) as Array<[string, string]>) (exDays.get(r[1]) ?? exDays.set(r[1], new Set()).get(r[1])!).add(r[0]);
+
 codes.forEach((code, ci) => {
   const rows = JSON.parse(readFileSync(join(dir, 'candles', `${code}.json`), 'utf8')) as Row[];
+  // 股票分割、減資那天的「昨收」換算成新的基準，排行榜的漲跌幅才不會顯示 -75%
+  const splitOn = new Map(detectSplits(rows.map(([date, o, , , c]) => ({ date, open: o, close: c })), exDays.get(code)));
   let prev = 0;
   for (const [date, o, h, l, c, v] of rows) {
+    const k = splitOn.get(date);
+    if (k && prev) prev = Math.round((prev / k) * 100) / 100;
     const m = date.slice(0, 7);
     let days = months.get(m);
     if (!days) months.set(m, (days = new Map()));

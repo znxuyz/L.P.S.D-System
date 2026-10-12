@@ -149,7 +149,7 @@ export function bankHtml(s: SimState, ctx: SimCtx, msg: string): string {
     .map(
       (l) => `<li><div class="num">本金餘額 <b>${money(l.balance)}</b>　月付 ${money(l.payment)}　剩 ${l.left} 期</div>
         <form class="sim-inline" data-form="loan-repay" data-id="${l.id}"><input type="number" name="amount" min="1" step="1000" placeholder="提前還款金額" aria-label="提前還款金額" />
-        <button type="submit" class="btn btn-sm">還款</button><button type="button" class="btn btn-sm" data-sim="loan-payoff" data-id="${l.id}">全部還清</button></form></li>`,
+        <button type="submit" class="btn btn-sm">還款</button><button type="button" class="btn btn-sm" data-sim="loan-payoff" data-id="${l.id}" ${s.cash < l.balance ? 'disabled title="現金不夠一次還清"' : ''}>全部還清</button></form></li>`,
     )
     .join('');
   const ratio = pledgeRatio(s, m);
@@ -173,6 +173,7 @@ export function bankHtml(s: SimState, ctx: SimCtx, msg: string): string {
     .join('');
   return `<h2 class="panel-title">資金 <small>薪資、信貸、質押</small></h2>
     <dl class="sim-stats">
+      <div><dt>現金</dt><dd class="num">${money(s.cash)}</dd></div>
       <div><dt>累計投入</dt><dd class="num">${money(investedOf(s))}</dd></div>
       <div><dt>每月薪資投入</dt><dd class="num">${monthly ? money(monthly) : '不投入'}</dd></div>
       <div><dt>負債合計</dt><dd class="num">${money(debtOf(s))}</dd></div>
