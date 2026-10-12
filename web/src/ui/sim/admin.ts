@@ -24,7 +24,7 @@ export function adminHtml(ctx: SimCtx, o: { synced: boolean; players: PlayerRef[
       const bench = c ? ctx.benchOf(c) : null;
       const updated = sv.updatedAt ? new Date(sv.updatedAt).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
       return `<tr data-sim="pick" data-sync="${esc(p.sync)}" tabindex="0">
-        <td><b>${esc(p.label)}</b></td>
+        <td><b>${esc(p.label)}</b>${c?.bankrupt ? ' <span class="sim-ruin-tag is-sm">💥 破產</span>' : ''}</td>
         <td class="num">${c ? `${esc(c.settings.start)} → ${esc(c.date)} ${clock(c.minute)}<br /><small class="muted">第 ${c.day} 天</small>` : '<span class="muted">沒有進行中</span>'}</td>
         <td class="num">${eq != null ? money(eq) : '—'}</td>
         <td class="num ${ret == null ? '' : cls(ret)}">${pctOrDash(ret)}</td>
@@ -80,7 +80,7 @@ export function playerDetailHtml(ctx: SimCtx, p: PlayerRef, sv: PlayerSave | und
   const hist = sv.history
     .map((r, i) => {
       const ret = r.equity / (r.invested ?? r.capital) - 1;
-      return `<tr${r.detail ? ` data-sim="report" data-i="${i}" data-sync="${esc(p.sync)}" tabindex="0" class="is-link"` : ''}><td class="num">${esc(r.start)} → ${esc(r.end)}</td><td class="num">${r.days}</td><td class="num">${money(r.invested ?? r.capital)}</td><td class="num ${cls(ret)}">${pctOrDash(ret)}</td>
+      return `<tr${r.detail ? ` data-sim="report" data-i="${i}" data-sync="${esc(p.sync)}" tabindex="0" class="is-link"` : ''}><td class="num">${esc(r.start)} → ${esc(r.end)}${r.bankrupt ? ' <span class="sim-ruin-tag is-sm">💥 破產</span>' : ''}</td><td class="num">${r.days}</td><td class="num">${money(r.invested ?? r.capital)}</td><td class="num ${cls(ret)}">${pctOrDash(ret)}</td>
         <td class="num ${r.bench == null ? 'muted' : cls(r.bench)}">${pctOrDash(r.bench)}</td><td class="num">${r.trades}</td><td>${r.detail ? '<span class="sim-link">報告 ▸</span>' : ''}</td></tr>`;
     })
     .join('');

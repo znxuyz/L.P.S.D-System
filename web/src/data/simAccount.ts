@@ -49,6 +49,8 @@ export interface SimRecord {
   invested?: number;
   /** 完整明細（只保留最近幾局），結束報告用。 */
   detail?: RecordDetail;
+  /** 這一局是破產結束的。 */
+  bankrupt?: { date: string; day: number };
 }
 
 export interface RecordDetail {

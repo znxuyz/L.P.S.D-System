@@ -233,3 +233,36 @@ describe('盤前委託與開盤撮合', () => {
     expect(s.pre).toBe(true);
   });
 });
+
+describe('破產', () => {
+  it('融資虧光：收盤時總資產歸零就破產，強制了結並結束這一局', () => {
+    const m = buildMarket(new Map([['2330', [bar('2024-01-02', 100, 100, 100, 100), bar('2024-01-03', 40, 40, 40, 40)]]]));
+    const s = newSim({ start: '2024-01-02', capital: 100_000, discount: 1 });
+    // 借信貸、全部融資買進，股價腰斬以下就會虧光
+    takeLoan(s, 1_000_000, 12);
+    placeOrder(s, m, { code: '2330', side: 'buy', kind: 'margin', shares: 27_000 });
+    closeDay(s, m);
+    expect(s.bankrupt).toBeUndefined();
+    beginDay(s, m, '2024-01-03');
+    closeDay(s, m);
+    expect(s.bankrupt).toMatchObject({ date: '2024-01-03', day: 2 });
+    expect(s.bankrupt!.equity).toBeLessThanOrEqual(0);
+    expect(s.pos).toHaveLength(0);
+    expect(s.loans).toHaveLength(0);
+    expect(placeOrder(s, m, { code: '2330', side: 'buy', kind: 'cash', shares: 1 })).toMatch(/破產/);
+    expect(s.notes.at(-1)!.text).toMatch(/破產/);
+  });
+
+  it('可以設定虧損 50% 就破產，或關閉破產', () => {
+    const rows = [bar('2024-01-02', 100, 100, 100, 100), bar('2024-01-03', 45, 45, 45, 45)];
+    for (const [ruinLoss, broke] of [[0.5, true], [1, false], [0, false]] as const) {
+      const m = buildMarket(new Map([['2330', rows]]));
+      const s = newSim({ start: '2024-01-02', capital: 100_000, discount: 1, ruinLoss });
+      placeOrder(s, m, { code: '2330', side: 'buy', kind: 'cash', shares: 990 });
+      closeDay(s, m);
+      beginDay(s, m, '2024-01-03');
+      closeDay(s, m);
+      expect(!!s.bankrupt).toBe(broke);
+    }
+  });
+});
