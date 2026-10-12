@@ -111,7 +111,7 @@ export function lobbyHtml(o: { user: CodeEntry; state: SimState | null; save: Si
     }
     <h3 class="sim-sub">歷史紀錄 <small class="muted">結束後揭曉日期；每局摘要都會保留，完整報告保留最近 10 局</small></h3>
     ${hist ? `<div class="sim-table-wrap"><table class="sim-table"><thead><tr><th>期間</th><th>累計投入</th><th>報酬</th><th>同額買大盤</th><th>成交筆數</th><th></th></tr></thead><tbody>${hist}</tbody></table></div>` : '<p class="muted">還沒有完成的模擬。</p>'}
-    <p class="sim-lobby-foot">${o.syncBadge}<button type="button" class="btn btn-sm" data-sim="logout">換開通碼／登出</button></p>`;
+    <p class="sim-lobby-foot">${o.syncBadge}<a class="btn btn-sm" href="#learn" title="K 棒、K 線圖、均線等基本知識">📘 股市入門</a><button type="button" class="btn btn-sm" data-sim="logout">換開通碼／登出</button></p>`;
 }
 
 export function setupHtml(cal: string[] | null | undefined): string {
