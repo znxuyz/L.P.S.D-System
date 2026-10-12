@@ -116,6 +116,8 @@ export interface SimSettings {
    * 沒設定（舊存檔）視為 1。
    */
   ruinLoss?: number;
+  /** 隨機開局抽到的情境（結束報告才揭曉）。 */
+  scenario?: string;
 }
 
 /** 破產時的狀態。 */
