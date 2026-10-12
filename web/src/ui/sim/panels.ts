@@ -29,7 +29,7 @@ export function newsHtml(s: SimState, news: NewsItem[]): string {
   // 盤前只看得到今天 09:00 以前發布的新聞
   const now = s.pre ? -1 : s.minute;
   const visible = news.filter(([d, time]) => d < s.date || (d === s.date && newsMinute(time) <= now));
-  const items = visible.slice(-40).reverse();
+  const items = visible.slice(-25).reverse();
   if (!items.length) return `${head}<p class="muted">還沒有新聞。</p>`;
   return `${head}<ol class="sim-newslist">${items
     .map(([d, , level, title]) => `<li class="sim-news-${level}"><span class="sim-news-date num">${garble(d)}（${weekday(d)}）</span><span class="sim-news-title">${esc(title)}</span></li>`)
