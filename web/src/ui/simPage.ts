@@ -83,12 +83,16 @@ import { candleSvg, tickSvg } from './sim/charts';
 import { WARMUP, boardHtml, gateHtml, lobbyHtml, setupHtml, type BoardRow } from './sim/lobby';
 import { bankHtml, dayReportHtml, equityHtml, holdHtml, logHtml, newsHtml, stopHtml } from './sim/panels';
 import { recordOf, reportHtml, verdict } from './sim/report';
+import { askGuide, runGuide } from './sim/guide';
+import { simGuideSteps } from './sim/guideSteps';
 import { BIAS, actionName, cls, garble, investedAt, money, pctOrDash, setHtml, weekday, type SimCtx } from './sim/util';
 
 /** 上次在模擬盤的哪個畫面（大廳／遊戲中），重新打開時用。 */
 const VIEW_KEY = 'lplc.sim.view';
 /** 交易日曆：0050 從 2003 年起每個交易日都有成交。 */
 const CALENDAR_CODE = '0050';
+/** 新手指引：問過（或看過）就記下來，不會每次都問。 */
+const GUIDE_KEY = 'lplc.sim.guide';
 /** 每天要不要先停在盤前（關掉的話收盤後直接進入下一天的盤中）。 */
 const PRESTOP_KEY = 'lplc.sim.prestop';
 /** 收盤後停留幾秒再進入下一個交易日。 */
@@ -156,6 +160,8 @@ export class SimPage implements SimCtx {
   private msg = '';
   private bankMsg = '';
   private hints = true;
+  /** 新手指引進行中（期間時鐘暫停）。 */
+  private guiding = false;
   /** 每天先停在盤前。 */
   private preStop = (() => {
     try {
@@ -664,6 +670,57 @@ export class SimPage implements SimCtx {
     await this.prepare();
   }
 
+  /** 新手指引：暫停時鐘，一步一步框出畫面上的區塊；結束後恢復。 */
+  private startGuide(): void {
+    if (this.guiding || this.view !== 'play') return;
+    this.guiding = true;
+    try {
+      localStorage.setItem(GUIDE_KEY, 'seen');
+    } catch {
+      /* 存不了就算了 */
+    }
+    const wasRunning = this.running;
+    this.running = false;
+    this.render();
+    runGuide(simGuideSteps(this.root), () => {
+      this.guiding = false;
+      this.running = wasRunning;
+      this.render();
+    });
+  }
+
+  /** 第一次進到遊戲畫面時問要不要看新手指引（只問一次）。 */
+  private maybeAskGuide(): void {
+    if (this.guiding || this.view !== 'play') return;
+    try {
+      if (localStorage.getItem(GUIDE_KEY)) return;
+      localStorage.setItem(GUIDE_KEY, 'asked');
+    } catch {
+      return;
+    }
+    this.guiding = true;
+    const wasRunning = this.running;
+    this.running = false;
+    this.render();
+    // 等畫面排好再問
+    setTimeout(
+      () =>
+        askGuide(
+          () => {
+            this.guiding = false;
+            this.running = wasRunning;
+            this.startGuide();
+          },
+          () => {
+            this.guiding = false;
+            this.running = wasRunning;
+            this.render();
+          },
+        ),
+      400,
+    );
+  }
+
   /** 開盤：盤前委託、定期定額以開盤價撮合，時間開始從 09:00 往前走。 */
   private async open(): Promise<void> {
     const s = this.state;
@@ -929,7 +986,7 @@ export class SimPage implements SimCtx {
     });
     // 空白鍵暫停／繼續、→ 直接到隔天（不在輸入框時）
     window.addEventListener('keydown', (e) => {
-      if (!document.querySelector('.app.page-sim') || !this.state || this.view !== 'play') return;
+      if (!document.querySelector('.app.page-sim') || !this.state || this.view !== 'play' || this.guiding) return;
       const t = e.target as HTMLElement;
       if (t.closest('input,textarea,select,button') || document.querySelector('.laplace-intro')) return;
       if (e.key === ' ') {
@@ -947,7 +1004,8 @@ export class SimPage implements SimCtx {
   }
 
   private action(a: string, el: HTMLElement): void {
-    if (a === 'open') void this.open();
+    if (a === 'guide') this.startGuide();
+    else if (a === 'open') void this.open();
     else if (a === 'prestop') {
       this.preStop = !this.preStop;
       try {
@@ -1161,6 +1219,7 @@ export class SimPage implements SimCtx {
     setHtml($('sim-hold'), holdHtml(s, this));
     setHtml($('sim-equity'), equityHtml(s, this, Math.max(280, $('sim-equity').clientWidth - 36)));
     setHtml($('sim-log'), logHtml(s, this));
+    if (!this.guiding) this.maybeAskGuide();
   }
 
   /** 標頭：時鐘與數字每分鐘更新，按鈕只在狀態改變時重畫（避免按到一半按鈕被換掉）。 */
@@ -1208,7 +1267,8 @@ export class SimPage implements SimCtx {
         <button type="button" class="btn" data-sim="nextday" ${end ? 'disabled' : ''} title="快捷鍵：→">⏭ 直接到隔天</button>
         <button type="button" class="btn" data-sim="prestop" aria-pressed="${this.preStop}" title="開啟時每天先停在盤前（08:30），可以先掛單，按「開盤」才開始">盤前停留：${this.preStop ? '開' : '關'}</button>
         <button type="button" class="btn" data-sim="lobby">大廳</button>
-        <button type="button" class="btn" data-sim="reset">結束這局</button>`,
+        <button type="button" class="btn" data-sim="reset">結束這局</button>
+        <button type="button" class="btn" data-sim="guide" title="一步一步介紹每個區塊與下單方式">❓ 新手指引</button>`,
     );
     setHtml(
       q('sim-endbox'),
