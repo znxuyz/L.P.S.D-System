@@ -131,7 +131,8 @@ export function kd(candles: Candle[], n = 9): { k: number[]; d: number[] } {
 const last = <T>(arr: T[], back = 0): T => arr[arr.length - 1 - back];
 const f1 = (v: number) => v.toFixed(1);
 
-export function analyzeTechnicals(candles: Candle[]): TechReport | null {
+/** basis：均線排列用簡單均線（'ma'，個股分析頁）或指數均線（'ema'，模擬盤）。 */
+export function analyzeTechnicals(candles: Candle[], basis: 'ma' | 'ema' = 'ma'): TechReport | null {
   if (candles.length < 30) return null;
   const closes = candles.map((c) => c.close);
   const series: TechSeries = {
@@ -142,22 +143,24 @@ export function analyzeTechnicals(candles: Candle[]): TechReport | null {
   const signals: Signal[] = [];
 
   // 均線排列：股價 > 月線 > 季線 > 半年線為多頭；資料不足半年時只看月線、季線
-  const m20 = last(series.ma[20])!;
-  const m60 = last(series.ma[60]);
-  const m120 = last(series.ma[120]);
+  const line = series[basis];
+  const tag = basis === 'ema' ? 'EMA' : 'MA';
+  const m20 = last(line[20])!;
+  const m60 = last(line[60]);
+  const m120 = last(line[120]);
   // 由短到長排列，沒有資料的週期略過
   const chain = [price, m20, m60, m120].filter((v): v is number => v != null);
   const bullAlign = chain.every((v, i) => i === 0 || chain[i - 1] > v);
   const bearAlign = chain.every((v, i) => i === 0 || chain[i - 1] < v);
   const e20 = last(series.ema[20]);
   const e60 = last(series.ema[60]);
-  const emaNote = e20 != null && e60 != null ? (e20 >= e60 ? '；EMA20 在 EMA60 之上' : '；EMA20 跌破 EMA60') : '';
+  const emaNote = basis === 'ema' || e20 == null || e60 == null ? '' : e20 >= e60 ? '；EMA20 在 EMA60 之上' : '；EMA20 跌破 EMA60';
   signals.push({
     id: 'ma',
     name: '均線排列',
-    value: bullAlign ? '多頭排列' : bearAlign ? '空頭排列' : price >= m20 ? '站上月線' : '跌破月線',
+    value: bullAlign ? '多頭排列' : bearAlign ? '空頭排列' : price >= m20 ? `站上${basis === 'ema' ? ' EMA20' : '月線'}` : `跌破${basis === 'ema' ? ' EMA20' : '月線'}`,
     tilt: bullAlign || (!bearAlign && price >= m20) ? 'bull' : 'bear',
-    note: `收盤 ${f1(price)}、MA20 ${f1(m20)}、MA60 ${m60 == null ? '—' : f1(m60)}、MA120 ${m120 == null ? '—' : f1(m120)}${emaNote}`,
+    note: `收盤 ${f1(price)}、${tag}20 ${f1(m20)}、${tag}60 ${m60 == null ? '—' : f1(m60)}、${tag}120 ${m120 == null ? '—' : f1(m120)}${emaNote}`,
   });
 
   // RSI

@@ -54,3 +54,25 @@ export function newsMinute(time: string): number {
   const [h, m] = time.split(':').map(Number);
   return (h - 9) * 60 + m;
 }
+
+/**
+ * 當時看得到的基本面（scripts/sim-fund.ts 產生）。
+ * q：[季別, 公布日, 營收, 毛利, 營業利益, 稅後淨利, EPS, 營業現金流]（單季，千元；公布日之前看不到）
+ * r：[日期, 近四季 EPS, 現金股利, 每股淨值]（有變化的日子才有一筆）
+ */
+export type FundQuarter = [string, string, number | null, number | null, number | null, number | null, number | null, number | null];
+export interface SimFund {
+  q: FundQuarter[];
+  r: Array<[string, number | null, number | null, number | null]>;
+}
+
+const funds = new Map<string, Promise<SimFund | null>>();
+export function loadSimFund(code: string): Promise<SimFund | null> {
+  let p = funds.get(code);
+  if (!p) {
+    p = json<SimFund>(`data/simfund/${encodeURIComponent(code)}.json`).then((j) => (j && Array.isArray(j.q) && Array.isArray(j.r) ? j : null));
+    funds.set(code, p);
+    if (funds.size > 30) funds.delete(funds.keys().next().value!);
+  }
+  return p;
+}

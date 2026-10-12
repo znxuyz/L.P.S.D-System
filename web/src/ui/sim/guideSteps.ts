@@ -153,6 +153,16 @@ export function simGuideSteps(root: HTMLElement, showPane?: (pane: string) => vo
       body: '每天收盤的報酬率走勢。實線是你的帳戶，虛線是「同額買大盤」；實線在虛線上面就是贏過大盤。',
     },
     {
+      target: $('#sim-fund'),
+      title: '分析：基本面',
+      body: '這一檔<b>當時已經公布</b>的財報：本益比、殖利率、淨值比（用昨收算），最近 8 季的營收、毛利率、EPS 與年增率。季別只寫「最新一季、前 1 季…」，看不出是哪一年。',
+    },
+    {
+      target: $('#sim-tech'),
+      title: '分析：技術分析',
+      body: 'EMA 均線排列、RSI、MACD、KD、布林通道、量能、支撐壓力，每一項標出偏多／偏空，還有外資＋投信近 5／20 日買賣超。只用到現在為止的價格，不會偷看未來。',
+    },
+    {
       target: $('#sim-log'),
       title: '交易紀錄',
       body: '每一筆成交、配息、貸款扣款、停損觸發等事件都記在這裡，用「第幾天幾點」標示。',
