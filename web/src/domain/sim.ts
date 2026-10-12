@@ -29,6 +29,7 @@
  * 開盤前就觸發的停損／停利單也以開盤價成交（一價鎖跌停時賣不掉，會提醒）；定期定額在開盤時買進。
  */
 import { SESSION_MINUTES, intradayPath, type IntradayPath } from './intraday';
+import { detectSplits, type Split } from './splits';
 import type { Candle } from './technicals';
 
 export const LOT = 1000;
@@ -232,6 +233,10 @@ export interface Market {
   /** date 之前（不含）最後一根日 K 的收盤。 */
   prevClose(code: string, date: string): number | undefined;
   exRights(date: string): ExRight[];
+  /** 這一天生效的分割／減資：[代號, 股數倍數]。 */
+  splits(date: string): Array<[string, number]>;
+  /** 某檔所有的分割／減資（圖表還原用；只能用模擬日以前的）。 */
+  splitsOf(code: string): Split[];
   /** 某檔某天的盤中路徑（沒有成交資料時 null）。 */
   path(code: string, date: string): IntradayPath | null;
 }
@@ -677,7 +682,7 @@ export function repayLoan(s: SimState, id: number, amount: number): string | nul
   if (!l) return '沒有這筆貸款';
   amount = Math.round(Math.min(amount, l.balance));
   if (!(amount > 0)) return '還款金額要大於 0';
-  if (amount > s.cash) return '現金不足';
+  if (amount > s.cash) return `現金不足：要 ${amount.toLocaleString()} 元，現金只有 ${Math.max(0, Math.floor(s.cash)).toLocaleString()} 元（可以先還一部分）`;
   s.cash -= amount;
   l.balance -= amount;
   if (l.balance < 1) {
@@ -731,7 +736,7 @@ export function pledgeRepay(s: SimState, code: string, amount: number): string |
   if (!pl) return '沒有這筆質押';
   amount = Math.round(Math.min(amount, pl.loan + pl.interest));
   if (!(amount > 0)) return '還款金額要大於 0';
-  if (amount > s.cash) return '現金不足';
+  if (amount > s.cash) return `現金不足：要 ${amount.toLocaleString()} 元，現金只有 ${Math.max(0, Math.floor(s.cash)).toLocaleString()} 元（可以先還一部分）`;
   s.cash -= amount;
   const toInterest = Math.min(amount, pl.interest);
   pl.interest -= toInterest;
@@ -932,6 +937,27 @@ export function beginDay(s: SimState, m: Market, date: string, preOpen = false):
   s.minute = 0;
   s.day += 1;
   s.orders = [];
+  // 股票分割、面額變更、減資：股數換算，總成本不變，停損停利價跟著換算
+  for (const [code, k] of m.splits(date)) {
+    let touched = false;
+    for (const p of s.pos.filter((x) => x.code === code)) {
+      p.shares = Math.max(1, Math.round(p.shares * k));
+      touched = true;
+    }
+    for (const pl of s.pledges.filter((x) => x.code === code)) pl.shares = Math.round(pl.shares * k);
+    for (const st of s.stops.filter((x) => x.code === code)) {
+      if (st.loss != null) st.loss = Math.round((st.loss / k) * 100) / 100;
+      if (st.profit != null) st.profit = Math.round((st.profit / k) * 100) / 100;
+    }
+    if (touched)
+      note(
+        s,
+        code,
+        k > 1 && Number.isInteger(k)
+          ? `股票分割：一股拆成 ${k} 股，持股數量 ×${k}，總成本不變（股價跟著變成約 1/${k}）`
+          : `${k < 1 ? '減資或反分割' : '面額變更'}：持股依價格換算為原本的 ${k.toFixed(4)} 倍，總成本不變`,
+      );
+  }
   for (const [, code, prev, ref, value, kind] of m.exRights(date)) {
     if (!(value > 0)) continue;
     for (const p of s.pos.filter((x) => x.code === code)) {
@@ -1036,7 +1062,19 @@ export function buildMarket(series: Map<string, Candle[]>, ex: ExRight[] = []): 
   const exBy = new Map<string, ExRight[]>();
   for (const r of ex) (exBy.get(r[0]) ?? exBy.set(r[0], []).get(r[0])!).push(r);
   const paths = new Map<string, IntradayPath | null>();
+  // 分割／減資：從每檔的價格找出來（排除除權息那天）
+  const exDays = new Map<string, Set<string>>();
+  for (const r of ex) (exDays.get(r[1]) ?? exDays.set(r[1], new Set()).get(r[1])!).add(r[0]);
+  const splitsBy = new Map<string, Split[]>();
+  const splitDay = new Map<string, Array<[string, number]>>();
+  for (const [code, rows] of series) {
+    const list = detectSplits(rows, exDays.get(code));
+    splitsBy.set(code, list);
+    for (const [d, k] of list) (splitDay.get(d) ?? splitDay.set(d, []).get(d)!).push([code, k]);
+  }
   return {
+    splits: (date) => splitDay.get(date) ?? [],
+    splitsOf: (code) => splitsBy.get(code) ?? [],
     bar: (code, date) => idx.get(code)?.get(date),
     prevClose(code, date) {
       const rows = series.get(code);
@@ -1048,7 +1086,10 @@ export function buildMarket(series: Map<string, Candle[]>, ex: ExRight[] = []): 
         if (rows[mid].date < date) lo = mid;
         else hi = mid - 1;
       }
-      return rows[lo].close;
+      // 中間發生分割／減資時，昨收換算成新的基準（跟交易所的參考價一樣）
+      let close = rows[lo].close;
+      for (const [d, k] of splitsBy.get(code) ?? []) if (d > rows[lo].date && d <= date) close /= k;
+      return close;
     },
     exRights: (date) => exBy.get(date) ?? [],
     path(code, date) {
