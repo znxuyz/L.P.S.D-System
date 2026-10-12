@@ -1506,3 +1506,47 @@ button.log-text:hover { color: var(--ink); }
 .sim-rank-tabs button { white-space: nowrap; padding-left: 2px; padding-right: 2px; }
 .sim-status-pre { color: #9fd8ff; border-color: color-mix(in srgb, #9fd8ff 45%, transparent); }
 .sim-pre-note { margin: 0; padding: 14px 16px; border: 1px dashed var(--glass-line); border-radius: var(--radius-sm); font-size: 13px; line-height: 1.7; }
+
+/* 模擬盤新手指引：框出區塊、其他地方變暗 */
+.sim-guide { position: fixed; inset: 0; z-index: 900; animation: sim-guide-in 0.25s var(--ease); }
+.sim-guide.is-leaving { opacity: 0; transition: opacity 0.2s; }
+@keyframes sim-guide-in { from { opacity: 0; } }
+.sim-guide-block { position: absolute; inset: 0; }
+.sim-guide-hole {
+  position: fixed; border-radius: 14px; pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(3, 6, 18, 0.74), 0 0 0 2px var(--accent), 0 0 24px 4px color-mix(in srgb, var(--accent) 45%, transparent);
+  transition: left 0.3s var(--ease), top 0.3s var(--ease), width 0.3s var(--ease), height 0.3s var(--ease);
+}
+.sim-guide-hole.is-none { box-shadow: 0 0 0 9999px rgba(3, 6, 18, 0.74); }
+.sim-guide-num {
+  position: absolute; top: -14px; left: -14px; min-width: 28px; height: 28px; padding: 0 6px; border-radius: 99px;
+  display: grid; place-items: center; font-weight: 700; font-size: 14px; color: #071022; background: var(--accent-grad);
+}
+.sim-guide-hole.is-none .sim-guide-num { display: none; }
+.sim-guide-num.is-action { background: #f5c451; }
+.sim-guide-card {
+  position: fixed; padding: 16px 18px; border-radius: var(--radius); background: var(--glass-strong);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--glass-line)); box-shadow: var(--shadow);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); color: var(--ink);
+  transition: left 0.3s var(--ease), top 0.3s var(--ease); max-height: calc(100dvh - 24px); overflow: auto;
+}
+.sim-guide-card h3 { margin: 6px 0 8px; font-size: 18px; }
+.sim-guide-step { margin: 0; display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+.sim-guide-tag { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11.5px; font-weight: 600; color: #071022; background: #f5c451; }
+.sim-guide-tag.is-info { background: var(--accent); }
+.sim-guide-body { font-size: 13.5px; line-height: 1.75; color: var(--ink-2); }
+.sim-guide-body ul { margin: 0; padding-left: 18px; }
+.sim-guide-body b { color: var(--ink); }
+.sim-guide-nav { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+.sim-guide-nav [data-guide='prev'] { margin-left: auto; }
+.sim-guide-nav .btn[disabled] { opacity: 0.4; }
+.sim-guide-dots { display: none; }
+.sim-guide-ask { position: fixed; inset: 0; z-index: 900; display: grid; place-items: center; padding: 16px; background: rgba(3, 6, 18, 0.6); animation: sim-guide-in 0.25s var(--ease); }
+.sim-guide-ask-card { max-width: 420px; padding: 22px 24px !important; }
+.sim-guide-ask-card h3 { margin: 6px 0 10px; font-size: 20px; }
+.sim-guide-ask-card p { margin: 0; line-height: 1.75; color: var(--ink-2); font-size: 14px; }
+.sim-guide-ask-card .sim-guide-nav { justify-content: flex-end; }
+@media (max-width: 720px) {
+  .sim-guide-card { padding: 14px; }
+  .sim-guide-body { font-size: 13px; }
+}
