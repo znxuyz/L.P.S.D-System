@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { beginDay, buildMarket, closeDay, equityOf, newSim, placeOrder, setStop } from '../domain/sim';
+import { beginDay, buildMarket, closeDay, equityOf, newSim, placeOrder, repairSplits, setStop } from '../domain/sim';
 import { adjustForSplits, detectSplits } from '../domain/splits';
 import type { Candle } from '../domain/technicals';
 
@@ -52,5 +52,22 @@ describe('股票分割', () => {
     expect(adj[0].close).toBe(45);
     expect(adj[0].volume).toBe(4000);
     expect(adj[7].close).toBe(47.6);
+  });
+
+  it('舊存檔漏掉的分割會補上（均價變 1/4），已經換算過的不會重複', () => {
+    const m = buildMarket(new Map([['0050', rows]]));
+    const s = newSim({ start: '2025-06-09', capital: 1_000_000, discount: 1 }, '0050');
+    placeOrder(s, m, { code: '0050', side: 'buy', kind: 'cash', shares: 2000 });
+    const cost = s.pos[0].cost;
+    // 模擬舊版：過了分割日但股數沒換算
+    s.date = '2025-06-19';
+    expect(repairSplits(s, m)).toBe(1);
+    expect(s.pos[0].shares).toBe(8000);
+    expect(s.pos[0].cost / s.pos[0].shares).toBeCloseTo(cost / 8000);
+    expect(repairSplits(s, m)).toBe(0);
+    // 已經換算過、但沒有紀錄的存檔
+    s.splitsDone = undefined;
+    expect(repairSplits(s, m)).toBe(0);
+    expect(s.pos[0].shares).toBe(8000);
   });
 });

@@ -16,7 +16,7 @@ import { loadNames, loadNews, loadSimMonth, type NewsItem, type SimMonth } from 
 import { loadStockDirectory, searchDirectory, type DirEntry } from '../data/stockDirectory';
 import { SESSION_MINUTES, clock, intradayPath, type IntradayPath } from '../domain/intraday';
 import { detectPatterns } from '../domain/patterns';
-import {
+import { repairSplits,
   KIND_NAME,
   LOT,
   MARGIN_LOAN,
@@ -362,6 +362,11 @@ export class SimPage implements SimCtx {
         this.fetchExRights(Number(s.settings.start.slice(0, 4)), y + 1),
         this.loadNewsFor(s.date),
       ]);
+      // 舊存檔：分割處理加上去之前已經過了分割日的，補上（均價跟著變）
+      if (this.state === s && repairSplits(s, this.market)) {
+        this.persist();
+        this.msg = '已補上之前漏掉的股票分割換算（股數與均價已更新）';
+      }
     }
     this.render();
   }
