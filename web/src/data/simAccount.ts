@@ -51,6 +51,8 @@ export interface SimRecord {
   detail?: RecordDetail;
   /** 這一局是破產結束的。 */
   bankrupt?: { date: string; day: number };
+  /** 隨機開局抽到的情境。 */
+  scenario?: string;
 }
 
 export interface RecordDetail {

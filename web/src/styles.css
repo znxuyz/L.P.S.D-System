@@ -1736,3 +1736,5 @@ a.btn { text-decoration: none; color: var(--ink); }
 @media (max-width: 380px) {
   .sim-tabs button { padding: 9px 8px; font-size: 14px; gap: 3px; }
 }
+.sim-scenario { margin: 4px 0 8px; color: var(--ink-2); }
+.sim-scenario b { color: var(--accent); }

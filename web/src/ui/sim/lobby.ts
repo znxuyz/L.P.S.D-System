@@ -135,7 +135,7 @@ export function setupHtml(cal: string[] | null | undefined): string {
         <option value="0.5">虧掉投入的 50% 就破產（嚴格）</option>
         <option value="0">不會破產</option>
       </select></label>
-      <button type="button" class="btn btn-accent" data-sim="random-start" title="隨機抽一個過去的日期，不會告訴你是哪一天">🎲 隨機日期開始</button>
+      <button type="button" class="btn btn-accent" data-sim="random-start" title="從值得練習的行情（崩跌、狂潮、空頭等）或至少一年前的任一天隨機抽，結束才揭曉">🎲 隨機日期開始</button>
       <label>或指定起始日期<input type="date" name="start" id="sim-start" min="${min}" max="${max}" value="${def}" /></label>
       <button type="submit" class="btn">從指定日期開始</button>
       <button type="button" class="btn" data-sim="lobby">返回</button>

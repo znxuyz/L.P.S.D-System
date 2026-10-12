@@ -85,6 +85,7 @@ import { bankHtml, dayReportHtml, equityHtml, holdHtml, logHtml, newsHtml, stopH
 import { recordOf, reportHtml, verdict } from './sim/report';
 import { askGuide, runGuide } from './sim/guide';
 import { simGuideSteps } from './sim/guideSteps';
+import { pickRandomStart } from '../domain/simScenarios';
 import { BIAS, actionName, cls, garble, investedAt, money, pctOrDash, setHtml, weekday, type SimCtx } from './sim/util';
 
 /** 上次在模擬盤的哪個畫面（大廳／遊戲中），重新打開時用。 */
@@ -856,16 +857,17 @@ export class SimPage implements SimCtx {
     const ruinLoss = [0, 0.5, 0.8, 1].includes(ruinRaw) ? ruinRaw : 1;
     const discount = Math.min(1, Math.max(0.1, Number(fd.get('discount')) || 0.6));
     const minIdx = Math.min(WARMUP, cal.length - 1);
-    const maxIdx = Math.max(minIdx, cal.length - 21);
     let idx: number;
-    if (dateWanted == null) idx = minIdx + Math.floor(Math.random() * (maxIdx - minIdx + 1));
+    let scenario: string | undefined;
+    // 隨機：從值得練習的行情裡抽，或抽一個至少一年前的日期
+    if (dateWanted == null) ({ idx, scenario } = pickRandomStart(cal, minIdx));
     else {
       idx = cal.findIndex((d) => d >= dateWanted);
       if (idx < 0) idx = cal.length - 1;
       idx = Math.max(idx, minIdx);
     }
     this.archive();
-    this.state = newSim({ start: cal[idx], capital, discount, monthly, ruinLoss }, this.state?.watch ?? '2330', this.preStop);
+    this.state = newSim({ start: cal[idx], capital, discount, monthly, ruinLoss, scenario }, this.state?.watch ?? '2330', this.preStop);
     this.msg = '';
     this.bankMsg = '';
     this.view = 'play';
