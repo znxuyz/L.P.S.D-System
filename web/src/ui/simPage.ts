@@ -87,6 +87,9 @@ import { askGuide, runGuide } from './sim/guide';
 import { simGuideSteps } from './sim/guideSteps';
 import { pickRandomStart } from '../domain/simScenarios';
 import { renderLearnPage } from './learnPage';
+import { fundHtml, techHtml } from './sim/analysis';
+import { loadChipSeries, type ChipSeries } from '../data/chipSeries';
+import { loadSimFund, type SimFund } from '../data/simData';
 import { BIAS, actionName, cls, garble, investedAt, money, pctOrDash, setHtml, weekday, type SimCtx } from './sim/util';
 
 /** 上次在模擬盤的哪個畫面（大廳／遊戲中），重新打開時用。 */
@@ -123,6 +126,7 @@ const SIM_TABS = [
   { id: 'trade', icon: '📈', title: '交易' },
   { id: 'hold', icon: '💼', title: '持股' },
   { id: 'money', icon: '💰', title: '資金' },
+  { id: 'analysis', icon: '🔍', title: '分析' },
   { id: 'rank', icon: '🏆', title: '排行' },
   { id: 'news', icon: '📰', title: '新聞' },
   { id: 'learn', icon: '📘', title: '入門' },
@@ -208,6 +212,9 @@ export class SimPage implements SimCtx {
   private dirty = false;
   /** 圖表大小：只在視窗大小改變時量（每次重畫都去讀寬度會強迫整頁重新排版）。 */
   private sizes = { kw: 0, kh: 0, ew: 0 };
+  /** 分析分頁用的資料（undefined＝載入中，null＝沒有）。 */
+  private readonly funds = new Map<string, SimFund | null | undefined>();
+  private readonly chipData = new Map<string, ChipSeries | null | undefined>();
   /** 手機版目前的分頁。 */
   private tab: SimTab = (() => {
     try {
@@ -715,8 +722,10 @@ export class SimPage implements SimCtx {
     }
     this.root.dataset.tab = tab;
     const bar = this.root.querySelector<HTMLElement>('#sim-tabs');
+    // 電腦版的 K 線與下單一直都在，「交易」分頁時下面顯示持股
+    const shown = tab === 'trade' && matchMedia('(min-width: 981px)').matches ? 'hold' : tab;
     for (const b of bar?.querySelectorAll<HTMLElement>('[data-sim-tab]') ?? []) {
-      const on = b.dataset.simTab === tab;
+      const on = b.dataset.simTab === shown;
       b.setAttribute('aria-selected', String(on));
       if (on && bar) bar.scrollLeft = b.offsetLeft - (bar.clientWidth - b.offsetWidth) / 2;
     }
@@ -1026,21 +1035,25 @@ export class SimPage implements SimCtx {
     root.dataset.ready = '1';
     root.innerHTML = `
       <div class="sim-head glass" id="sim-head"></div>
-      <nav class="sim-tabs glass" id="sim-tabs" role="tablist" aria-label="模擬盤畫面">
-        ${SIM_TABS.map((t) => `<button type="button" role="tab" data-sim-tab="${t.id}" aria-selected="false"><span aria-hidden="true">${t.icon}</span>${t.title}</button>`).join('')}
-      </nav>
       <div class="sim-main">
+        <nav class="sim-tabs glass" id="sim-tabs" role="tablist" aria-label="模擬盤畫面">
+          ${SIM_TABS.map((t) => `<button type="button" role="tab" data-sim-tab="${t.id}" aria-selected="false"><span aria-hidden="true">${t.icon}</span>${t.title}</button>`).join('')}
+        </nav>
         <div class="sim-chart glass" id="sim-chart" data-pane="trade"></div>
-        <div class="sim-dayrep-panel glass" id="sim-dayrep" data-pane="hold"></div>
-        <div class="sim-hold glass" id="sim-hold" data-pane="hold"></div>
-        <div class="sim-news glass" id="sim-news" data-pane="news"></div>
-        <div class="sim-equity glass" id="sim-equity" data-pane="money"></div>
+        <div class="sim-panes">
+          <div class="sim-dayrep-panel glass" id="sim-dayrep" data-pane="hold"></div>
+          <div class="sim-hold glass" id="sim-hold" data-pane="hold"></div>
+          <div class="sim-log glass" id="sim-log" data-pane="hold"></div>
+          <div class="sim-bank glass" id="sim-bank" data-pane="money"></div>
+          <div class="sim-equity glass" id="sim-equity" data-pane="money"></div>
+          <div class="sim-fund glass" id="sim-fund" data-pane="analysis"></div>
+          <div class="sim-tech glass" id="sim-tech" data-pane="analysis"></div>
+          <div class="sim-rank glass" id="sim-rank" data-pane="rank"></div>
+          <div class="sim-news glass" id="sim-news" data-pane="news"></div>
+        </div>
       </div>
       <div class="sim-aside">
         <div class="sim-order glass" id="sim-order" data-pane="trade"></div>
-        <div class="sim-bank glass" id="sim-bank" data-pane="money"></div>
-        <div class="sim-rank glass" id="sim-rank" data-pane="rank"></div>
-        <div class="sim-log glass" id="sim-log" data-pane="hold"></div>
       </div>
       <div class="sim-learn" id="sim-learn" data-pane="learn"><div class="learn"></div></div>
       <div class="sim-setup glass" id="sim-setup"></div>`;
@@ -1363,7 +1376,44 @@ export class SimPage implements SimCtx {
     const named = Object.keys(this.names).length > 0;
     setHtml($('sim-equity'), this.cached('equity', `${s.settings.start}|${s.equity.length}|${s.trades.length}|${ew}|${!!this.taiex}|${!!this.calendar}`, () => equityHtml(s, this, ew)));
     setHtml($('sim-log'), this.cached('log', `${s.settings.start}|${s.trades.length}|${s.notes.length}|${named}`, () => logHtml(s, this)));
+    if (this.tab === 'analysis') this.renderAnalysis(s);
     if (!this.guiding) this.maybeAskGuide();
+  }
+
+  /** 分析分頁：基本面（當時已公布的）與技術分析（到現在為止的價格）。 */
+  private renderAnalysis(s: SimState): void {
+    const code = s.watch;
+    if (!this.funds.has(code)) {
+      this.funds.set(code, undefined);
+      void loadSimFund(code).then((f) => {
+        this.funds.set(code, f);
+        this.render();
+      });
+    }
+    if (!this.chipData.has(code)) {
+      this.chipData.set(code, undefined);
+      void loadChipSeries(code).then((c) => {
+        this.chipData.set(code, c);
+        this.render();
+      });
+    }
+    const fund = this.funds.get(code);
+    const chips = this.chipData.get(code);
+    const past = this.candles.get(code)?.filter((c) => c.date < s.date);
+    const prevClose = past?.length ? past[past.length - 1].close : null;
+    const q = (id: string) => this.root.querySelector<HTMLElement>(`#${id}`)!;
+    setHtml(
+      q('sim-fund'),
+      this.cached('fund', `${code}|${s.date}|${fund === undefined ? 'l' : fund ? 'y' : 'n'}|${prevClose}`, () => fundHtml({ code, etf: /^00/.test(code), fund, date: s.date, prevClose })),
+    );
+    // 盤中今天的成交量還沒累積完：換算成全天的「預估量」再跟均量比
+    const bars = [...(this.visibleBars(s) ?? [])];
+    const today = bars[bars.length - 1];
+    if (today?.date === s.date && !s.pre && s.minute < SESSION_MINUTES) bars[bars.length - 1] = { ...today, volume: (today.volume * SESSION_MINUTES) / Math.max(30, s.minute) };
+    setHtml(
+      q('sim-tech'),
+      this.cached('tech', `${code}|${s.date}|${bars.length}|${Math.floor(s.minute / 5)}|${chips === undefined ? 'l' : chips ? 'y' : 'n'}`, () => techHtml({ candles: bars, chips, date: s.date })),
+    );
   }
 
   /** 標頭：時鐘與數字每分鐘更新，按鈕只在狀態改變時重畫（避免按到一半按鈕被換掉）。 */

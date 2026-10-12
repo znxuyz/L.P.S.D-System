@@ -45,6 +45,8 @@ jobs:
       - name: 產生模擬盤資料
         run: |
           if [ -d .data/candles ]; then node scripts/sim-daily.ts .data && node scripts/sim-news.ts .data; fi
+          # 模擬盤「分析」分頁：當時已公布的財報與本益比（每檔一個檔案）
+          if [ -d .data/fin ] && [ -d .data/candles ]; then node scripts/sim-fund.ts .data; fi
           # 沒有即時行情金鑰時首頁用的最近一個交易日收盤資料
           node scripts/close-snapshot.ts .data
 
@@ -58,7 +60,7 @@ jobs:
           if [ -d .data/chips ]; then cp -r .data/chips web/public/data/; fi
           if [ -f .data/index/TAIEX.json ]; then mkdir -p web/public/data/index && cp .data/index/TAIEX.json web/public/data/index/; fi
           if [ -d .data/exrights ]; then cp -r .data/exrights web/public/data/; fi
-          for d in simday news; do if [ -d ".data/$d" ]; then cp -r ".data/$d" web/public/data/; fi; done
+          for d in simday news simfund; do if [ -d ".data/$d" ]; then cp -r ".data/$d" web/public/data/; fi; done
           if [ -f .data/names.json ]; then cp .data/names.json web/public/data/; fi
 
       - run: npm ci
