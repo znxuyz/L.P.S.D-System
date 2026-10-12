@@ -266,7 +266,7 @@ const SECTIONS: Section[] = [
     title: 'K 棒實驗室',
     html: () => `
       <p>拉動下面的價格，看看 K 棒怎麼變、代表什麼意思。昨天收盤固定是 <b>100 元</b>，所以今天只能在 90～110 元之間（漲跌停 10%）。</p>
-      <div class="learn-lab" id="learn-lab-box">
+      <div class="learn-lab">
         <div class="learn-lab-fig"><svg class="learn-svg is-lab" viewBox="0 0 200 240" role="img" aria-label="K 棒實驗室"></svg></div>
         <div class="learn-lab-ctl">
           ${(['o:開盤', 'h:最高', 'l:最低', 'c:收盤'] as const)
@@ -306,7 +306,7 @@ const SECTIONS: Section[] = [
         <button type="button" class="btn btn-sm is-on" data-kline="1">日K（一根＝一天）</button>
         <button type="button" class="btn btn-sm" data-kline="5">週K（一根＝一週）</button>
       </div>
-      <div class="learn-chart" id="learn-kline"></div>
+      <div class="learn-chart"></div>
       <p class="muted">示意走勢，不是真實股票。兩條線是均線：<span class="learn-ma-key"></span>。圓圈標出短均線穿過長均線的地方。</p>
       <h4>週K、月K 怎麼來的</h4>
       <p>週K 就是把這一週 5 根日K 合成一根：<b>開盤＝週一開盤、收盤＝週五收盤、最高＝這週最高、最低＝這週最低</b>。月K 同理。看長期趨勢用週K、月K，看短線進出用日K。</p>
@@ -336,6 +336,12 @@ const SECTIONS: Section[] = [
         <li><b>黃金交叉</b>：短天期均線由下往上穿過長天期均線，常被當成轉強訊號。</li>
         <li><b>死亡交叉</b>：短天期均線由上往下穿過長天期均線，常被當成轉弱訊號。</li>
         <li><b>多頭排列</b>：5 日 &gt; 20 日 &gt; 60 日，而且都往上；反過來就是空頭排列。</li>
+      </ul>
+      <h4>SMA 與 EMA</h4>
+      <ul class="learn-list">
+        <li><b>SMA（簡單移動平均）</b>：最近 N 天收盤價直接平均，每一天的權重一樣。上面說的週線、月線、季線通常是這種。</li>
+        <li><b>EMA（指數移動平均）</b>：越近的價格權重越大，股價轉彎時 EMA 比 SMA 更快跟著轉，但也比較容易被短暫的波動騙。</li>
+        <li><b>模擬盤的 K 線圖用 EMA20、EMA60、EMA120</b>：大約是一個月、一季、半年的趨勢。股價站在三條線上面、三條線由上而下依序是 20 &gt; 60 &gt; 120，就是多頭排列。</li>
       </ul>
       <p class="learn-tip">均線是用過去的價格算的，所以一定<b>比股價慢</b>。盤整的時候均線會一直交叉，訊號很容易失準。</p>`,
   },
@@ -429,11 +435,10 @@ const SECTIONS: Section[] = [
   },
 ];
 
-let labBound = false;
 
 /** K 棒實驗室：讀滑桿、畫 K 棒、寫說明。 */
 function updateLab(root: HTMLElement): void {
-  const lab = root.querySelector<HTMLElement>('#learn-lab-box');
+  const lab = root.querySelector<HTMLElement>('.learn-lab');
   if (!lab) return;
   const inp = (k: string) => lab.querySelector<HTMLInputElement>(`[data-lab="${k}"]`)!;
   const b = { o: +inp('o').value, h: +inp('h').value, l: +inp('l').value, c: +inp('c').value };
@@ -476,7 +481,7 @@ function updateLab(root: HTMLElement): void {
 const DEMO = demoSeries();
 
 function drawKline(root: HTMLElement, n: number): void {
-  const el = root.querySelector<HTMLElement>('#learn-kline');
+  const el = root.querySelector<HTMLElement>('.learn-chart');
   if (!el) return;
   // 日K 畫後面 100 天（前 20 天給均線暖身）；週K 把 120 天合成 24 根
   el.innerHTML =
@@ -499,7 +504,8 @@ const GROUPS: { id: string; icon: string; title: string; sections: string[] }[] 
 ];
 const TAB_KEY = 'lplc.learn.tab';
 
-let rendered = false;
+/** 已經畫好的地方（股市入門頁、模擬盤裡各一份）。 */
+const rendered = new WeakSet<HTMLElement>();
 
 function showGroup(root: HTMLElement, id: string, scroll: boolean): void {
   const gi = Math.max(0, GROUPS.findIndex((g) => g.id === id));
@@ -525,15 +531,18 @@ function showGroup(root: HTMLElement, id: string, scroll: boolean): void {
   }
   if (scroll) {
     // 回到這一類的最上面（分頁列下面）
-    const top = root.getBoundingClientRect().top + window.scrollY - 8;
+    // 停在分頁列黏住的位置（模擬盤裡上面還有模擬盤的分頁列）
+    const bar = root.querySelector<HTMLElement>('.learn-tabs');
+    const stick = bar ? parseFloat(getComputedStyle(bar).top) || 8 : 8;
+    const top = root.getBoundingClientRect().top + window.scrollY - stick;
     if (window.scrollY > top) window.scrollTo({ top });
   }
 }
 
 /** 第一次切到這頁時畫出來（之後不重畫，保留捲動位置與實驗室的值）。 */
-export function renderLearnPage(root: HTMLElement): void {
-  if (rendered) return;
-  rendered = true;
+export function renderLearnPage(root: HTMLElement, idPrefix = 'learn'): void {
+  if (rendered.has(root)) return;
+  rendered.add(root);
   // 編號照分類順序（1、2、3…一路往下）
   const order = GROUPS.flatMap((g) => g.sections);
   const byId = new Map(SECTIONS.map((s) => [s.id, { s, n: order.indexOf(s.id) + 1 }]));
@@ -556,7 +565,7 @@ export function renderLearnPage(root: HTMLElement): void {
           ${g.sections
             .map((id) => {
               const { s, n } = byId.get(id)!;
-              return `<section class="learn-card glass" id="learn-sec-${s.id}" aria-labelledby="learn-h-${s.id}"><h3 id="learn-h-${s.id}"><span class="learn-no">${n}</span>${s.title}</h3>${s.html()}</section>`;
+              return `<section class="learn-card glass" aria-labelledby="${idPrefix}-h-${s.id}"><h3 id="${idPrefix}-h-${s.id}"><span class="learn-no">${n}</span>${s.title}</h3>${s.html()}</section>`;
             })
             .join('')}
         </div>`,
@@ -573,8 +582,6 @@ export function renderLearnPage(root: HTMLElement): void {
     /* 沒有就從第一類開始 */
   }
   showGroup(root, saved ?? GROUPS[0].id, false);
-  if (labBound) return;
-  labBound = true;
   const bar = root.querySelector<HTMLElement>('.learn-tabs')!;
   bar.addEventListener('scroll', () => bar.classList.toggle('is-end', bar.scrollLeft + bar.clientWidth >= bar.scrollWidth - 2), { passive: true });
   root.addEventListener('input', (e) => {
@@ -590,7 +597,7 @@ export function renderLearnPage(root: HTMLElement): void {
     const pre = t.closest<HTMLElement>('[data-lab-preset]');
     if (pre) {
       const [o, h, l, c] = pre.dataset.labPreset!.split(',');
-      const lab = root.querySelector<HTMLElement>('#learn-lab-box')!;
+      const lab = root.querySelector<HTMLElement>('.learn-lab')!;
       Object.entries({ o, h, l, c }).forEach(([k, v]) => (lab.querySelector<HTMLInputElement>(`[data-lab="${k}"]`)!.value = v));
       updateLab(root);
       return;

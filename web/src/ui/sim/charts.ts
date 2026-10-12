@@ -1,25 +1,27 @@
 /** 模擬盤的圖表（SVG 字串）。 */
 import { scaleBand, scaleLinear } from 'd3';
 import { SESSION_MINUTES, clock, type IntradayPath } from '../../domain/intraday';
-import { sma, type Candle } from '../../domain/technicals';
+import { emaSeries, type Candle } from '../../domain/technicals';
 import { pct, price } from '../format';
 import { money } from './util';
 
 const BARS = 120;
 
-/** 日 K（只到現在）＋月線、季線＋成交量。不畫月份刻度（會洩漏日期）。 */
+/** 日 K（只到現在）＋EMA 20／60／120＋成交量。不畫月份刻度（會洩漏日期）。 */
 export function candleSvg(visible: Candle[], w: number, h: number): string {
   const n = Math.min(BARS, visible.length);
   const off = visible.length - n;
   const c = visible.slice(off);
   const closes = visible.map((x) => x.close);
-  const ma20 = sma(closes, 20).slice(off);
-  const ma60 = sma(closes, 60).slice(off);
+  // 指數移動平均（EMA）用全部歷史算，越近的價格權重越大，比簡單均線反應快
+  const ma20 = emaSeries(closes, 20).slice(off);
+  const ma60 = emaSeries(closes, 60).slice(off);
+  const ma120 = emaSeries(closes, 120).slice(off);
   const pad = { l: 6, r: 52, t: 8, b: 10 };
   const volH = Math.round((h - pad.t - pad.b) * 0.2);
   const pb = h - pad.b - volH - 8;
   const x = scaleBand<number>().domain(c.map((_, i) => i)).range([pad.l, w - pad.r]).padding(0.25);
-  const vals = [...c.flatMap((b) => [b.high, b.low]), ...ma20, ...ma60].filter((v): v is number => v != null);
+  const vals = [...c.flatMap((b) => [b.high, b.low]), ...ma20, ...ma60, ...ma120].filter((v): v is number => v != null);
   const y = scaleLinear().domain([Math.min(...vals), Math.max(...vals)]).nice(5).range([pb, pad.t]);
   const yv = scaleLinear().domain([0, Math.max(1, ...c.map((b) => b.volume))]).range([h - pad.b, h - pad.b - volH]);
   const bw = x.bandwidth();
@@ -48,9 +50,9 @@ export function candleSvg(visible: Candle[], w: number, h: number): string {
   const lastC = c[c.length - 1].close;
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img" aria-label="日 K 線（只到現在）">
     ${ticks}${body}
-    <path class="sim-ma20" d="${path(ma20)}"></path><path class="sim-ma60" d="${path(ma60)}"></path>
+    <path class="sim-ma20" d="${path(ma20)}"></path><path class="sim-ma60" d="${path(ma60)}"></path><path class="sim-ma120" d="${path(ma120)}"></path>
     <line class="sim-last" x1="${pad.l}" x2="${w - pad.r}" y1="${y(lastC).toFixed(1)}" y2="${y(lastC).toFixed(1)}"></line>
-    <text class="sim-legend" x="${pad.l + 4}" y="${pad.t + 10}"><tspan class="sim-ma20t">— 月線 MA20</tspan>  <tspan class="sim-ma60t">— 季線 MA60</tspan></text>
+    <text class="sim-legend" x="${pad.l + 4}" y="${pad.t + 10}"><tspan class="sim-ma20t">— EMA20</tspan>  <tspan class="sim-ma60t">— EMA60</tspan>  <tspan class="sim-ma120t">— EMA120</tspan></text>
   </svg>`;
 }
 

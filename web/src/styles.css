@@ -198,7 +198,7 @@ html:has(.page-learn), body:has(.page-learn) { height: auto; }
 .app.page-learn .side,
 .app.page-learn .dock,
 .app.page-learn .screener,
-.app:not(.page-learn) .learn { display: none; }
+.app:not(.page-learn) > .learn { display: none; }
 /* 模擬盤只留模擬：頂端列只剩圖示、名稱與離開 */
 .app.page-sim .pages,
 .app.page-sim .ticker,
@@ -1281,7 +1281,9 @@ button.log-text:hover { color: var(--ink); }
 .sim-vol { opacity: 0.45; stroke: none; }
 .sim-grid { stroke: rgba(255, 255, 255, 0.06); }
 .sim-axis { fill: var(--muted); font-size: 10.5px; font-family: var(--font); }
-.sim-ma20, .sim-ma60 { fill: none; stroke-width: 1.4; }
+.sim-ma20, .sim-ma60, .sim-ma120 { fill: none; stroke-width: 1.4; }
+.sim-ma120 { stroke: #b07cff; }
+.sim-ma120t { fill: #c4a0ff; }
 .sim-ma20 { stroke: #3987e5; }
 .sim-ma60 { stroke: #c98500; }
 .sim-ma20t { fill: #6aa7f0; }
@@ -1738,3 +1740,14 @@ a.btn { text-decoration: none; color: var(--ink); }
 }
 .sim-scenario { margin: 4px 0 8px; color: var(--ink-2); }
 .sim-scenario b { color: var(--accent); }
+
+/* 模擬盤裡的股市入門：桌機版按「股市入門」整個主畫面換成入門內容；手機版是「入門」分頁 */
+.sim-learn { grid-area: learn; min-width: 0; }
+.sim-learn .learn { display: grid; }
+.sim:not([data-tab='learn']) > .sim-learn { display: none; }
+.sim[data-tab='learn']:not(.is-setup) { grid-template-areas: 'head head' 'learn learn'; }
+.sim[data-tab='learn'] > .sim-main, .sim[data-tab='learn'] > .sim-aside { display: none !important; }
+@media (max-width: 980px) {
+  /* 模擬盤的分頁列下面再黏入門的分類列 */
+  .sim-learn .learn-tabs { top: calc(66px + env(safe-area-inset-top)); z-index: 19; }
+}
