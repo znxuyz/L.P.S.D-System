@@ -1400,25 +1400,26 @@ button.log-text:hover { color: var(--ink); }
 .sim-endbox { flex-basis: 100%; }
 .sim-endbox:empty { display: none; }
 
-/* 模擬盤日期亂碼：每個數字是一格固定位置、不停跳動的報價燈號 */
+/* 模擬盤日期亂碼：每個數字是一格固定位置、不停跳動的報價燈號（一格一個元素，用 transform 跳，格高用整數像素才不會忽高忽低） */
+.gb { --gh: 16px; }
+.sim-news-date .gb { --gh: 14px; }
 .gb > span { display: inline-flex; align-items: center; gap: 0.15em; }
 .gb-run {
   display: inline-flex; gap: 1px; padding: 0 2px;
   border-radius: 3px; background: rgba(143, 240, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(143, 240, 255, 0.14);
 }
 .gb-run i {
-  position: relative; display: inline-block; width: 0.62em; height: 1.25em;
-  font-style: normal; color: var(--accent);
+  display: inline-block; width: 0.62em; height: var(--gh); overflow: hidden;
+  font-style: normal; color: var(--accent); contain: paint;
 }
 .gb-run b {
-  position: absolute; inset: 0; line-height: 1.25em; text-align: center;
-  font-weight: 600; font-variant-numeric: tabular-nums; opacity: 0;
-  animation: gb-flip var(--t) linear var(--d) infinite;
+  display: block; line-height: var(--gh); text-align: center;
+  font-weight: 600; font-variant-numeric: tabular-nums; opacity: 0.9;
+  animation: gb-roll var(--t) steps(10, end) var(--d) infinite;
 }
-@keyframes gb-flip { 0%, 9.9% { opacity: 0.9; } 10%, 100% { opacity: 0; } }
+@keyframes gb-roll { to { transform: translateY(calc(var(--gh) * -10)); } }
 @media (prefers-reduced-motion: reduce) {
   .gb-run b { animation: none; filter: blur(2.5px); }
-  .gb-run b:first-child { opacity: 0.9; }
 }
 
 /* 收盤結算、資金、停損停利 */
@@ -1507,28 +1508,25 @@ button.log-text:hover { color: var(--ink); }
 .sim-status-pre { color: #9fd8ff; border-color: color-mix(in srgb, #9fd8ff 45%, transparent); }
 .sim-pre-note { margin: 0; padding: 14px 16px; border: 1px dashed var(--glass-line); border-radius: var(--radius-sm); font-size: 13px; line-height: 1.7; }
 
-/* 模擬盤新手指引：框出區塊、其他地方變暗 */
-.sim-guide { position: fixed; inset: 0; z-index: 900; animation: sim-guide-in 0.25s var(--ease); }
-.sim-guide.is-leaving { opacity: 0; transition: opacity 0.2s; }
+/* 模擬盤新手指引：框出區塊、其他地方變暗（遮罩用 clip-path 挖洞，框線與說明卡只用 transform 移動） */
+.sim-guide { position: fixed; inset: 0; z-index: 900; animation: sim-guide-in 0.2s ease-out; }
+.sim-guide.is-leaving { opacity: 0; transition: opacity 0.18s; }
 @keyframes sim-guide-in { from { opacity: 0; } }
-.sim-guide-block { position: absolute; inset: 0; }
+.sim-guide-dim { position: absolute; inset: 0; background: rgba(3, 6, 18, 0.76); }
 .sim-guide-hole {
-  position: fixed; border-radius: 14px; pointer-events: none;
-  box-shadow: 0 0 0 9999px rgba(3, 6, 18, 0.74), 0 0 0 2px var(--accent), 0 0 24px 4px color-mix(in srgb, var(--accent) 45%, transparent);
-  transition: left 0.3s var(--ease), top 0.3s var(--ease), width 0.3s var(--ease), height 0.3s var(--ease);
+  position: fixed; left: 0; top: 0; border-radius: 14px; pointer-events: none;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 14px 2px color-mix(in srgb, var(--accent) 40%, transparent);
 }
-.sim-guide-hole.is-none { box-shadow: 0 0 0 9999px rgba(3, 6, 18, 0.74); }
+.sim-guide-hole[hidden] { display: none; }
 .sim-guide-num {
   position: absolute; top: -14px; left: -14px; min-width: 28px; height: 28px; padding: 0 6px; border-radius: 99px;
   display: grid; place-items: center; font-weight: 700; font-size: 14px; color: #071022; background: var(--accent-grad);
 }
-.sim-guide-hole.is-none .sim-guide-num { display: none; }
 .sim-guide-num.is-action { background: #f5c451; }
 .sim-guide-card {
-  position: fixed; padding: 16px 18px; border-radius: var(--radius); background: var(--glass-strong);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--glass-line)); box-shadow: var(--shadow);
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); color: var(--ink);
-  transition: left 0.3s var(--ease), top 0.3s var(--ease); max-height: calc(100dvh - 24px); overflow: auto;
+  position: fixed; left: 0; top: 0; padding: 16px 18px; border-radius: var(--radius); background: #0d1328;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--glass-line)); box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  color: var(--ink); transition: transform 0.22s var(--ease); max-height: calc(100dvh - 24px); overflow: auto;
 }
 .sim-guide-card h3 { margin: 6px 0 8px; font-size: 18px; }
 .sim-guide-step { margin: 0; display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
@@ -1550,3 +1548,8 @@ button.log-text:hover { color: var(--ink); }
   .sim-guide-card { padding: 14px; }
   .sim-guide-body { font-size: 13px; }
 }
+
+/* 效能：模擬盤裡面板很多又常常更新，關掉毛玻璃模糊並暫停背景極光（手機上這兩個最吃效能） */
+.app.page-sim .glass { -webkit-backdrop-filter: none; backdrop-filter: none; background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)), rgba(12, 17, 36, 0.92); }
+body:has(.app.page-sim) .aurora i { animation-play-state: paused; }
+.sim-newslist li { content-visibility: auto; contain-intrinsic-size: auto 56px; }

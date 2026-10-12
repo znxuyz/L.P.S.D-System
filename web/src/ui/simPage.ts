@@ -95,6 +95,10 @@ const CALENDAR_CODE = '0050';
 const GUIDE_KEY = 'lplc.sim.guide';
 /** 每天要不要先停在盤前（關掉的話收盤後直接進入下一天的盤中）。 */
 const PRESTOP_KEY = 'lplc.sim.prestop';
+/** 盤中畫面最多多久重畫一次（毫秒）：3×、5× 時每秒會走好幾分鐘，不用每一分鐘都重畫整個畫面。 */
+const RENDER_MS = 250;
+/** 盤中每隔幾分鐘自動存檔一次（收盤、暫停、離開時也會存）。 */
+const SAVE_EVERY_MIN = 60;
 /** 收盤後停留幾秒再進入下一個交易日。 */
 const CLOSE_PAUSE_MS = 2500;
 /** 排行榜：收盤後等這麼久才上傳（連續跳好幾天時只傳最後一次）；大廳裡的排行榜多久重新讀一次。 */
@@ -178,6 +182,16 @@ export class SimPage implements SimCtx {
   /** 收盤後要等到這個時間（performance.now）才進入下一天。 */
   private closedUntil = 0;
   private lastSavedMinute = -1;
+  /** 上次重畫盤中畫面的時間，與是否有還沒畫上去的變化。 */
+  private lastRender = 0;
+  private dirty = false;
+  /** 圖表大小：只在視窗大小改變時量（每次重畫都去讀寬度會強迫整頁重新排版）。 */
+  private sizes = { kw: 0, kh: 0, ew: 0 };
+  /** K 線與分時圖每秒最多重畫一次（換股票、換日立即重畫）。 */
+  private chartKey = '';
+  private chartAt = 0;
+  /** 不常變的面板快取（交易紀錄、資產曲線、新聞）：內容沒變就不重算。 */
+  private panelCache = new Map<string, { key: string; html: string }>();
   /** 剛收盤的那一天（收盤結算面板閃一下提示）。 */
   private freshDay = '';
   // 排行與新聞
@@ -567,7 +581,7 @@ export class SimPage implements SimCtx {
     if (!this.user) return;
     this.save.current = this.state;
     this.save.updatedAt = Date.now();
-    trimSave(this.save);
+    // 歷史紀錄的容量檢查（要把整份存檔轉成文字）只在封存一局時做，平常存檔不做
     writeSave(this.user.id, this.save);
     this.schedulePush();
     if (this.state) this.lastSavedMinute = this.state.minute;
@@ -612,6 +626,7 @@ export class SimPage implements SimCtx {
     if (!s || this.view !== 'play' || !this.running || s.pre || document.hidden || !document.querySelector('.app.page-sim')) return;
     if (!prevTs) return;
     const dt = Math.min(1000, ts - prevTs);
+    if (this.dirty && ts - this.lastRender >= RENDER_MS) this.renderNow(ts);
     if (s.minute >= SESSION_MINUTES) {
       // 收盤：停留一下再進入下一個交易日
       if (!this.closedUntil) this.closedUntil = ts + CLOSE_PAUSE_MS;
@@ -626,10 +641,36 @@ export class SimPage implements SimCtx {
     if (Math.floor(target) > before) {
       tickTo(s, this.market, Math.floor(target));
       s.minute = Math.min(SESSION_MINUTES, target);
-      if (Math.floor(s.minute) >= SESSION_MINUTES) this.closeToday();
-      else if (Math.floor(s.minute) - this.lastSavedMinute >= 30) this.persist();
-      this.renderPlay();
+      if (Math.floor(s.minute) >= SESSION_MINUTES) {
+        this.closeToday();
+        this.renderNow(ts);
+      } else {
+        if (Math.floor(s.minute) - this.lastSavedMinute >= SAVE_EVERY_MIN) this.persist();
+        if (ts - this.lastRender >= RENDER_MS) this.renderNow(ts);
+        else this.dirty = true;
+      }
     } else s.minute = target;
+  }
+
+  private renderNow(ts: number): void {
+    this.lastRender = ts;
+    this.dirty = false;
+    this.renderPlay();
+  }
+
+  private measure(): void {
+    const k = this.root.querySelector<HTMLElement>('#sim-k');
+    const e = this.root.querySelector<HTMLElement>('#sim-equity');
+    this.sizes = { kw: k?.clientWidth ?? 0, kh: k?.clientHeight ?? 0, ew: e?.clientWidth ?? 0 };
+  }
+
+  /** 內容的關鍵值沒變就沿用上次產生的 HTML。 */
+  private cached(id: string, key: string, build: () => string): string {
+    const c = this.panelCache.get(id);
+    if (c && c.key === key) return c.html;
+    const html = build();
+    this.panelCache.set(id, { key, html });
+    return html;
   }
 
   private closeToday(): void {
@@ -968,7 +1009,12 @@ export class SimPage implements SimCtx {
     let raf = 0;
     new ResizeObserver(() => {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => this.render());
+      raf = requestAnimationFrame(() => {
+        // 在這一格還沒改任何東西之前量，不會強迫重新排版
+        this.measure();
+        this.chartKey = '';
+        this.render();
+      });
     }).observe(root);
     window.addEventListener('pagehide', () => {
       if (this.state && this.view === 'play') this.persist();
@@ -1215,10 +1261,15 @@ export class SimPage implements SimCtx {
     this.renderBank($('sim-bank'), s);
     this.renderRank($('sim-rank'), s);
     setHtml($('sim-dayrep'), dayReportHtml(s, this.freshDay === s.date));
-    setHtml($('sim-news'), newsHtml(s, this.news));
+    // 新聞只在新的一則出現時才會變；以「看得到幾則」當關鍵值
+    const newsKey = `${s.date}|${s.pre}|${this.news.length}|${this.news.filter(([d]) => d === s.date).length}|${Math.floor(s.minute / 30)}`;
+    setHtml($('sim-news'), this.cached('news', newsKey, () => newsHtml(s, this.news)));
     setHtml($('sim-hold'), holdHtml(s, this));
-    setHtml($('sim-equity'), equityHtml(s, this, Math.max(280, $('sim-equity').clientWidth - 36)));
-    setHtml($('sim-log'), logHtml(s, this));
+    // 資產曲線每天收盤才變、交易紀錄有新的一筆才變
+    const ew = Math.max(280, (this.sizes.ew || 640) - 36);
+    const named = Object.keys(this.names).length > 0;
+    setHtml($('sim-equity'), this.cached('equity', `${s.settings.start}|${s.equity.length}|${s.trades.length}|${ew}|${!!this.taiex}|${!!this.calendar}`, () => equityHtml(s, this, ew)));
+    setHtml($('sim-log'), this.cached('log', `${s.settings.start}|${s.trades.length}|${s.notes.length}|${named}`, () => logHtml(s, this)));
     if (!this.guiding) this.maybeAskGuide();
   }
 
@@ -1349,14 +1400,32 @@ export class SimPage implements SimCtx {
        }`,
     );
     const k = el.querySelector<HTMLElement>('#sim-k')!;
+    // 同一檔同一天時，K 線與分時圖每秒最多重畫一次
+    const chartKey = `${s.watch}|${s.date}|${!!s.pre}|${this.sizes.kw}|${this.sizes.kh}|${all ? all.length : -1}`;
+    const tNow = performance.now();
+    const chartDue = chartKey !== this.chartKey || tNow - this.chartAt >= 1000 || s.minute >= SESSION_MINUTES;
+    if (chartDue) {
+      this.chartKey = chartKey;
+      this.chartAt = tNow;
+    }
     if (all === undefined) setHtml(k, `<p class="muted sim-empty">下載 ${esc(s.watch)} 的日 K⋯⋯</p>`);
     else if (visible.length < 2) setHtml(k, `<p class="muted sim-empty">${esc(s.watch)} 在這一天以前沒有日 K（可能還沒上市）。</p>`);
-    else setHtml(k, candleSvg(visible, Math.max(320, k.clientWidth || 640), Math.max(240, k.clientHeight || 300)));
+    else if (chartDue) setHtml(k, candleSvg(visible, Math.max(320, this.sizes.kw || 640), Math.max(240, this.sizes.kh || 300)));
     setHtml(
       el.querySelector<HTMLElement>('#sim-tick')!,
-      s.pre ? '<p class="muted sim-pre-note">盤前（08:30～09:00）：可以先下市價或限價單，按「🔔 開盤」後以開盤價集合競價撮合。</p>' : path && pc ? tickSvg(path, pc, s.minute, Math.max(320, k.clientWidth || 640)) : '',
+      s.pre
+        ? '<p class="muted sim-pre-note">盤前（08:30～09:00）：可以先下市價或限價單，按「🔔 開盤」後以開盤價集合競價撮合。</p>'
+        : path && pc
+          ? chartDue
+            ? tickSvg(path, pc, s.minute, Math.max(320, this.sizes.kw || 640))
+            : (el.querySelector<HTMLElement>('#sim-tick')!.dataset.html ?? '')
+          : '',
     );
-    setHtml(el.querySelector<HTMLElement>('#sim-hints')!, visible.length >= 30 ? this.hintsHtml(visible) : '');
+    // 型態只用到昨天收盤為止的資料，一天只要算一次（每分鐘重算整份歷史在手機上很卡）
+    setHtml(
+      el.querySelector<HTMLElement>('#sim-hints')!,
+      visible.length >= 30 ? this.cached('hints', `${s.watch}|${s.date}|${this.hints}|${visible.length}`, () => this.hintsHtml(visible)) : '',
+    );
   }
 
   private hintsHtml(visible: Candle[]): string {

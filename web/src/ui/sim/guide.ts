@@ -23,9 +23,11 @@ export function runGuide(all: GuideStep[], onEnd: () => void): void {
   document.querySelector('.sim-guide')?.remove();
   const root = document.createElement('div');
   root.className = 'sim-guide';
-  root.innerHTML = `<div class="sim-guide-block"></div><div class="sim-guide-hole" aria-hidden="true"><span class="sim-guide-num"></span></div>
+  // 效能：暗色遮罩用 clip-path 挖洞（只重畫一層），框線與說明卡用 transform 移動，都不做會觸發版面重排的動畫
+  root.innerHTML = `<div class="sim-guide-dim"></div><div class="sim-guide-hole" aria-hidden="true"><span class="sim-guide-num"></span></div>
     <div class="sim-guide-card" role="dialog" aria-modal="true" aria-labelledby="sim-guide-title"></div>`;
   document.body.append(root);
+  const dim = root.querySelector<HTMLElement>('.sim-guide-dim')!;
   const hole = root.querySelector<HTMLElement>('.sim-guide-hole')!;
   const num = root.querySelector<HTMLElement>('.sim-guide-num')!;
   const card = root.querySelector<HTMLElement>('.sim-guide-card')!;
@@ -37,35 +39,46 @@ export function runGuide(all: GuideStep[], onEnd: () => void): void {
   const visible = (el: Element | null) => !!el && (el as HTMLElement).offsetParent !== null && el.getBoundingClientRect().height > 0;
   const steps = all.filter((s) => !s.target || visible(s.target()));
 
+  /** 遮罩：整個畫面減掉一個圓角矩形。 */
+  const clip = (vw: number, vh: number, x = 0, y = 0, w = 0, h = 0) => {
+    const r = Math.min(14, w / 2, h / 2);
+    const outer = `M0 0H${vw}V${vh}H0Z`;
+    const inner = w
+      ? `M${x + r} ${y}H${x + w - r}A${r} ${r} 0 0 1 ${x + w} ${y + r}V${y + h - r}A${r} ${r} 0 0 1 ${x + w - r} ${y + h}H${x + r}A${r} ${r} 0 0 1 ${x} ${y + h - r}V${y + r}A${r} ${r} 0 0 1 ${x + r} ${y}Z`
+      : '';
+    dim.style.clipPath = `path(evenodd, '${outer}${inner}')`;
+  };
+
   const place = () => {
     cancelAnimationFrame(raf);
     raf = requestAnimationFrame(() => {
       const vw = window.innerWidth;
       const vh = window.innerHeight;
       const cw = Math.min(380, vw - 24);
-      card.style.width = `${cw}px`;
+      if (card.style.width !== `${cw}px`) card.style.width = `${cw}px`;
+      const ch = card.offsetHeight;
       if (!target) {
-        hole.style.cssText = `left:${vw / 2}px;top:${vh / 2}px;width:0;height:0;`;
-        hole.classList.add('is-none');
-        card.style.left = `${(vw - cw) / 2}px`;
-        card.style.top = `${Math.max(12, (vh - card.offsetHeight) / 2)}px`;
+        clip(vw, vh);
+        hole.hidden = true;
+        card.style.transform = `translate(${Math.round((vw - cw) / 2)}px, ${Math.round(Math.max(12, (vh - ch) / 2))}px)`;
         return;
       }
-      hole.classList.remove('is-none');
-      const r = target.getBoundingClientRect();
-      const left = Math.max(4, r.left - PAD);
-      const top = Math.max(4, r.top - PAD);
-      const w = Math.min(vw - 8, r.width + PAD * 2);
-      const h = Math.min(vh - 8, r.height + PAD * 2);
-      hole.style.cssText = `left:${left}px;top:${top}px;width:${w}px;height:${h}px;`;
+      hole.hidden = false;
+      const rc = target.getBoundingClientRect();
+      const left = Math.round(Math.max(4, rc.left - PAD));
+      const top = Math.round(Math.max(4, rc.top - PAD));
+      const w = Math.round(Math.min(vw - 8 - left, rc.width + PAD * 2));
+      const h = Math.round(Math.min(vh - 8 - top, rc.height + PAD * 2));
+      clip(vw, vh, left, top, w, h);
+      hole.style.width = `${w}px`;
+      hole.style.height = `${h}px`;
+      hole.style.transform = `translate(${left}px, ${top}px)`;
       // 說明卡放在框的下方，放不下就放上方，再不行就貼在畫面底部
-      const ch = card.offsetHeight;
       let cy = top + h + 12;
       if (cy + ch > vh - 12) cy = top - ch - 12;
       if (cy < 12) cy = vh - ch - 12;
       const cx = Math.min(Math.max(12, left + w / 2 - cw / 2), vw - cw - 12);
-      card.style.left = `${cx}px`;
-      card.style.top = `${Math.max(12, cy)}px`;
+      card.style.transform = `translate(${Math.round(cx)}px, ${Math.round(Math.max(12, cy))}px)`;
     });
   };
 
@@ -86,12 +99,10 @@ export function runGuide(all: GuideStep[], onEnd: () => void): void {
         <button type="button" class="btn btn-sm" data-guide="prev" ${i === 0 ? 'disabled' : ''}>上一步</button>
         <button type="button" class="btn btn-sm btn-accent" data-guide="next">${i === steps.length - 1 ? '完成 ✓' : '下一步'}</button>
       </div>`;
-    if (target) {
-      // 先捲到畫面中間，捲完再定位
-      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      place();
-      setTimeout(place, 380);
-    } else place();
+    // 直接跳到目標（平滑捲動在手機上會一路重畫遮罩），再淡入框線
+    if (target) target.scrollIntoView({ block: 'center' });
+    place();
+    hole.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' });
     card.querySelector<HTMLButtonElement>('[data-guide="next"]')?.focus({ preventScroll: true });
   };
 

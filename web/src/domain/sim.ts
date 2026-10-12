@@ -847,6 +847,8 @@ export function closeDay(s: SimState, m: Market): void {
     note(s, '', `質押維持率 ${Math.round(pr * 100)}% 低於 ${PLEDGE_CALL * 100}%，請還款或增加質押，再跌會被強制賣出`);
   }
   s.minute = SESSION_MINUTES;
+  // 提醒只留最近 500 則（成交紀錄全部保留），存檔才不會越來越大
+  if (s.notes.length > 600) s.notes = s.notes.slice(-500);
   const eq = Math.round(equityOf(s, m));
   s.equity.push([s.date, eq]);
   const today = s.trades.filter((t) => t.date === s.date);
