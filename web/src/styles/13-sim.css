@@ -1,0 +1,262 @@
+/* 拉普拉斯模擬盤（版面、面板、報告、排行榜） */
+/* ---------------- 拉普拉斯模擬盤 ---------------- */
+.sim {
+  grid-area: screen;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-areas:
+    'head head'
+    'main aside';
+  align-items: start;
+  animation: sim-in 0.6s var(--ease);
+}
+@keyframes sim-in { from { opacity: 0; transform: translateY(8px); } }
+.sim > .glass { padding: 16px 18px; min-width: 0; }
+.sim.is-setup { grid-template-columns: minmax(0, 760px); justify-content: center; grid-template-areas: 'setup'; }
+.sim.is-setup > :not(.sim-setup), .sim:not(.is-setup) > .sim-setup { display: none; }
+.sim-setup { grid-area: setup; padding: 28px 30px !important; }
+.sim-title { margin: 6px 0 10px; font-size: 28px; font-weight: 600; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sim-lead { color: var(--ink-2); line-height: 1.75; margin: 0 0 18px; }
+.sim-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-bottom: 18px; }
+.sim-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.sim input[type='date'], .sim input[type='number'], .sim input[type='text'], .sim-search input {
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--glass-line); color: var(--ink); border-radius: var(--radius-sm);
+  padding: 8px 10px; font: inherit; font-size: 14px; min-width: 0; color-scheme: dark;
+}
+.sim-form input { width: 150px; }
+.sim-rules { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; line-height: 1.85; }
+.sim-head { grid-area: head; display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px; }
+.sim-day { margin: 2px 0 0; font-size: 24px; font-weight: 600; }
+.sim-day small { font-size: 13px; color: var(--muted); font-weight: 400; }
+.sim-kpis, .sim-stats { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; }
+.sim-kpis dt, .sim-stats dt { font-size: 11px; color: var(--muted); }
+.sim-kpis dd, .sim-stats dd { margin: 2px 0 0; font-size: 18px; font-weight: 600; }
+.sim-stats dd { font-size: 15px; }
+.sim-steps { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.sim-steps .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+.sim-end { flex-basis: 100%; margin: 0; padding: 10px 14px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--ink); line-height: 1.7; }
+.sim-chart { grid-area: chart; display: flex; flex-direction: column; gap: 10px; }
+.sim-chart-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.sim-stock { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 16px; }
+.sim-stock small { font-size: 12px; }
+.sim-search { display: flex; gap: 6px; }
+.sim-search input { width: 200px; }
+.sim-k { min-height: 340px; }
+.sim-k svg { display: block; }
+.sim-empty { padding: 40px 0; text-align: center; }
+.sim-up { fill: var(--up); stroke: var(--up); }
+.sim-down { fill: var(--down); stroke: var(--down); }
+.sim-vol { opacity: 0.45; stroke: none; }
+.sim-grid { stroke: rgba(255, 255, 255, 0.06); }
+.sim-axis { fill: var(--muted); font-size: 10.5px; font-family: var(--font); }
+.sim-ma20, .sim-ma60, .sim-ma120 { fill: none; stroke-width: 1.4; }
+.sim-ma120 { stroke: #b07cff; }
+.sim-ma120t { fill: #c4a0ff; }
+.sim-ma20 { stroke: #3987e5; }
+.sim-ma60 { stroke: #c98500; }
+.sim-ma20t { fill: #6aa7f0; }
+.sim-ma60t { fill: #e0a63a; }
+.sim-legend { font-size: 11px; font-family: var(--font); }
+.sim-last { stroke: var(--accent); stroke-dasharray: 3 4; opacity: 0.6; }
+.sim-hints-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.sim-pat { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }
+.sim-order { grid-area: order; }
+.sim-order-form { display: grid; gap: 10px; margin-top: 12px; }
+.sim-target { margin: 0; font-size: 14px; }
+.sim-qty-row { display: flex; gap: 8px; align-items: center; }
+.sim-qty-row input { width: 100%; flex: 1; }
+.sim-unit { width: 92px; flex: none; }
+.sim-type { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.sim-type label { display: flex; align-items: center; gap: 6px; }
+.sim-type input[type='number'] { width: 110px; padding: 5px 8px; }
+.sim-type input[disabled] { opacity: 0.4; }
+.sim-est { margin: 0; min-height: 1.4em; font-size: 12px; color: var(--muted); }
+.btn-buy { background: color-mix(in srgb, var(--up) 85%, black); color: #fff; border: 0; font-weight: 600; }
+.btn-sell { background: color-mix(in srgb, var(--down) 80%, black); color: #fff; border: 0; font-weight: 600; }
+.btn-buy:hover, .btn-sell:hover { filter: brightness(1.1); }
+.sim-msg { margin: 10px 0 0; min-height: 1.2em; font-size: 12.5px; color: var(--accent); }
+.sim-sub { margin: 14px 0 6px; font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: 0.06em; }
+.sim-orders, .sim-logs { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.sim-orders li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.sim-orders .btn { margin-left: auto; }
+.sim-hold { grid-area: hold; }
+.sim-table-wrap { overflow-x: auto; margin-top: 10px; }
+.sim-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sim-table th { text-align: right; font-weight: 500; font-size: 11px; color: var(--muted); padding: 4px 6px; }
+.sim-table th:first-child, .sim-table td:first-child { text-align: left; }
+.sim-table td { text-align: right; padding: 7px 6px; border-top: 1px solid var(--glass-line); white-space: nowrap; }
+.sim-table tbody tr { cursor: pointer; }
+.sim-table tbody tr:hover { background: var(--row-hover); }
+.sim-equity { grid-area: equity; display: flex; flex-direction: column; gap: 10px; }
+.sim-eq { display: block; height: auto; }
+.sim-mine { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.sim-bench { fill: none; stroke: #b8a9ff; stroke-width: 1.4; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; opacity: 0.8; }
+.sim-base { stroke: rgba(255, 255, 255, 0.2); vector-effect: non-scaling-stroke; }
+.sim-eq .sim-grid { vector-effect: non-scaling-stroke; }
+.sim-eq-legend { margin: 0; font-size: 12px; }
+.sim-mine-t { color: var(--accent); }
+.sim-bench-t { color: #b8a9ff; }
+.sim-log { grid-area: log; max-height: 360px; overflow: auto; }
+.sim-logs { margin-top: 10px; }
+.sim-logs li { line-height: 1.6; }
+@media (max-width: 980px) {
+  .sim { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'head' 'chart' 'order' 'dayrep' 'hold' 'bank' 'rank' 'news' 'equity' 'log'; }
+  .sim-main, .sim-aside { display: contents; }
+  .sim-steps { margin-left: 0; }
+}
+@media (max-width: 720px) {
+  .sim-k { min-height: 280px; }
+  .sim-search, .sim-search input { width: 100%; }
+  .sim-setup { padding: 20px 18px !important; }
+  .sim-form input { width: 100%; }
+  .sim-form label { flex: 1 1 140px; }
+  .sim-kpis { gap: 8px 18px; }
+  .sim-kpis dd { font-size: 16px; }
+}
+.sim-search .btn { flex: none; white-space: nowrap; }
+
+.sim-gate input { width: 560px; max-width: 100%; letter-spacing: 0.04em; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }
+.sim-note { font-size: 12px; margin: 6px 0 0; }
+.sim-lobby { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 6px 0 8px; }
+.sim-card { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: var(--radius-sm); border: 1px solid var(--glass-line); background: rgba(255, 255, 255, 0.03); }
+.sim-card p { margin: 0; }
+.sim-card .btn { margin-top: auto; }
+.sim-card-date { font-size: 22px; font-weight: 600; }
+.sim-card-empty { justify-content: center; }
+.sim-lobby-foot { margin: 16px 0 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.sim-lobby-foot .btn { margin-left: auto; }
+.sim-sync { font-size: 12px; color: var(--muted); }
+.sim-sync.is-ok { color: var(--accent); }
+.sim-sync.is-error { color: #f5b14c; }
+@media (max-width: 720px) {
+  .sim-gate input { width: 100%; }
+  .sim-gate label { flex-basis: 100%; }
+}
+
+.sim-admin-tag { margin-left: 10px; padding: 2px 10px; border-radius: 99px; font-size: 12px; vertical-align: middle; color: #071022; background: var(--accent-grad); -webkit-text-fill-color: #071022; }
+.sim-card-admin { margin: 0 0 8px; border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.sim-admin-table tbody tr { cursor: pointer; }
+.sim-admin-log { max-height: 420px; overflow: auto; }
+
+/* 模擬盤：時鐘、排行、新聞、分時 */
+.sim-clock { font-size: 30px; letter-spacing: 0.04em; margin-left: 4px; }
+.sim-status { margin-left: 10px; padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 500; vertical-align: middle; border: 1px solid var(--glass-line); }
+.sim-status-run { color: #071022; background: var(--accent-grad); border-color: transparent; }
+.sim-status-pause { color: #f5b14c; border-color: color-mix(in srgb, #f5b14c 50%, transparent); }
+.sim-status-closed, .sim-status-end { color: var(--ink-2); }
+.sim-garble { margin: 2px 0 0; font-size: 12px; color: var(--muted); letter-spacing: 0.12em; }
+.sim-speed { width: auto; min-width: 132px; grid-template-columns: repeat(3, 1fr); }
+.sim-kinds { grid-template-columns: repeat(4, 1fr); }
+.sim-rank-tabs { grid-template-columns: repeat(6, 1fr); margin-top: 10px; }
+.sim-rank-tabs button, .sim-kinds button { padding: 6px 4px; font-size: 12.5px; }
+.sim-main { grid-area: main; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sim-aside { grid-area: aside; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sim-main > .glass, .sim-aside > .glass { padding: 16px 18px; min-width: 0; }
+.sim.is-setup > .sim-main, .sim.is-setup > .sim-aside { display: none; }
+.sim-rank { grid-area: rank; }
+.sim-rank-table td { padding: 6px 5px; }
+.sim-rank-table tr.is-watch { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.sim-news { grid-area: news; max-height: 420px; overflow: auto; }
+.sim-newslist { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.sim-newslist li { display: grid; gap: 2px; padding-bottom: 8px; border-bottom: 1px solid var(--glass-line); font-size: 13px; line-height: 1.5; }
+.sim-news-date { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; }
+.sim-news-1 .sim-news-title { color: var(--ink); font-weight: 600; }
+.sim-news-1 .sim-news-title::before { content: '● '; color: #f5b14c; }
+.sim-news-2 .sim-news-title { color: var(--ink-2); }
+.sim-news-3 .sim-news-title { color: var(--muted); }
+.sim-px { font-size: 20px; font-weight: 600; }
+.sim-tick svg { display: block; }
+.sim-pc { stroke: rgba(255, 255, 255, 0.35); stroke-dasharray: 3 3; }
+.sim-tickline { fill: none; stroke-width: 1.6; }
+.sim-up-line { stroke: var(--up); }
+.sim-down-line { stroke: var(--down); }
+.sim-today { opacity: 0.85; }
+.sim-kind { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11.5px; border: 1px solid var(--glass-line); }
+.sim-kind-day { color: #f5b14c; }
+.sim-kind-margin { color: var(--up); }
+.sim-kind-short { color: var(--down); }
+.sim-order-form button[type='submit'][disabled] { opacity: 0.45; cursor: not-allowed; }
+@media (max-width: 720px) {
+  .sim-clock { font-size: 24px; }
+  .sim-steps .seg { width: auto; }
+}
+.sim-endbox { flex-basis: 100%; }
+.sim-endbox:empty { display: none; }
+
+/* 模擬盤日期亂碼：每個數字是一格固定位置、不停跳動的報價燈號（一格一個元素，用 transform 跳，格高用整數像素才不會忽高忽低） */
+.gb { --gh: 16px; }
+.sim-news-date .gb { --gh: 14px; }
+.gb > span { display: inline-flex; align-items: center; gap: 0.15em; }
+.gb-run {
+  display: inline-flex; gap: 1px; padding: 0 2px;
+  border-radius: 3px; background: rgba(143, 240, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(143, 240, 255, 0.14);
+}
+.gb-run i {
+  display: inline-block; width: 0.62em; height: var(--gh); overflow: hidden;
+  font-style: normal; color: var(--accent); contain: paint;
+}
+.gb-run b {
+  display: block; line-height: var(--gh); text-align: center;
+  font-weight: 600; font-variant-numeric: tabular-nums; opacity: 0.9;
+  animation: gb-roll var(--t) steps(10, end) var(--d) infinite;
+}
+@keyframes gb-roll { to { transform: translateY(calc(var(--gh) * -10)); } }
+@media (prefers-reduced-motion: reduce) {
+  .gb-run b { animation: none; filter: blur(2.5px); }
+}
+
+/* 收盤結算、資金、停損停利 */
+.sim-dayrep-panel { grid-area: dayrep; }
+.sim-bank { grid-area: bank; }
+.sim-dayrep { margin-top: 10px; border-radius: var(--radius-sm); }
+.sim-dayrep.is-fresh { animation: sim-fresh 2.4s var(--ease) 1; }
+@keyframes sim-fresh {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  100% { box-shadow: 0 0 0 10px transparent; background: transparent; }
+}
+.sim-dayrep-main dd { font-size: 18px; }
+.sim-tick-note { margin: 0; }
+.sim-stop { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 8px; margin: 6px 0; font-size: 12px; color: var(--muted); }
+.sim-stop label { display: grid; gap: 3px; }
+.sim-stop input[type='number'] { width: 92px; padding: 5px 8px; }
+.sim-stop-label { flex-basis: 100%; color: var(--ink-2); }
+.sim-stopcell { font-size: 12px; line-height: 1.4; }
+.sim-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+.sim-inline input[type='number'] { width: 130px; padding: 5px 8px; }
+.sim-inline select { padding: 5px 8px; border-radius: var(--radius-sm); border: 1px solid var(--glass-line); background: rgba(255, 255, 255, 0.04); color: var(--ink); font: inherit; font-size: 13px; max-width: 100%; }
+.sim-inline select option { background: var(--bg); }
+.sim-pledge-form select { flex-basis: 100%; }
+.sim-bank-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 13px; }
+.sim-bank-list li { padding: 8px 10px; border: 1px solid var(--glass-line); border-radius: var(--radius-sm); }
+.sim-bank .sim-sub small, .sim-order .sim-sub small { font-weight: 400; letter-spacing: 0; }
+
+/* 朋友排行榜 */
+.sim-board { margin: 0 0 8px; }
+.sim-board-tabs { grid-template-columns: repeat(4, 1fr); margin: 4px 0 0; }
+.sim-board-tabs button { padding: 6px 4px; font-size: 12.5px; }
+.sim-board-table tbody tr { cursor: default; }
+.sim-board-table tr.is-me { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.sim-table tr.is-link { cursor: pointer; }
+.sim-link { color: var(--accent); font-size: 12px; }
+
+/* 結束報告 */
+.sim-reveal { margin: 0 0 6px; font-size: 22px; font-weight: 600; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.sim-reveal small { font-size: 13px; font-weight: 400; }
+.sim-verdict { margin: 0 0 14px; font-size: 15px; font-weight: 600; }
+.sim-report-kpis { margin: 4px 0 8px; }
+.sim-report-sec { margin-top: 14px; }
+.sim-report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 18px; }
+.sim-bar-real.is-up { fill: var(--up); }
+.sim-bar-real.is-down { fill: var(--down); }
+.sim-bar-unreal { opacity: 0.4; }
+.sim-bar-unreal.is-up { fill: var(--up); }
+.sim-bar-unreal.is-down { fill: var(--down); }
+.sim-bar-real-t { color: var(--ink); }
+.sim-bar-unreal-t { color: var(--muted); }
+.sim-dd { fill: color-mix(in srgb, var(--down) 30%, transparent); stroke: var(--down); stroke-width: 1; vector-effect: non-scaling-stroke; }
+@media (max-width: 720px) {
+  .sim-reveal { font-size: 18px; }
+  .sim-inline input[type='number'] { flex: 1 1 110px; width: auto; }
+}
+.sim-board-table th:nth-child(2), .sim-board-table td:nth-child(2) { text-align: left; }

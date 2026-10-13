@@ -1,0 +1,99 @@
+/* 主要頁面的響應式版面 */
+/* ---------------- 響應式 ---------------- */
+@media (max-width: 1240px) {
+  .analysis { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'head head' 'chart chart' 'pattern pattern' 'summary score' 'tech score' 'fund fund' 'news news'; }
+  .app.page-intel { grid-template-columns: 200px minmax(0, 1fr) 300px; }
+  .screener { grid-template-columns: 220px minmax(0, 1fr) 290px; }
+  .ticker { gap: 18px; }
+}
+@media (max-width: 980px) {
+  .app.page-intel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'top top' 'sectors side' 'dock dock'; grid-template-rows: auto minmax(420px, auto) auto; height: auto; }
+  .app.page-intel .dock { grid-template-rows: 280px 280px; }
+  html:has(.page-intel), body:has(.page-intel), html:has(.page-screen), body:has(.page-screen), html:has(.page-etf), body:has(.page-etf) { height: auto; }
+  .app.page-screen, .app.page-etf { height: auto; }
+  .etf-cats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .screener { grid-template-columns: minmax(0, 1fr); }
+  .strat-list { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .scr-detail { max-height: none; }
+}
+@media (max-width: 720px) {
+  .analysis { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'head' 'chart' 'pattern' 'summary' 'score' 'tech' 'fund' 'news'; }
+  .sa-chart { min-height: 380px; }
+  .kchart { min-height: 300px; }
+  .sa-search { margin-left: 0; width: 100%; }
+  .tech-table td.muted { display: none; }
+  .news-list li { grid-template-columns: 40px 1fr; }
+  .news-list li .tilt { grid-column: 2; justify-self: start; }
+  html, body { height: auto; }
+  .app { height: auto; gap: 12px; padding: 12px 16px; }
+  .app.page-map { grid-template-rows: auto auto; }
+  .app.page-intel { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'top' 'sectors' 'side' 'dock'; grid-template-rows: auto; }
+  .app.page-intel .dock { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .app.page-intel .dock .card { min-height: 260px; }
+  .app.page-intel .side { grid-template-rows: auto 260px; }
+  .sectors { overflow-x: auto; overflow-y: hidden; padding: 10px; }
+  .sectors .panel-title { display: none; }
+  .sector-list { display: flex; gap: 6px; width: max-content; }
+  .sector { min-width: 140px; border-color: var(--glass-line); }
+  /* 頂部：第一列 Logo＋選單，第二列分頁（可左右滑），第三列行情 */
+  .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'brand menu' 'pages pages' 'ticker ticker';
+    gap: 10px;
+    padding: 10px 12px 12px;
+  }
+  .brand { grid-area: brand; min-width: 0; gap: 10px; }
+  .menu { grid-area: menu; position: static; }
+  .pages {
+    grid-area: pages;
+    display: flex;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .pages::-webkit-scrollbar { display: none; }
+  .pages button { flex: 1 0 auto; white-space: nowrap; padding: 7px 9px; font-size: 13px; }
+  .ticker {
+    grid-area: ticker;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px 12px;
+    align-items: end;
+  }
+  .ticker .kv-index { grid-row: 1; grid-column: 1 / 3; }
+  .ticker .kv-live { grid-row: 1; grid-column: 3; justify-self: end; align-self: center; }
+  .kv-index b { font-size: 22px; }
+  .kv b { font-size: 15px; }
+  /* 選單改成固定在畫面上方的整寬面板，不會跑出螢幕 */
+  .menu-body {
+    position: fixed;
+    top: 64px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-height: calc(100dvh - 80px);
+  }
+  .view { flex: none; height: clamp(520px, 78vh, 900px); margin: 0 8px 8px; }
+  .field-head { padding: 12px 14px 8px; }
+  .map-detail { top: auto; bottom: 16px; right: 16px; left: 16px; width: auto; max-height: 55%; }
+  .toasts { left: 16px; bottom: 16px; width: calc(100% - 32px); }
+  .gm-tip { display: none; }
+  .scr-main { padding: 16px; }
+  .scr-facts { grid-template-columns: minmax(0, 1fr); }
+  .crit-list li { grid-template-columns: 24px minmax(0, 1fr) 60px; }
+  .crit-bar { display: none; }
+}
+@media (max-width: 380px) {
+  .brand-text span, .chip-source { font-size: 10px; }
+  .pages button { padding: 7px 6px; font-size: 12px; }
+  .kv-index b { font-size: 19px; }
+  .kv-index dd { flex-wrap: wrap; column-gap: 6px; row-gap: 0; }
+  .kv b { font-size: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aurora i, .live i, .flash-up, .flash-down, .gm-cell.is-surge::before, .toast, .map-detail, .log-item.is-new { animation: none; }
+  .gm-group, .gm-cell { transition: none; }
+}

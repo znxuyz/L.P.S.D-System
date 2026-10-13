@@ -1,0 +1,97 @@
+/* 各頁面的格線版面與顯示／隱藏 */
+/* ---------------- 版面 ---------------- */
+.app {
+  height: 100%;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+.app > * { min-width: 0; min-height: 0; }
+.app.page-map {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: 'top' 'field';
+}
+.app.page-map .sectors,
+.app.page-map .side,
+.app.page-map .dock { display: none; }
+.app.page-intel {
+  grid-template-columns: 230px minmax(0, 1fr) 350px;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    'top top top'
+    'sectors dock side';
+}
+.app.page-intel .field,
+.app.page-intel .screener,
+.app.page-map .screener,
+.app.page-screen .etf-page,
+.app.page-etf #page-screen { display: none; }
+.app.page-etf {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: 'top' 'screen';
+}
+.app.page-etf .field,
+.app.page-etf .sectors,
+.app.page-etf .side,
+.app.page-etf .dock { display: none; }
+.app.page-screen {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: 'top' 'screen';
+}
+.app.page-screen .field,
+.app.page-screen .sectors,
+.app.page-screen .side,
+.app.page-screen .dock { display: none; }
+.app.page-stock {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  grid-template-areas: 'top' 'screen';
+  height: auto;
+}
+html:has(.page-stock), body:has(.page-stock) { height: auto; }
+.app.page-stock .field,
+.app.page-stock .sectors,
+.app.page-stock .side,
+.app.page-stock .dock,
+.app.page-stock .screener,
+.app:not(.page-stock) .analysis { display: none; }
+.app.page-sim {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  grid-template-areas: 'top' 'screen';
+  height: auto;
+}
+html:has(.page-sim), body:has(.page-sim) { height: auto; }
+.app.page-sim .field,
+.app.page-sim .sectors,
+.app.page-sim .side,
+.app.page-sim .dock,
+.app.page-sim .screener,
+.app:not(.page-sim) .sim { display: none; }
+.app.page-learn {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  grid-template-areas: 'top' 'screen';
+  height: auto;
+}
+html:has(.page-learn), body:has(.page-learn) { height: auto; }
+.app.page-learn .field,
+.app.page-learn .sectors,
+.app.page-learn .side,
+.app.page-learn .dock,
+.app.page-learn .screener,
+.app:not(.page-learn) > .learn { display: none; }
+/* 模擬盤只留模擬：頂端列只剩圖示、名稱與離開 */
+.app.page-sim .pages,
+.app.page-sim .ticker,
+.app.page-sim .chip-source,
+.app.page-sim .menu,
+.app.page-sim .brand-main,
+.app:not(.page-sim) .brand-sim,
+.app:not(.page-sim) .sim-bar { display: none; }
+.app.page-sim .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sim-bar { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.brand-sim { color: var(--accent) !important; }

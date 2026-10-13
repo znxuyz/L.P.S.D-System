@@ -1,0 +1,32 @@
+/* 窄螢幕面板順序、iPhone 瀏海與動態島的安全區域 */
+/* 窄螢幕：主欄與側欄拆開，面板依序排成一欄（要放在 .sim-main／.sim-aside 的 display: flex 之後才蓋得過去） */
+@media (max-width: 980px) {
+  .sim > .sim-main, .sim > .sim-aside { display: contents; }
+}
+
+/* iPhone 瀏海／動態島：從主畫面打開時狀態列是透明的（black-translucent），內容要避開時間、電量那一列與底部橫條 */
+.app {
+  padding-top: calc(14px + env(safe-area-inset-top));
+  padding-right: max(14px, env(safe-area-inset-right));
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  padding-left: max(14px, env(safe-area-inset-left));
+}
+@media (max-width: 720px) {
+  .app {
+    padding-top: calc(12px + env(safe-area-inset-top));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    padding-left: max(16px, env(safe-area-inset-left));
+  }
+  .menu-body {
+    top: calc(64px + env(safe-area-inset-top));
+    max-height: calc(100dvh - 80px - env(safe-area-inset-top));
+  }
+}
+.sim-fav { margin-left: auto; padding: 6px 12px; border-radius: 99px; border: 1px solid var(--glass-line); background: rgba(255, 255, 255, 0.04); color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; }
+.sim-fav[aria-pressed='true'] { color: #f5c451; border-color: color-mix(in srgb, #f5c451 50%, transparent); }
+.sim-dca-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sim-dca-target { flex-basis: 100%; font-size: 13px; color: var(--ink-2); }
+.sim-rank-tabs button { white-space: nowrap; padding-left: 2px; padding-right: 2px; }
+.sim-status-pre { color: #9fd8ff; border-color: color-mix(in srgb, #9fd8ff 45%, transparent); }
+.sim-pre-note { margin: 0; padding: 14px 16px; border: 1px dashed var(--glass-line); border-radius: var(--radius-sm); font-size: 13px; line-height: 1.7; }

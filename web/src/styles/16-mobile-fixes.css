@@ -1,0 +1,36 @@
+/* 手機版修正（輸入框、表格）與破產標示 */
+/* 手機版修正 */
+/* iPhone 的日期欄有自己的最小寬度，會撐出去蓋到旁邊的按鈕；改成跟著容器寬度 */
+input[type='date'] { -webkit-appearance: none; appearance: none; min-width: 0; max-width: 100%; box-sizing: border-box; }
+input[type='date']::-webkit-date-and-time-value { text-align: left; }
+@media (max-width: 720px) {
+  /* 輸入框字小於 16px 時，iPhone 點下去會自動放大整個畫面 */
+  input:not([type='radio']):not([type='checkbox']), select, textarea { font-size: 16px !important; }
+  /* 開新局表單：日期一整行，按鈕平分一行，不會擠在一起 */
+  .sim-form label:has(input[type='date']) { flex: 1 1 100%; }
+  .sim-form .btn { flex: 1 1 auto; }
+  .sim-form input { width: 100%; }
+}
+/* 狀態標籤不要從中間斷開：太長就整個換到下一行 */
+.sim-status { display: inline-block; white-space: nowrap; }
+/* 表格：表頭不要一個字一行；手機上表格比畫面寬時右邊淡出，提示還可以往右滑（右側留白，滑到底時最後一欄不會被淡出蓋住） */
+.sim-table th { white-space: nowrap; }
+@media (max-width: 720px) {
+  .sim-table-wrap, .scr-table-wrap {
+    padding-right: 28px;
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+  }
+}
+
+/* 破產 */
+.sim-form select { padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--glass-line); background: rgba(255, 255, 255, 0.04); color: var(--ink); font: inherit; font-size: 14px; }
+.sim-form select option { background: var(--bg); }
+.sim-status-ruin { color: #fff; background: #d6455d; border-color: transparent; }
+.sim-ruin { display: grid; gap: 6px; background: color-mix(in srgb, #d6455d 16%, transparent); border: 1px solid color-mix(in srgb, #d6455d 50%, transparent); }
+.sim-ruin b { font-size: 18px; color: #ff9aaa; }
+.sim-ruin p { margin: 0; }
+.sim-ruin .btn { justify-self: start; }
+.sim-ruin-tag { display: inline-block; margin-left: 10px; padding: 2px 10px; border-radius: 99px; font-size: 13px; font-weight: 700; vertical-align: middle; color: #fff; background: #d6455d; -webkit-text-fill-color: #fff; }
+.sim-ruin-tag.is-sm { margin-left: 4px; padding: 1px 7px; font-size: 11px; }
+.sim-ruin-note { color: #ff9aaa; }
