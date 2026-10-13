@@ -10,11 +10,7 @@
  * 這個檔案是控制器（狀態、時鐘、雲端同步、事件）；各畫面的 HTML 在 ui/sim/ 底下：
  * lobby.ts（登入、大廳、排行榜、開新局）、panels.ts（遊戲中的面板）、report.ts（結束報告）、admin.ts（管理員）、charts.ts（圖表）。
  */
-import { loadOfficialCandles } from '../data/candles';
-import { loadTaiex } from '../data/chipSeries';
-import { loadNames, loadNews, loadSimMonth, type NewsItem, type SimMonth } from '../data/simData';
-import { loadStockDirectory, searchDirectory, type DirEntry } from '../data/stockDirectory';
-import { SESSION_MINUTES, clock, intradayPath, type IntradayPath } from '../domain/intraday';
+import { SESSION_MINUTES, clock } from '../domain/intraday';
 import { detectPatterns } from '../domain/patterns';
 import { repairSplits,
   KIND_NAME,
@@ -22,8 +18,6 @@ import { repairSplits,
   MARGIN_LOAN,
   SHORT_DEPOSIT,
   beginDay,
-  benchValue,
-  buildMarket,
   cancelOrder,
   closeDay,
   debtOf,
@@ -48,7 +42,6 @@ import { repairSplits,
   toggleFav,
   taxOf,
   tickTo,
-  type ExRight,
   type Kind,
   type Market,
   type Side,
@@ -86,17 +79,15 @@ import { recordOf, reportHtml, verdict } from './sim/report';
 import { askGuide, runGuide } from './sim/guide';
 import { simGuideSteps } from './sim/guideSteps';
 import { pickRandomStart } from '../domain/simScenarios';
-import { adjustForSplits } from '../domain/splits';
+import { loadSimMonth } from '../data/simData';
+import { SimData } from './sim/dataStore';
+import { RANK_NAME, rankRows, rankTableHtml, type RankKey, type RankRow } from './sim/rank';
 import { renderLearnPage } from './learnPage';
 import { fundHtml, techHtml } from './sim/analysis';
-import { loadChipSeries, type ChipSeries } from '../data/chipSeries';
-import { loadSimFund, type SimFund } from '../data/simData';
-import { BIAS, actionName, cls, garble, investedAt, money, pctOrDash, setHtml, weekday, type SimCtx } from './sim/util';
+import { BIAS, actionName, cls, garble, money, pctOrDash, setHtml, weekday, type SimCtx } from './sim/util';
 
 /** 上次在模擬盤的哪個畫面（大廳／遊戲中），重新打開時用。 */
 const VIEW_KEY = 'lplc.sim.view';
-/** 交易日曆：0050 從 2003 年起每個交易日都有成交。 */
-const CALENDAR_CODE = '0050';
 /** 新手指引：問過（或看過）就記下來，不會每次都問。 */
 const GUIDE_KEY = 'lplc.sim.guide';
 /** 每天要不要先停在盤前（關掉的話收盤後直接進入下一天的盤中）。 */
@@ -110,15 +101,6 @@ const CLOSE_PAUSE_MS = 2500;
 /** 排行榜：收盤後等這麼久才上傳（連續跳好幾天時只傳最後一次）；大廳裡的排行榜多久重新讀一次。 */
 const BOARD_PUSH_MS = 20_000;
 const BOARD_STALE_MS = 60_000;
-
-type RankKey = 'up' | 'down' | 'vol' | 'high' | 'low' | 'fav';
-const RANK_NAME: Record<RankKey, string> = { up: '漲幅', down: '跌幅', vol: '成交量', high: '高價', low: '低價', fav: '自選' };
-
-interface RankRow {
-  code: string;
-  pc: number;
-  path: IntradayPath;
-}
 
 type View = 'gate' | 'lobby' | 'setup' | 'play' | 'admin' | 'report';
 
@@ -165,16 +147,17 @@ export class SimPage implements SimCtx {
   private boardLoadedAt = 0;
   private boardLoading = false;
   private boardTimer = 0;
-  private readonly candles = new Map<string, Candle[] | null>();
-  private readonly loading = new Map<string, Promise<Candle[] | null>>();
-  calendar: string[] | null | undefined;
-  private calIndex = new Map<string, number>();
-  private dir: DirEntry[] = [];
-  private names: Record<string, string> = {};
-  taiex: Map<string, number> | null = null;
-  private ex: ExRight[] = [];
-  private exYears = new Set<number>();
-  market: Market = buildMarket(new Map());
+  /** 資料層：日 K、行情、日曆、名稱、新聞、基本面（ui/sim/dataStore.ts）。 */
+  private readonly data = new SimData();
+  get market(): Market {
+    return this.data.market;
+  }
+  get calendar(): string[] | null | undefined {
+    return this.data.calendar;
+  }
+  get taiex(): Map<string, number> | null {
+    return this.data.taiex;
+  }
   private started = false;
   // 下單面板與資金面板
   private side: Side = 'buy';
@@ -213,9 +196,6 @@ export class SimPage implements SimCtx {
   private dirty = false;
   /** 圖表大小：只在視窗大小改變時量（每次重畫都去讀寬度會強迫整頁重新排版）。 */
   private sizes = { kw: 0, kh: 0, ew: 0 };
-  /** 分析分頁用的資料（undefined＝載入中，null＝沒有）。 */
-  private readonly funds = new Map<string, SimFund | null | undefined>();
-  private readonly chipData = new Map<string, ChipSeries | null | undefined>();
   /** 手機版目前的分頁。 */
   private tab: SimTab = (() => {
     try {
@@ -237,10 +217,8 @@ export class SimPage implements SimCtx {
   private rankKey: RankKey = 'up';
   private rankCache: { date: string; rows: RankRow[] } | null = null;
   private rankLoading = '';
-  private news: NewsItem[] = [];
   /** 表格列在 pointerdown 時已處理，忽略接著來的 click。 */
   private rowDown = 0;
-  private newsYears = new Set<string>();
 
   constructor(private readonly root: HTMLElement) {}
 
@@ -296,55 +274,10 @@ export class SimPage implements SimCtx {
       if (entry) this.login(entry);
       else this.render();
     });
-    void Promise.all([
-      this.fetchCandles(CALENDAR_CODE).then((c) => {
-        this.calendar = c?.map((x) => x.date) ?? null;
-        this.calIndex = new Map((this.calendar ?? []).map((d, i) => [d, i]));
-      }),
-      loadStockDirectory().then((d) => (this.dir = d?.stocks ?? [])),
-      loadNames().then((n) => (this.names = n)),
-      loadTaiex().then((t) => (this.taiex = t)),
-    ]).then(() => this.prepare());
+    void this.data.loadBasics().then(() => this.prepare());
   }
 
   // ------------------------------------------------------------ 資料
-
-  private fetchCandles(code: string): Promise<Candle[] | null> {
-    if (this.candles.has(code)) return Promise.resolve(this.candles.get(code)!);
-    let p = this.loading.get(code);
-    if (!p) {
-      p = loadOfficialCandles(code).then((c) => {
-        this.candles.set(code, c);
-        this.loading.delete(code);
-        this.rebuildMarket();
-        return c;
-      });
-      this.loading.set(code, p);
-    }
-    return p;
-  }
-
-  private async fetchExRights(fromYear: number, toYear: number): Promise<void> {
-    const todo: number[] = [];
-    for (let y = fromYear; y <= toYear; y++) if (!this.exYears.has(y)) todo.push(y);
-    if (!todo.length) return;
-    for (const y of todo) this.exYears.add(y);
-    const rows = await Promise.all(
-      todo.map((y) =>
-        fetch(`data/exrights/${y}.json`, { cache: 'no-cache' })
-          .then((r) => (r.ok ? (r.json() as Promise<ExRight[]>) : []))
-          .catch(() => [] as ExRight[]),
-      ),
-    );
-    this.ex.push(...rows.flat().filter((r) => Array.isArray(r)));
-    this.rebuildMarket();
-  }
-
-  private rebuildMarket(): void {
-    const series = new Map<string, Candle[]>();
-    for (const [code, c] of this.candles) if (c) series.set(code, c);
-    this.market = buildMarket(series, this.ex);
-  }
 
   /** 目前用到的股票（觀看中、有部位、委託中、質押中）都要有日 K。 */
   private neededCodes(): string[] {
@@ -358,9 +291,9 @@ export class SimPage implements SimCtx {
     if (s) {
       const y = Number(s.date.slice(0, 4));
       await Promise.all([
-        ...this.neededCodes().map((c) => this.fetchCandles(c)),
-        this.fetchExRights(Number(s.settings.start.slice(0, 4)), y + 1),
-        this.loadNewsFor(s.date),
+        ...this.neededCodes().map((c) => this.data.fetchCandles(c)),
+        this.data.fetchExRights(Number(s.settings.start.slice(0, 4)), y + 1),
+        this.data.loadNewsFor(s.date),
       ]);
       // 舊存檔：分割處理加上去之前已經過了分割日的，補上（均價跟著變）
       if (this.state === s && repairSplits(s, this.market)) {
@@ -371,50 +304,16 @@ export class SimPage implements SimCtx {
     this.render();
   }
 
-  private async loadNewsFor(date: string): Promise<void> {
-    const years = [String(Number(date.slice(0, 4)) - 1), date.slice(0, 4)];
-    const todo = years.filter((y) => !this.newsYears.has(y));
-    if (!todo.length) return;
-    for (const y of todo) this.newsYears.add(y);
-    const lists = await Promise.all(todo.map((y) => loadNews(y)));
-    this.news = [...this.news, ...lists.flat()].sort((a, b) => (a[0] + a[1] < b[0] + b[1] ? -1 : 1));
-  }
-
   nameOf(code: string): string {
-    return this.names[code] ?? this.dir.find((d) => d.code === code)?.name ?? '';
+    return this.data.nameOf(code);
   }
 
-  private prevDay = (d: string): string | undefined => {
-    const cal = this.calendar;
-    if (!cal) return undefined;
-    const i = this.calIndex.get(d);
-    if (i != null) return i > 0 ? cal[i - 1] : undefined;
-    // 不是交易日：找它之前最後一個交易日
-    let lo = 0;
-    let hi = cal.length - 1;
-    if (!cal.length || cal[0] >= d) return undefined;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (cal[mid] < d) lo = mid;
-      else hi = mid - 1;
-    }
-    return cal[lo];
-  };
-
-  private index = (d: string): number | undefined => this.taiex?.get(d);
-
-  /** 同額投入大盤的對照組在 date 收盤的價值。 */
   benchAt(s: SimState, date: string): number | null {
-    if (!this.taiex || !this.calendar) return null;
-    return benchValue(s, this.index, this.prevDay, date);
+    return this.data.benchAt(s, date);
   }
 
-  /** 對照組報酬：到最近一個已收盤的交易日（盤中不看今天，避免偷看）。 */
   benchOf(s: SimState): number | null {
-    const lastDone = s.minute >= SESSION_MINUTES ? s.date : this.prevDay(s.date);
-    if (!lastDone || lastDone < s.settings.start) return s.equity.length ? null : 0;
-    const b = this.benchAt(s, lastDone);
-    return b == null ? null : b / investedAt(s, lastDone) - 1;
+    return this.data.benchOf(s);
   }
 
   // ------------------------------------------------------------ 帳號
@@ -540,7 +439,7 @@ export class SimPage implements SimCtx {
     this.boardTimer = 0;
     const s = this.state;
     if (!s || !s.equity.length || !this.canSync() || !this.taiex || !this.calendar) return;
-    const stats = boardStats(s, this.index, this.prevDay);
+    const stats = boardStats(s, this.data.indexAt, this.data.prevDay);
     void pushBoard(this.sync!, this.syncId!, stats).then(
       () => (this.boardLoadedAt = 0),
       () => undefined,
@@ -779,7 +678,7 @@ export class SimPage implements SimCtx {
     const s = this.state;
     const cal = this.calendar;
     if (!s || !cal || s.bankrupt) return;
-    await Promise.all(this.neededCodes().map((c) => this.fetchCandles(c)));
+    await Promise.all(this.neededCodes().map((c) => this.data.fetchCandles(c)));
     // 盤前直接跳到隔天：先開盤撮合盤前委託，再走完今天
     if (s.pre) openDay(s, this.market);
     if (s.minute < SESSION_MINUTES || s.equity.at(-1)?.[0] !== s.date) {
@@ -860,7 +759,7 @@ export class SimPage implements SimCtx {
   private async open(): Promise<void> {
     const s = this.state;
     if (!s?.pre || s.bankrupt) return;
-    await Promise.all(this.neededCodes().map((c) => this.fetchCandles(c)));
+    await Promise.all(this.neededCodes().map((c) => this.data.fetchCandles(c)));
     if (!s.pre) return;
     const before = s.trades.length;
     openDay(s, this.market);
@@ -914,11 +813,7 @@ export class SimPage implements SimCtx {
   private async watch(q: string): Promise<void> {
     const s = this.state;
     if (!s || !q.trim()) return;
-    const token = q.trim().split(/\s+/)[0].toUpperCase();
-    const hit =
-      searchDirectory(this.dir, q)?.code ??
-      (this.names[token] ? token : Object.entries(this.names).find(([, n]) => n === q.trim())?.[0]) ??
-      (/^\d{4,6}[A-Z]?$/.test(token) ? token : undefined);
+    const hit = this.data.findCode(q);
     if (!hit) {
       this.msg = `找不到「${q}」`;
       return this.render();
@@ -926,7 +821,7 @@ export class SimPage implements SimCtx {
     s.watch = hit;
     this.msg = '';
     this.render();
-    await this.fetchCandles(hit);
+    await this.data.fetchCandles(hit);
     this.render();
   }
 
@@ -1010,7 +905,7 @@ export class SimPage implements SimCtx {
         const code = String(fd.get('code'));
         err = setDca(s, code, n('amount'));
         ok = `已設定 ${code} 每月定期定額 ${n('amount').toLocaleString()} 元`;
-        if (!err) void this.fetchCandles(code);
+        if (!err) void this.data.fetchCandles(code);
         break;
       }
     }
@@ -1374,12 +1269,12 @@ export class SimPage implements SimCtx {
     this.renderRank($('sim-rank'), s);
     setHtml($('sim-dayrep'), dayReportHtml(s, this.freshDay === s.date));
     // 新聞只在新的一則出現時才會變；以「看得到幾則」當關鍵值
-    const newsKey = `${s.date}|${s.pre}|${this.news.length}|${this.news.filter(([d]) => d === s.date).length}|${Math.floor(s.minute / 30)}`;
-    setHtml($('sim-news'), this.cached('news', newsKey, () => newsHtml(s, this.news)));
+    const newsKey = `${s.date}|${s.pre}|${this.data.news.length}|${this.data.news.filter(([d]) => d === s.date).length}|${Math.floor(s.minute / 30)}`;
+    setHtml($('sim-news'), this.cached('news', newsKey, () => newsHtml(s, this.data.news)));
     setHtml($('sim-hold'), holdHtml(s, this));
     // 資產曲線每天收盤才變、交易紀錄有新的一筆才變
     const ew = Math.max(240, (this.sizes.ew || 640) - 36);
-    const named = Object.keys(this.names).length > 0;
+    const named = this.data.hasNames;
     setHtml($('sim-equity'), this.cached('equity', `${s.settings.start}|${s.equity.length}|${s.trades.length}|${ew}|${!!this.taiex}|${!!this.calendar}`, () => equityHtml(s, this, ew)));
     setHtml($('sim-log'), this.cached('log', `${s.settings.start}|${s.trades.length}|${s.notes.length}|${named}`, () => logHtml(s, this)));
     if (this.tab === 'analysis') this.renderAnalysis(s);
@@ -1389,22 +1284,9 @@ export class SimPage implements SimCtx {
   /** 分析分頁：基本面（當時已公布的）與技術分析（到現在為止的價格）。 */
   private renderAnalysis(s: SimState): void {
     const code = s.watch;
-    if (!this.funds.has(code)) {
-      this.funds.set(code, undefined);
-      void loadSimFund(code).then((f) => {
-        this.funds.set(code, f);
-        this.render();
-      });
-    }
-    if (!this.chipData.has(code)) {
-      this.chipData.set(code, undefined);
-      void loadChipSeries(code).then((c) => {
-        this.chipData.set(code, c);
-        this.render();
-      });
-    }
-    const fund = this.funds.get(code);
-    const chips = this.chipData.get(code);
+    this.data.ensureAnalysis(code, () => this.render());
+    const fund = this.data.funds.get(code);
+    const chips = this.data.chipData.get(code);
     const prevClose = this.market.prevClose(code, s.date) ?? null;
     const q = (id: string) => this.root.querySelector<HTMLElement>(`#${id}`)!;
     setHtml(
@@ -1412,7 +1294,7 @@ export class SimPage implements SimCtx {
       this.cached('fund', `${code}|${s.date}|${fund === undefined ? 'l' : fund ? 'y' : 'n'}|${prevClose}`, () => fundHtml({ code, etf: /^00/.test(code), fund, date: s.date, prevClose })),
     );
     // 盤中今天的成交量還沒累積完：換算成全天的「預估量」再跟均量比
-    const bars = [...(this.visibleBars(s) ?? [])];
+    const bars = [...(this.data.visibleBars(s) ?? [])];
     const today = bars[bars.length - 1];
     if (today?.date === s.date && !s.pre && s.minute < SESSION_MINUTES) bars[bars.length - 1] = { ...today, volume: (today.volume * SESSION_MINUTES) / Math.max(30, s.minute) };
     setHtml(
@@ -1482,30 +1364,8 @@ export class SimPage implements SimCtx {
     );
   }
 
-  /** 觀看中股票：到昨天為止的日 K，加上今天到現在為止的 K 棒。 */
-  private visibleBars(s: SimState): Candle[] | null {
-    const all = this.candles.get(s.watch);
-    if (!all) return null;
-    // 已經發生的分割／減資：以前的 K 棒還原成現在的基準（未來的不能用，否則等於偷看）
-    const past = adjustForSplits(
-      all.filter((c) => c.date < s.date),
-      this.market.splitsOf(s.watch),
-      s.date,
-    );
-    const path = this.market.path(s.watch, s.date);
-    if (!path || s.pre) return past;
-    const t = Math.min(SESSION_MINUTES, Math.floor(s.minute));
-    let hi = -Infinity;
-    let lo = Infinity;
-    for (let i = 0; i <= t; i++) {
-      hi = Math.max(hi, path.price[i]);
-      lo = Math.min(lo, path.price[i]);
-    }
-    return [...past, { date: s.date, open: path.price[0], high: hi, low: lo, close: path.price[t], volume: Math.round(path.cumVolume[t]) }];
-  }
-
   private renderChart(el: HTMLElement, s: SimState): void {
-    const all = this.candles.get(s.watch);
+    const all = this.data.candles.get(s.watch);
     const name = this.nameOf(s.watch);
     if (!el.dataset.ready) {
       el.dataset.ready = '1';
@@ -1526,9 +1386,9 @@ export class SimPage implements SimCtx {
     }
     // 股票清單（約 2,000 筆）等瀏覽器有空時才建立，不卡住畫面
     const dl = el.querySelector<HTMLElement>('#sim-dir')!;
-    if (this.dir.length && !dl.dataset.filled) {
+    if (this.data.dir.length && !dl.dataset.filled) {
       dl.dataset.filled = '1';
-      const fill = () => (dl.innerHTML = this.dir.map((d) => `<option value="${esc(`${d.code} ${d.name}`)}"></option>`).join(''));
+      const fill = () => (dl.innerHTML = this.data.dir.map((d) => `<option value="${esc(`${d.code} ${d.name}`)}"></option>`).join(''));
       if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(fill, { timeout: 3000 });
       else setTimeout(fill, 500);
     }
@@ -1539,7 +1399,7 @@ export class SimPage implements SimCtx {
       fav.textContent = isFav ? '★ 自選' : '☆ 自選';
       fav.title = isFav ? '移出自選股' : '加入自選股';
     }
-    const visible = this.visibleBars(s) ?? [];
+    const visible = this.data.visibleBars(s) ?? [];
     const path = this.market.path(s.watch, s.date);
     const pc = this.market.prevClose(s.watch, s.date);
     const now = priceNow(s, this.market, s.watch);
@@ -1718,21 +1578,8 @@ export class SimPage implements SimCtx {
       this.rankCache = { date, rows: [] };
       return this.renderPlay();
     }
-    this.rankCache = { date, rows: this.rankRows(month, date) };
+    this.rankCache = { date, rows: rankRows(month, date) };
     this.renderPlay();
-  }
-
-  private rankRows(month: SimMonth, date: string): RankRow[] {
-    const rows: RankRow[] = [];
-    const day = month.days[date];
-    if (!day) return rows;
-    day.forEach((r, i) => {
-      if (!r) return;
-      const [open, high, low, close, volume, pc] = r;
-      const code = month.codes[i];
-      rows.push({ code, pc, path: intradayPath(code, date, { open, high, low, close, volume }) });
-    });
-    return rows;
   }
 
   private renderRank(el: HTMLElement, s: SimState): void {
@@ -1750,37 +1597,11 @@ export class SimPage implements SimCtx {
     if (s.pre) return setHtml(body, '<p class="muted">盤前，09:00 開盤後才有今日排行。</p>');
     if (!cache || cache.date !== s.date) return setHtml(body, '<p class="muted">計算今日排行⋯⋯</p>');
     if (!cache.rows.length) return setHtml(body, '<p class="muted">這一天沒有全市場資料。</p>');
+    // 表格每分鐘才會變：同一分鐘、同一個排序就沿用
     const t = Math.min(SESSION_MINUTES, Math.floor(s.minute));
-    const list = cache.rows.map((r) => {
-      const p = r.path.price[t];
-      return { code: r.code, p, chg: r.pc ? p / r.pc - 1 : 0, vol: r.path.cumVolume[t] };
-    });
-    const key = this.rankKey;
-    if (key === 'fav' && !s.fav.length) return setHtml(body, '<p class="muted">還沒有自選股。看一檔股票時按圖表上方的「☆ 自選」加入。</p>');
-    const sorted =
-      key === 'fav'
-        ? s.fav.map((c) => list.find((r) => r.code === c)).filter((r): r is (typeof list)[number] => !!r)
-        : key === 'up'
-        ? list.sort((a, b) => b.chg - a.chg)
-        : key === 'down'
-          ? list.sort((a, b) => a.chg - b.chg)
-          : key === 'vol'
-            ? list.sort((a, b) => b.vol - a.vol)
-            : key === 'high'
-              ? list.sort((a, b) => b.p - a.p)
-              : list.sort((a, b) => a.p - b.p);
-    const rows = sorted
-      .slice(0, key === 'fav' ? 100 : 20)
-      .map(
-        (r, i) => `<tr data-sim="watch" data-code="${esc(r.code)}" class="${r.code === s.watch ? 'is-watch' : ''}">
-          <td class="num muted">${i + 1}</td><td><b>${esc(r.code)}</b> ${esc(this.nameOf(r.code))}</td>
-          <td class="num">${price(r.p)}</td><td class="num ${cls(r.chg)}">${pct(r.chg * 100)}</td><td class="num muted">${num(Math.round(r.vol))}</td></tr>`,
-      )
-      .join('');
     setHtml(
       body,
-      `<div class="sim-table-wrap"><table class="sim-table sim-rank-table"><thead><tr><th>#</th><th>股票</th><th>現價</th><th>漲跌</th><th>量（張）</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <p class="muted sim-note">共 ${cache.rows.length} 檔（上市、上櫃、ETF），價格是依當天開高低收模擬的盤中走勢。</p>`,
+      this.cached('rank', `${s.date}|${t}|${this.rankKey}|${s.watch}|${s.fav.join(',')}|${cache.rows.length}`, () => rankTableHtml(cache.rows, s, this.rankKey, (c) => this.nameOf(c))),
     );
   }
 

@@ -1,0 +1,103 @@
+/* 股市入門頁 */
+/* ---------------- 股市入門 ---------------- */
+.learn { grid-area: screen; display: grid; gap: 14px; justify-items: center; }
+/* 分類分頁：捲動時黏在畫面上方 */
+.learn-tabs { position: sticky; top: calc(8px + env(safe-area-inset-top)); z-index: 20; width: 100%; max-width: 900px; display: flex; gap: 4px; padding: 6px; overflow-x: auto; scrollbar-width: none; background: rgba(12, 16, 36, 0.97); }
+.learn-tabs::-webkit-scrollbar { display: none; }
+.learn-tabs button { flex: 1 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 14px; border: 0; border-radius: 12px; background: none; color: var(--ink-2); font: inherit; font-size: 15px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.learn-tabs button:hover { color: var(--ink); background: var(--row-hover); }
+.learn-tabs button[aria-selected='true'] { color: #060914; background: var(--accent-grad); }
+.learn-group { display: grid; gap: 14px; }
+.learn-group[hidden] { display: none; }
+.learn-pager { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.learn-pager .btn { padding: 10px 16px; }
+.learn-main { display: grid; gap: 14px; min-width: 0; width: 100%; max-width: 900px; }
+.learn-hero { padding: 20px 22px; }
+.learn-hero h2 { margin: 4px 0 8px; font-size: 26px; }
+.learn-hero p:last-child { margin: 0; color: var(--ink-2); line-height: 1.7; }
+.learn-card { padding: 18px 22px; scroll-margin-top: 80px; line-height: 1.75; color: var(--ink-2); }
+.learn-card h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 19px; color: var(--ink); }
+.learn-card h4 { margin: 16px 0 6px; font-size: 15px; color: var(--ink); }
+.learn-card p { margin: 0 0 10px; }
+.learn-card b { color: var(--ink); }
+.learn-card b.up, .learn .up { color: var(--up); }
+.learn-card b.down, .learn .down { color: var(--down); }
+.learn-no { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; font-size: 14px; color: #060914; background: var(--accent-grad); }
+.learn-list { margin: 0 0 10px; padding-left: 1.3em; display: grid; gap: 4px; }
+.learn-list.is-compact { gap: 0; margin: 6px 0; }
+.learn-tip { padding: 10px 14px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); }
+.learn-foot { margin: 0 4px 20px; font-size: 13px; }
+.learn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.learn-def { margin: 0; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--row); border: 1px solid var(--glass-line); }
+.learn-def dt { font-weight: 700; color: var(--ink); margin-bottom: 4px; }
+.learn-def dd { margin: 0; font-size: 14px; line-height: 1.65; }
+.learn-table-wrap { overflow-x: auto; margin-bottom: 10px; }
+.learn-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.learn-table th, .learn-table td { padding: 7px 10px; border-bottom: 1px solid var(--glass-line); text-align: left; }
+.learn-table th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+.learn-svg { display: block; width: 100%; height: auto; }
+.learn-svg line { stroke-width: 1.4; }
+.learn-svg .k-up line, .learn-svg .k-up rect { stroke: var(--up); fill: var(--up); }
+.learn-svg .k-down line, .learn-svg .k-down rect { stroke: var(--down); fill: var(--down); }
+.learn-svg .k-flat line, .learn-svg .k-flat rect { stroke: var(--ink-2); fill: var(--ink-2); }
+.learn-svg .v-up { fill: color-mix(in srgb, var(--up) 45%, transparent); }
+.learn-svg .v-down { fill: color-mix(in srgb, var(--down) 45%, transparent); }
+.learn-svg .lab { fill: var(--ink); font-size: 12px; }
+.learn-svg .lab.is-soft { fill: var(--ink-2); }
+.learn-svg .lab.is-tiny { fill: var(--muted); font-size: 10px; }
+.learn-svg .ln-lab { fill: var(--muted); font-size: 11px; }
+.learn-svg .lab-line { stroke: var(--muted); stroke-dasharray: 2 2; stroke-width: 1; }
+.learn-svg .ma { fill: none; stroke-width: 1.6; }
+.learn-svg .ma.is-5, .ma-key.is-5 { stroke: #ffd36b; color: #ffd36b; }
+.learn-svg .ma.is-20, .ma-key.is-20 { stroke: #8b9bff; color: #8b9bff; }
+.ma-key { font-weight: 600; }
+.learn-svg .ma-mark circle { fill: none; stroke-width: 2; }
+.learn-svg .ma-mark text { font-size: 12px; font-weight: 700; paint-order: stroke; stroke: #0b1024; stroke-width: 4px; stroke-linejoin: round; }
+.learn-svg .ma-mark.is-gold circle { stroke: #ffd36b; }
+.learn-svg .ma-mark.is-gold text { fill: #ffd36b; }
+.learn-svg .ma-mark.is-dead circle { stroke: #c9b4ff; }
+.learn-svg .ma-mark.is-dead text { fill: #c9b4ff; }
+.learn-svg .path { fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-linejoin: round; }
+.learn-svg .neck { stroke: #ffd36b; stroke-dasharray: 5 4; }
+.learn-svg .sup { stroke: var(--down); stroke-dasharray: 5 4; }
+.learn-svg .prev { stroke: var(--muted); stroke-dasharray: 4 4; stroke-width: 1; }
+.learn-anatomy { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.learn-anatomy figure { margin: 0; padding: 12px; border-radius: var(--radius-sm); background: var(--row); text-align: center; }
+.learn-anatomy .learn-svg { max-width: 240px; margin: 0 auto; }
+.learn-anatomy figcaption { font-size: 14px; }
+.learn-shapes { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.learn-shape { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--row); }
+.learn-shape .learn-svg { flex: none; width: 44px; }
+.learn-shape h4 { margin: 0 0 2px; }
+.learn-shape p { margin: 0; font-size: 14px; line-height: 1.6; }
+.learn-chart { padding: 10px; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.18); margin-bottom: 8px; }
+.learn-seg { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.learn-seg .btn.is-on, .learn-presets .btn:active { border-color: var(--accent); color: var(--accent); }
+.learn-svg.is-merge { max-width: 420px; margin: 4px 0 12px; }
+.learn-patterns { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.learn-pattern { padding: 12px; border-radius: var(--radius-sm); background: var(--row); }
+.learn-pattern h4 { margin: 8px 0 2px; }
+.learn-pattern p { margin: 0; font-size: 14px; line-height: 1.6; }
+.learn-lab { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 18px; align-items: start; }
+.learn-lab-fig { padding: 8px; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.18); }
+.learn-lab-ctl { display: grid; gap: 8px; }
+.learn-range { display: grid; grid-template-columns: 40px minmax(0, 1fr) 48px; align-items: center; gap: 10px; font-size: 14px; }
+.learn-range input { width: 100%; accent-color: var(--accent); font-size: 16px; }
+.learn-range output { font-variant-numeric: tabular-nums; color: var(--ink); text-align: right; }
+.learn-presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.learn-lab-read p { margin: 0 0 6px; }
+.learn-lab-read .learn-tip { margin-top: 8px; }
+@media (max-width: 560px) {
+  .learn-tabs { margin: 0 -4px; width: calc(100% + 8px); }
+  /* 右邊淡出：提示分頁列還可以往右滑（滑到最右邊就不淡出） */
+  .learn-tabs:not(.is-end) { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); }
+  .learn-tabs button { padding: 9px 11px; font-size: 14px; }
+  .learn-pager .btn { flex: 1 1 auto; }
+  .learn-hero, .learn-card { padding: 16px 14px; }
+  .learn-hero h2 { font-size: 22px; }
+  .learn-lab { grid-template-columns: minmax(0, 1fr); }
+  .learn-lab-fig { max-width: 200px; justify-self: center; width: 100%; }
+  .learn-chart { padding: 4px; margin-left: -6px; margin-right: -6px; }
+  .learn-grid, .learn-shapes, .learn-patterns { grid-template-columns: minmax(0, 1fr); }
+}
+a.btn { text-decoration: none; color: var(--ink); }

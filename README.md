@@ -130,8 +130,11 @@ K 線圖的三條線是 **EMA20／EMA60／EMA120**（指數移動平均，約一
 scripts/             資料抓取與整理、型態勝率回測、模擬盤每日行情與新聞、開通碼工具（sim-code.mjs）
 web/                 網站原始碼（說明見 web/README.md）
   src/data/          資料載入、即時行情、帳號與雲端同步
-  src/domain/        資金流、選股、技術指標、型態辨識、模擬盤引擎（sim.ts、intraday.ts、simRank.ts）
-  src/ui/            各頁面；模擬盤畫面在 ui/sim/
+  src/domain/        資金流、選股、技術指標、型態辨識
+  src/domain/sim/    模擬盤引擎，依職責分檔：config（規則參數）、types、state（新局／舊存檔）、valuation（市值）、
+                     orders（下單撮合）、bank（信貸質押定期定額）、session（開盤收盤、分割、破產）、market、summary
+  src/ui/            各頁面；模擬盤畫面在 ui/sim/（dataStore 資料層、rank 排行、panels 面板、analysis 分析…）
+  src/styles/        樣式，依頁面分檔，index.css 依序載入（順序就是層疊順序）
 worker/              證交所即時行情轉接服務
 firestore.rules      模擬盤雲端存檔的安全規則（合併到 main 後自動部署）
 docs/OPERATIONS.md   維運手冊

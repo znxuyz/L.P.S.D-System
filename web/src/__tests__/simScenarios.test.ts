@@ -52,3 +52,16 @@ describe('隨機開局', () => {
     expect(r.idx).toBeLessThanOrEqual(tiny.length - 22);
   });
 });
+
+import { topK } from '../ui/sim/rank';
+
+describe('排行前 k 名', () => {
+  it('跟整個排序取前 k 個一樣', () => {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let n = 0; n < 50; n++) {
+      const arr = Array.from({ length: Math.floor(rnd() * 60) }, () => Math.round(rnd() * 100));
+      expect(topK(arr, 20, (a, b) => a > b)).toEqual([...arr].sort((a, b) => b - a).slice(0, 20));
+    }
+  });
+});

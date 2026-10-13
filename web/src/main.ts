@@ -1,4 +1,4 @@
-import './styles.css';
+import './styles/index.css';
 import { MockMarketProvider } from './data/mockProvider';
 import { LiveProvider, type LiveStatus } from './data/liveProvider';
 import { CloseReplayProvider, loadCloseFile } from './data/closeProvider';

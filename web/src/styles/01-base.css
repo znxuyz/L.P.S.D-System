@@ -1,0 +1,116 @@
+/* 設計變數（顏色、圓角、字型）、全域重設、玻璃卡片等共用元件 */
+/*
+ * L.P.L.C. 玻璃數據艙
+ * 深空靛藍底 + 緩慢流動的極光 + 細雜訊；面板是霧面玻璃，邊框是由亮到暗的漸層描邊。
+ * 介面主色是冰藍到紫的漸層，紅綠只用於漲跌。字型：Manrope（數字、英文）＋ Noto Sans TC。
+ */
+:root {
+  color-scheme: dark;
+  --bg: #060914;
+  --glass: rgba(18, 24, 48, 0.55);
+  --glass-strong: rgba(14, 19, 40, 0.82);
+  --glass-line: rgba(255, 255, 255, 0.09);
+  --row: rgba(255, 255, 255, 0.04);
+  --row-hover: rgba(255, 255, 255, 0.08);
+  --ink: #eef2ff;
+  --ink-2: #b5bfdc;
+  --muted: #7682a6;
+  --accent: #8ff0ff;
+  --accent-2: #8b7bff;
+  --accent-grad: linear-gradient(135deg, #8ff0ff, #8b7bff);
+  --up: #ff7a93;
+  --down: #4fe0a8;
+  --radius: 18px;
+  --radius-sm: 10px;
+  --shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --font: 'Manrope', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif;
+  --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+}
+:root[data-convention='intl'] {
+  --up: #4fe0a8;
+  --down: #ff7a93;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  color: var(--ink);
+  font: 400 14px/1.55 var(--font);
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+  background: radial-gradient(120% 80% at 50% 0%, #0d1430 0%, var(--bg) 60%) fixed, var(--bg);
+}
+/* 細雜訊，讓大面積漸層不會有色帶 */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+.up, .up-flow { color: var(--up); }
+.down, .down-flow { color: var(--down); }
+.flat { color: var(--ink-2); }
+.muted { color: var(--muted); }
+
+/* 極光：三團模糊色光緩慢漂移 */
+.aurora { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.aurora i { position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.55; animation: drift 28s ease-in-out infinite alternate; }
+.aurora i:nth-child(1) { width: 46vw; height: 46vw; left: -10vw; top: -16vw; background: radial-gradient(circle, rgba(64, 110, 255, 0.55), transparent 65%); }
+.aurora i:nth-child(2) { width: 40vw; height: 40vw; right: -12vw; bottom: -14vw; background: radial-gradient(circle, rgba(150, 80, 255, 0.45), transparent 65%); animation-duration: 34s; }
+.aurora i:nth-child(3) { width: 30vw; height: 30vw; left: 45vw; top: -8vw; background: radial-gradient(circle, rgba(0, 210, 230, 0.32), transparent 65%); animation-duration: 40s; }
+/* 手機上背景光暈不飄動：它一動，所有毛玻璃面板每一格都要重新模糊，很吃 GPU */
+@media (hover: none), (max-width: 720px) {
+  .aurora i { animation: none; }
+}
+@keyframes drift { to { transform: translate(6vw, 5vh) scale(1.12); } }
+
+/* 霧面玻璃：漸層描邊（上亮下暗）＋上緣高光 */
+.glass {
+  position: relative;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015)), var(--glass);
+  border-radius: var(--radius);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+.glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.05) 35%, rgba(140, 160, 255, 0.06) 70%, rgba(143, 240, 255, 0.18));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+/* 可捲動的面板：漸層描邊的偽元素會跟著內容捲走，改用固定的細邊框 */
+.sectors::before, .strategies::before, .scr-main::before, .scr-detail::before,
+.detail::before, .log::before, .map-detail::before { display: none; }
+.sectors, .strategies, .scr-main, .scr-detail, .detail, .log, .map-detail {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-top-color: rgba(255, 255, 255, 0.2);
+}
+
+.panel-title {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  flex-wrap: wrap;
+}
+.panel-title small { font-size: 11px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+.eyebrow { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.16em; color: var(--accent); text-transform: uppercase; }

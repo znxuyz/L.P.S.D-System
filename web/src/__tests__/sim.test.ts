@@ -102,7 +102,9 @@ describe('模擬盤交易', () => {
     expect(placeOrder(s, m, { code: '2330', side: 'buy', kind: 'cash', shares: 1000 })).toMatch(/漲停/);
     closeDay(s, m);
     beginDay(s, m, D[2]);
-    placeOrder(s, m, { code: '2330', side: 'buy', kind: 'cash', shares: 1000, limit: 90 });
+    // 限價要在昨收 110 的 ±10%（99～121）以內
+    expect(placeOrder(s, m, { code: '2330', side: 'buy', kind: 'cash', shares: 1000, limit: 90 })).toMatch(/漲跌停範圍（99～121）/);
+    expect(placeOrder(s, m, { code: '2330', side: 'buy', kind: 'cash', shares: 1000, limit: 99.5 })).toBeNull();
     cancelOrder(s, s.orders[0].id);
     expect(s.orders).toHaveLength(0);
   });
