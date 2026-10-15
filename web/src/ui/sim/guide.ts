@@ -149,7 +149,7 @@ export function askGuide(onYes: () => void, onNo: () => void): void {
       <p class="eyebrow">Laplace Replay</p>
       <h3 id="sim-ask-title">第一次使用模擬盤？</h3>
       <p>要不要花一分鐘看新手指引？會一步一步框出每個區塊，告訴你這是什麼、怎麼下單、怎麼看成績。
-        之後隨時可以按上方的「❓ 新手指引」再看一次。</p>
+        之後隨時可以按右上角的「❓ 新手指引」再看一次。</p>
       <div class="sim-guide-nav">
         <button type="button" class="btn" data-ask="no">先不用</button>
         <button type="button" class="btn btn-accent" data-ask="yes">好，開始指引</button>
