@@ -18,6 +18,7 @@
   .sim[data-tab='money'] .sim-panes > [data-pane]:not([data-pane='money']),
   .sim[data-tab='analysis'] .sim-panes > [data-pane]:not([data-pane='analysis']),
   .sim[data-tab='map'] .sim-panes > [data-pane]:not([data-pane='map']),
+  .sim[data-tab='screen'] .sim-panes > [data-pane]:not([data-pane='screen']),
   .sim[data-tab='rank'] .sim-panes > [data-pane]:not([data-pane='rank']),
   .sim[data-tab='news'] .sim-panes > [data-pane]:not([data-pane='news']),
   .sim[data-tab='trade'] .sim-panes > [data-pane]:not([data-pane='hold']) { display: none; }
@@ -33,6 +34,7 @@
   .sim[data-tab='money'] [data-pane]:not([data-pane='money']),
   .sim[data-tab='analysis'] [data-pane]:not([data-pane='analysis']),
   .sim[data-tab='map'] [data-pane]:not([data-pane='map']),
+  .sim[data-tab='screen'] [data-pane]:not([data-pane='screen']),
   .sim[data-tab='rank'] [data-pane]:not([data-pane='rank']),
   .sim[data-tab='news'] [data-pane]:not([data-pane='news']),
   .sim[data-tab='learn'] [data-pane]:not([data-pane='learn']) { display: none !important; }
@@ -67,3 +69,9 @@
 @media (max-width: 720px) {
   .sim-map-view { height: 440px; margin: 8px -6px 10px; }
 }
+/* 模擬盤選股 */
+.sim-screen-tabs { display: flex; flex-wrap: wrap; width: auto; margin: 6px 0 10px; }
+.sim-screen-idea { margin: 0 0 6px; line-height: 1.6; }
+.sim-screen-rules { margin: 0 0 10px; padding-left: 1.2em; color: var(--ink-2); font-size: 14px; line-height: 1.7; }
+.sim-screen-table th { white-space: nowrap; }
+.sim-screen-table th:nth-child(2), .sim-screen-table td:nth-child(2) { text-align: left; white-space: nowrap; }
