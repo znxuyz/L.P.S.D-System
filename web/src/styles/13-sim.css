@@ -262,3 +262,20 @@
 .sim-board-table th:nth-child(2), .sim-board-table td:nth-child(2) { text-align: left; }
 .sim-pat-win { color: var(--muted); }
 .sim-pat-win b { color: var(--ink-2); }
+/* 控制列：結束這局跟其他按鈕分開，避免誤按 */
+.sim-steps .sim-step-end { margin-left: 10px; color: #ff9aaa; border-color: rgba(255, 122, 147, 0.35); }
+/* 頂端列：股市入門、新手指引、大廳 */
+.sim-bar .btn[aria-pressed='true'] { color: var(--accent); border-color: var(--accent); }
+.bar-txt { margin-left: 4px; }
+@media (max-width: 560px) {
+  .sim-bar { gap: 6px; }
+  .sim-bar .bar-txt { display: none; }
+  .sim-steps .sim-step-end { margin-left: 0; }
+}
+/* 手機：資訊卡收短（數字 2×2、控制按鈕縮小） */
+@media (max-width: 560px) {
+  .sim-head .sim-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+  .sim-steps { gap: 6px; }
+  .sim-steps .btn, .sim-steps .seg button { padding: 7px 10px; font-size: 14px; }
+  .sim-steps .sim-speed { min-width: 0; }
+}
