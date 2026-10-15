@@ -5,6 +5,7 @@
 import { loadOfficialCandles } from '../../data/candles';
 import { loadChipSeries, loadTaiex, type ChipSeries } from '../../data/chipSeries';
 import { loadNames, loadNews, loadSimFund, type NewsItem, type SimFund } from '../../data/simData';
+import { loadPatternStats, type PatternStats } from '../../data/patternStats';
 import { loadStockDirectory, searchDirectory, type DirEntry } from '../../data/stockDirectory';
 import { SESSION_MINUTES } from '../../domain/intraday';
 import { benchValue, buildMarket, type ExRight, type Market, type SimState } from '../../domain/sim';
@@ -24,6 +25,8 @@ export class SimData implements SimCtx {
   /** 代號 → 名稱（股票目錄＋已下市的名稱），查名稱 O(1)。 */
   private names = new Map<string, string>();
   taiex: Map<string, number> | null = null;
+  /** 型態歷史勝率（全市場回測）。 */
+  patStats: PatternStats | null = null;
   private readonly ex: ExRight[] = [];
   private readonly exYears = new Set<number>();
   market: Market = buildMarket(new Map());
@@ -52,6 +55,9 @@ export class SimData implements SimCtx {
       }),
       loadTaiex().then((t) => {
         this.taiex = t;
+      }),
+      loadPatternStats().then((p) => {
+        this.patStats = p;
       }),
     ]).then(() => undefined);
   }

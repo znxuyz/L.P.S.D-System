@@ -157,7 +157,10 @@ function main(dir: string): void {
     const codes = new Set(days.flatMap((d) => Object.keys(d)));
     const streak: Record<string, number> = {};
     for (const code of codes) streak[code] = streakOf(days.map((d) => d[code] ?? 0));
-    out.inst = { asOf: instFiles[0].replace(/\.json$/, ''), days: instFiles.length, streak };
+    // 最新一天的買賣超（張）：熱力圖、個股顯示「法人實際買賣」用
+    const last: Record<string, number> = {};
+    for (const [code, net] of Object.entries(days[0])) if (net) last[code] = Math.round(net / 1000);
+    out.inst = { asOf: instFiles[0].replace(/\.json$/, ''), days: instFiles.length, streak, last };
   }
 
   const weeks = readdirSync(join(dir, 'tdcc')).sort();

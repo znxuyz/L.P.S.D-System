@@ -134,3 +134,4 @@
   background: var(--accent-grad);
   box-shadow: 0 4px 18px rgba(143, 240, 255, 0.25);
 }
+.tip-note { margin: 8px 0 0; max-width: 260px; font-size: 11px; line-height: 1.5; color: var(--muted); }

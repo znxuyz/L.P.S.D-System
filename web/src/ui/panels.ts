@@ -155,6 +155,7 @@ function fundamentalsBlock(s: StockMetrics, f: Fundamentals | undefined): string
       ${kv('3 年股價位階', `${Math.round(v.pos3y * 100)}%`)}
       ${kv('距一年高點', `${((1 - v.toHigh52w) * 100).toFixed(1)}%`)}
       ${kv('法人', inst, dirCls(f.instBuyDays))}
+      ${f.instNet !== undefined ? kv('法人買賣超（最新一天）', `${f.instNet > 0 ? '+' : ''}${f.instNet.toLocaleString()} 張`, dirCls(f.instNet)) : ''}
       ${kv('千張大戶（4 週）', `${f.bigHolderChg >= 0 ? '+' : '−'}${Math.abs(f.bigHolderChg).toFixed(1)} 百分點`, dirCls(f.bigHolderChg))}
     </dl>`;
 }

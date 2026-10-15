@@ -81,6 +81,7 @@ import { simGuideSteps } from './sim/guideSteps';
 import { pickRandomStart } from '../domain/simScenarios';
 import { loadSimMonth } from '../data/simData';
 import { SimData } from './sim/dataStore';
+import { baselineFor } from '../data/patternStats';
 import { RANK_NAME, rankRows, rankTableHtml, type RankKey, type RankRow } from './sim/rank';
 import { renderLearnPage } from './learnPage';
 import { fundHtml, techHtml } from './sim/analysis';
@@ -1444,7 +1445,7 @@ export class SimPage implements SimCtx {
     // 型態只用到昨天收盤為止的資料，一天只要算一次（每分鐘重算整份歷史在手機上很卡）
     setHtml(
       el.querySelector<HTMLElement>('#sim-hints')!,
-      visible.length >= 30 ? this.cached('hints', `${s.watch}|${s.date}|${this.hints}|${visible.length}`, () => this.hintsHtml(visible)) : '',
+      visible.length >= 30 ? this.cached('hints', `${s.watch}|${s.date}|${this.hints}|${visible.length}|${!!this.data.patStats}`, () => this.hintsHtml(visible)) : '',
     );
   }
 
@@ -1453,8 +1454,19 @@ export class SimPage implements SimCtx {
     if (!this.hints) return `<div class="sim-hints-row">${toggle}</div>`;
     // 型態只用到昨天收盤為止的日 K（今天還沒收完）
     const { patterns } = detectPatterns(visible.slice(0, -1));
-    const list = patterns.slice(0, 5).map((p) => `<li><span class="tilt tilt-${p.bias}">${BIAS[p.bias]}</span> <b>${esc(p.name)}</b> <span class="muted">${esc(p.status)}</span></li>`).join('');
-    return `<div class="sim-hints-row">${toggle}<small class="muted">只用到昨天收盤為止的資料判斷</small></div>
+    // 歷史勝率：全市場回測（2020 年起）出現這個型態後 N 天往型態方向走的比例
+    const st = this.data.patStats;
+    const win = (p: (typeof patterns)[number]) => {
+      const r = st && p.bias !== 'neutral' ? st.patterns[`${p.id}|${p.bias}`] : undefined;
+      if (!st || !r || r.n < 30) return '';
+      const base = baselineFor(st, p.bias as 'bull' | 'bear');
+      return ` <small class="sim-pat-win">歷史 ${st.horizon} 日勝率 <b>${Math.round(r.win * 100)}%</b>${base != null ? `（隨機 ${Math.round(base * 100)}%）` : ''}・${num(r.n)} 次</small>`;
+    };
+    const list = patterns
+      .slice(0, 5)
+      .map((p) => `<li><span class="tilt tilt-${p.bias}">${BIAS[p.bias]}</span> <b>${esc(p.name)}</b> <span class="muted">${esc(p.status)}</span>${win(p)}</li>`)
+      .join('');
+    return `<div class="sim-hints-row">${toggle}<small class="muted">只用到昨天收盤為止的資料判斷；勝率是全市場歷史統計，不會透露這檔之後的走勢</small></div>
       ${list ? `<ul class="sim-pat">${list}</ul>` : '<p class="muted">目前沒有明顯的型態。</p>'}`;
   }
 
