@@ -81,6 +81,11 @@ import { simGuideSteps } from './sim/guideSteps';
 import { pickRandomStart } from '../domain/simScenarios';
 import { loadSimMonth } from '../data/simData';
 import { SimData } from './sim/dataStore';
+import { buildMapDay, historyAt, snapshotAt, type SimMapDay } from './sim/heatmap';
+import { GlassMapView } from './glassMapView';
+import { computeMetrics } from '../domain/metrics';
+import { palette } from './colors';
+import type { SimMonth } from '../data/simData';
 import { baselineFor } from '../data/patternStats';
 import { RANK_NAME, rankRows, rankTableHtml, type RankKey, type RankRow } from './sim/rank';
 import { renderLearnPage } from './learnPage';
@@ -108,6 +113,7 @@ type View = 'gate' | 'lobby' | 'setup' | 'play' | 'admin' | 'report';
 /** 手機版分頁：一次只看一類，不用一路往下滑。 */
 const SIM_TABS = [
   { id: 'trade', icon: '📈', title: '交易' },
+  { id: 'map', icon: '🗺️', title: '熱力圖' },
   { id: 'hold', icon: '💼', title: '持股' },
   { id: 'money', icon: '💰', title: '資金' },
   { id: 'analysis', icon: '🔍', title: '分析' },
@@ -197,6 +203,11 @@ export class SimPage implements SimCtx {
   private dirty = false;
   /** 圖表大小：只在視窗大小改變時量（每次重畫都去讀寬度會強迫整頁重新排版）。 */
   private sizes = { kw: 0, kh: 0, ew: 0 };
+  /** 熱力圖分頁。 */
+  private mapDay: SimMapDay | null = null;
+  private mapLoading = '';
+  private mapView: GlassMapView | null = null;
+  private mapKey = '';
   /** 手機版目前的分頁。 */
   private tab: SimTab = (() => {
     try {
@@ -647,6 +658,7 @@ export class SimPage implements SimCtx {
     if (window.scrollY > top) window.scrollTo({ top });
     this.measure();
     this.chartKey = '';
+    this.mapKey = '';
     this.panelCache.clear();
     this.render();
   }
@@ -943,6 +955,12 @@ export class SimPage implements SimCtx {
         </nav>
         <div class="sim-chart glass" id="sim-chart" data-pane="trade"></div>
         <div class="sim-panes">
+          <div class="sim-map glass" id="sim-map" data-pane="map">
+            <h2 class="panel-title">熱力圖 <small>面積＝成交額、顏色＝漲跌；只到現在為止</small></h2>
+            <div class="sim-map-sectors" id="sim-map-sectors"></div>
+            <div class="view sim-map-view" id="sim-map-view"></div>
+            <p class="muted sim-note">股票池與首頁熱力圖相同；成交額依張數與均價估算，資金流＝成交佔比比近 20 日常態多出的成交額（錢往哪裡集中，不是買賣淨額）。點方塊看那一檔。</p>
+          </div>
           <div class="sim-dayrep-panel glass" id="sim-dayrep" data-pane="hold"></div>
           <div class="sim-hold glass" id="sim-hold" data-pane="hold"></div>
           <div class="sim-log glass" id="sim-log" data-pane="hold"></div>
@@ -1279,7 +1297,60 @@ export class SimPage implements SimCtx {
     setHtml($('sim-equity'), this.cached('equity', `${s.settings.start}|${s.equity.length}|${s.trades.length}|${ew}|${!!this.taiex}|${!!this.calendar}`, () => equityHtml(s, this, ew)));
     setHtml($('sim-log'), this.cached('log', `${s.settings.start}|${s.trades.length}|${s.notes.length}|${named}`, () => logHtml(s, this)));
     if (this.tab === 'analysis') this.renderAnalysis(s);
+    if (this.tab === 'map') this.renderMap(s);
     if (!this.guiding) this.maybeAskGuide();
+  }
+
+  /** 熱力圖分頁：模擬當天全市場（只到現在這一分鐘）。 */
+  private renderMap(s: SimState): void {
+    const sectors = this.root.querySelector<HTMLElement>('#sim-map-sectors')!;
+    const viewEl = this.root.querySelector<HTMLElement>('#sim-map-view')!;
+    if (this.mapDay?.date !== s.date) {
+      if (this.mapLoading !== s.date) {
+        this.mapLoading = s.date;
+        const [y, mo] = s.date.split('-').map(Number);
+        const prev = mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
+        void Promise.all([loadSimMonth(prev), loadSimMonth(s.date.slice(0, 7))]).then((ms) => {
+          if (this.mapLoading !== s.date) return;
+          this.mapDay = buildMapDay(s.date, ms.filter((m): m is SimMonth => !!m)) ?? { date: s.date, universe: { industries: [], stocks: [], index: { name: '', prevClose: 0 } }, tracks: new Map() };
+          this.mapView = null;
+          this.mapKey = '';
+          this.render();
+        });
+      }
+      return setHtml(sectors, '<p class="muted">載入當天全市場資料⋯⋯</p>');
+    }
+    const day = this.mapDay;
+    if (!day.tracks.size) return setHtml(sectors, '<p class="muted">這一天沒有全市場資料。</p>');
+    if (s.pre) {
+      viewEl.hidden = true;
+      return setHtml(sectors, '<p class="muted">盤前，09:00 開盤後才有今天的熱力圖。</p>');
+    }
+    viewEl.hidden = false;
+    if (!this.mapView) {
+      viewEl.innerHTML = '';
+      this.mapView = new GlassMapView(viewEl, day.universe, (f) => {
+        if (f?.kind !== 'stock' || !this.state) return;
+        this.state.watch = f.id;
+        this.setTab('trade', true);
+      });
+    }
+    // 每分鐘更新一次
+    const t = Math.min(SESSION_MINUTES, Math.floor(s.minute));
+    const conv = document.documentElement.dataset.convention === 'intl' ? 'intl' : 'tw';
+    const key = `${s.date}|${t}|${conv}`;
+    if (key === this.mapKey) return;
+    this.mapKey = key;
+    const metrics = computeMetrics(day.universe, snapshotAt(day, t));
+    this.mapView.update(metrics, palette(conv), historyAt(day, t));
+    const inds = [...metrics.industries].filter((i) => i.stocks.length).sort((a, b) => b.flow - a.flow);
+    const chip = (i: (typeof inds)[number]) =>
+      `<li><b>${esc(i.name)}</b> <span class="num ${cls(i.changePct)}">${pct(i.changePct)}</span> <span class="num ${i.flow >= 0 ? 'up' : 'down'}">${i.flow >= 0 ? '流入' : '流出'} ${num(Math.abs(i.flow), 1)} 億</span></li>`;
+    setHtml(
+      sectors,
+      `<div class="sim-map-flow"><div><h3 class="sim-sub">資金集中</h3><ul>${inds.slice(0, 3).map(chip).join('')}</ul></div>
+        <div><h3 class="sim-sub">資金撤出</h3><ul>${inds.slice(-3).reverse().map(chip).join('')}</ul></div></div>`,
+    );
   }
 
   /** 分析分頁：基本面（當時已公布的）與技術分析（到現在為止的價格）。 */
