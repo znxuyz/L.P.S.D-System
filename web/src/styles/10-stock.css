@@ -59,3 +59,9 @@
 .kchart.is-dragging { cursor: grabbing; }
 .kc-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .k-range { font-size: 11px; color: var(--muted); }
+/* 自選股 */
+.sa-fav { margin-left: 10px; padding: 3px 12px; border-radius: 999px; border: 1px solid var(--glass-line); background: var(--row); color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 600; vertical-align: middle; cursor: pointer; }
+.sa-fav[aria-pressed='true'] { color: #ffd36b; border-color: color-mix(in srgb, #ffd36b 50%, transparent); }
+.sa-favs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 0; }
+.sa-favs .chip-btn { color: var(--ink-2); }
+.sa-favs .chip-btn.is-on { color: var(--accent); border-color: var(--accent); }

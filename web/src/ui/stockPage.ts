@@ -31,6 +31,8 @@ export interface ExternalStock {
 }
 
 export interface StockPageContext {
+  /** 自選股（代號）。 */
+  favs?: string[];
   /** 真實行情時，基本面哪些是官方資料的說明。 */
   realSrc?: string;
   /** 查詢的股票不在股票池時才有。 */
@@ -300,6 +302,16 @@ export function renderStockPage(root: HTMLElement, code: string, ctx: StockPageC
 
 // ---------------------------------------------------------------- 標頭與搜尋
 
+/** 自選股快速切換列。 */
+function favRow(code: string, ctx: StockPageContext): string {
+  const favs = ctx.favs ?? [];
+  if (!favs.length) return '';
+  const nameOf = (c: string) => ctx.universe.stocks.find((x) => x.code === c)?.name ?? ctx.directory?.stocks.find((x) => x.code === c)?.name ?? '';
+  return `<p class="sa-favs"><span class="muted">自選</span>${favs
+    .map((c) => `<button type="button" class="chip-btn${c === code ? ' is-on' : ''}" data-analyze="${esc(c)}">${esc(c)} ${esc(nameOf(c))}</button>`)
+    .join('')}</p>`;
+}
+
 function renderHead(el: HTMLElement, code: string, s: StockMetrics | undefined, ctx: StockPageContext): void {
   // 搜尋框只建立一次（避免每秒重畫洗掉輸入），之後只更新名稱與報價
   if (!el.dataset.ready) {
@@ -326,7 +338,9 @@ function renderHead(el: HTMLElement, code: string, s: StockMetrics | undefined, 
   setHtml(
     el.querySelector<HTMLElement>('.sa-id')!,
     `<p class="eyebrow">個股分析 · ${esc(code)}${market ? ` · ${market}` : ''}${ind ? ` · ${esc(ind)}` : ''}</p>
-     <h2 class="sa-name">${esc(s?.name ?? code)}</h2>`,
+     <h2 class="sa-name">${esc(s?.name ?? code)}
+       <button type="button" class="sa-fav" data-fav-toggle="${esc(code)}" aria-pressed="${!!ctx.favs?.includes(code)}">${ctx.favs?.includes(code) ? '★ 已自選' : '☆ 加入自選'}</button></h2>
+     ${favRow(code, ctx)}`,
   );
   setHtml(el.querySelector<HTMLElement>('.sa-quote')!, s ? quoteHtml(s, ext) : '');
 }

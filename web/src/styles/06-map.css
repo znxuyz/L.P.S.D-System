@@ -135,3 +135,6 @@
   box-shadow: 0 4px 18px rgba(143, 240, 255, 0.25);
 }
 .tip-note { margin: 8px 0 0; max-width: 260px; font-size: 11px; line-height: 1.5; color: var(--muted); }
+.fav-chip { margin-left: auto; font: inherit; font-size: 12px; font-weight: 600; padding: 5px 14px; border-radius: 999px; cursor: pointer; color: #ffd36b; background: rgba(255, 211, 107, 0.08); border: 1px solid rgba(255, 211, 107, 0.4); }
+.fav-chip[disabled] { opacity: 0.45; cursor: default; }
+.fav-chip + .filter-chip { margin-left: 0; }
