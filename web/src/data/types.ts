@@ -55,6 +55,9 @@ export interface Fundamentals {
   ma60: number;
   /** 法人（外資＋投信）連續買超天數；負數為連續賣超。 */
   instBuyDays: number;
+  /** 最新一天外資＋投信買賣超（張）與日期；只有真實籌碼資料才有。 */
+  instNet?: number;
+  instAsOf?: string;
   /** 千張大戶持股比率近 4 週變化（百分點）。 */
   bigHolderChg: number;
   /** 特殊事件標籤。 */

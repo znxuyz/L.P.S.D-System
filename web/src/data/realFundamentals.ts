@@ -21,6 +21,8 @@ export interface Chips {
     days: number;
     /** 外資＋投信連續買超天數；負數為連續賣超。 */
     streak: Record<string, number>;
+    /** 最新一天外資＋投信買賣超（張）；舊資料沒有。 */
+    last?: Record<string, number>;
   };
   big?: {
     asOf: string;
@@ -144,6 +146,10 @@ export function overlayReal(
   }
   const streak = chips?.inst?.streak[code];
   if (streak !== undefined) f.instBuyDays = streak;
+  if (chips?.inst?.last) {
+    f.instNet = chips.inst.last[code] ?? 0;
+    f.instAsOf = chips.inst.asOf;
+  }
   const chg = chips?.big?.chg[code];
   if (chg !== undefined) f.bigHolderChg = chg;
 

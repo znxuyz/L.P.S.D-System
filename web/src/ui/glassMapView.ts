@@ -50,6 +50,7 @@ export class GlassMapView {
   private pal?: Palette;
   private history = new Map<string, number[]>();
   private focus: Focus = null;
+  private readonly stockOf: Map<string, Universe['stocks'][number]>;
 
   constructor(
     private readonly el: HTMLElement,
@@ -57,6 +58,7 @@ export class GlassMapView {
     private readonly onSelect: (focus: Focus) => void,
   ) {
     this.industryOf = new Map(universe.stocks.map((s) => [s.code, s.industryId]));
+    this.stockOf = new Map(universe.stocks.map((s) => [s.code, s]));
     this.tree = hierarchy<Node>({
       id: 'root',
       name: '',
@@ -248,13 +250,25 @@ export class GlassMapView {
         : '') +
       `<dl class="tip-grid"><dt>成交額</dt><dd>${yi(s.turnover)}</dd>` +
       `<dt>成交佔比</dt><dd>${sharePct(s.share)}（常態 ${sharePct(s.baseShare)}）</dd>` +
-      `<dt>資金流</dt><dd class="${s.flow >= 0 ? 'up' : 'down'}">${signedYi(s.flow)}</dd></dl>`;
+      `<dt>資金流</dt><dd class="${s.flow >= 0 ? 'up' : 'down'}">${signedYi(s.flow)}</dd>` +
+      instRow(this.stockOf.get(code)?.fundamentals, s.price) +
+      `</dl><p class="tip-note">資金流＝成交佔比比常態多出的成交額（錢往哪裡集中），不是買賣淨額${
+        this.stockOf.get(code)?.fundamentals?.instNet !== undefined ? '；法人買賣超才是實際買減賣' : ''
+      }。</p>`;
     this.tooltip.hidden = false;
     const rect = this.el.getBoundingClientRect();
     const x = Math.min(e.clientX - rect.left + 18, rect.width - this.tooltip.offsetWidth - 10);
     const y = Math.min(e.clientY - rect.top + 18, rect.height - this.tooltip.offsetHeight - 10);
     this.tooltip.style.transform = `translate(${Math.max(10, x)}px, ${Math.max(10, y)}px)`;
   }
+}
+
+/** 外資＋投信最新一天的買賣超（真實資料才有）。 */
+function instRow(f: { instNet?: number; instAsOf?: string } | undefined, px: number): string {
+  if (f?.instNet === undefined) return '';
+  const amt = (f.instNet * 1000 * px) / 1e8;
+  const day = f.instAsOf ? `<small class="muted">（${Number(f.instAsOf.slice(5, 7))}/${Number(f.instAsOf.slice(8, 10))}）</small>` : '';
+  return `<dt>法人買賣超</dt><dd class="${f.instNet > 0 ? 'up' : f.instNet < 0 ? 'down' : ''}">${f.instNet > 0 ? '+' : ''}${f.instNet.toLocaleString()} 張（約 ${signedYi(amt)}）${day}</dd>`;
 }
 
 function place(el: HTMLElement, x: number, y: number, w: number, h: number): void {

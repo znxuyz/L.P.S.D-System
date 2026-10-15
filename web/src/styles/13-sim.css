@@ -260,3 +260,5 @@
   .sim-inline input[type='number'] { flex: 1 1 110px; width: auto; }
 }
 .sim-board-table th:nth-child(2), .sim-board-table td:nth-child(2) { text-align: left; }
+.sim-pat-win { color: var(--muted); }
+.sim-pat-win b { color: var(--ink-2); }
