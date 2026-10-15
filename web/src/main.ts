@@ -26,6 +26,15 @@ import { MOCK_ETFS } from './data/mockEtfs';
 import { renderStockPage, type ExternalStock } from './ui/stockPage';
 import { SimPage } from './ui/simPage';
 import { loadFavs, toggleFav } from './data/favorites';
+import { marketRows, newsCardHtml, rankCardHtml, type MarketRankKey, type MarketRankScope } from './ui/marketExtras';
+import { loadNames, loadNews, loadSimMonth, type NewsItem } from './data/simData';
+
+/** 內容沒變就不重寫（避免每秒重畫打斷捲動與點擊）。 */
+function setInner(el: HTMLElement, html: string): void {
+  if (el.dataset.html === html) return;
+  el.dataset.html = html;
+  el.innerHTML = html;
+}
 import { startUpdateCheck } from './data/appUpdate';
 import { renderLearnPage } from './ui/learnPage';
 import { laplaceBusy, playLaplaceIntro, playLaplaceOutro } from './ui/laplaceIntro';
@@ -103,6 +112,12 @@ class App {
   private readonly fundamentals: Map<string, Fundamentals>;
   private strategy: StrategyId = 'value';
   /** 熱力圖上正在標示的股票群：五大選股的某個策略，或某檔 ETF 的成分股。 */
+  /** 市場情報頁的今日排行與新聞。 */
+  private extrasLoading = false;
+  private mrankKey: MarketRankKey = 'up';
+  private mrankScope: MarketRankScope = 'pool';
+  private allMarket: { date: string; rows: ReturnType<typeof marketRows> } | null | undefined;
+  private newsItems: NewsItem[] | undefined;
   /** 自選股（這台裝置）。 */
   private favs = loadFavs();
   private highlight:
@@ -285,7 +300,10 @@ class App {
     const floating = $('#map-detail');
     floating.hidden = !this.focus || this.page !== 'map';
     if (!floating.hidden) renderDetail(floating, ctx);
-    if (this.page === 'intel') renderDock($('#dock'), ctx, (el) => this.rotation && renderRotation(el, this.rotation, this.pal, this.openMs));
+    if (this.page === 'intel') {
+      renderDock($('#dock'), ctx, (el) => this.rotation && renderRotation(el, this.rotation, this.pal, this.openMs));
+      this.renderExtras();
+    }
     renderLog($('#log'), this.events, this.fresh);
     this.fresh = new Set();
     this.syncControls();
@@ -464,6 +482,32 @@ class App {
     return PAGES.find((p) => $('.app').classList.contains(`page-${p}`)) ?? 'map';
   }
 
+  /** 市場情報頁的今日排行與新聞（第一次打開時才載入資料）。 */
+  private renderExtras(): void {
+    if (!this.extrasLoading) {
+      this.extrasLoading = true;
+      const today = taipeiDate(Date.now());
+      const [y, mo] = today.split('-').map(Number);
+      const prev = mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
+      void loadNews(today.slice(0, 4)).then((n) => {
+        this.newsItems = n;
+        this.renderPanels();
+      });
+      void Promise.all([loadNames(), loadSimMonth(today.slice(0, 7)), loadSimMonth(prev)]).then(([names, cur, old]) => {
+        const month = [cur, old].find((m) => m && Object.keys(m.days).some((d) => d <= today));
+        const date = month ? Object.keys(month.days).filter((d) => d <= today).sort().at(-1)! : '';
+        const nameOf = (c: string) => names[c] ?? this.universe.stocks.find((s) => s.code === c)?.name ?? '';
+        this.allMarket = month ? { date, rows: marketRows(month, date, nameOf) } : null;
+        this.renderPanels();
+      });
+    }
+    if (!this.metrics) return;
+    const rank = document.querySelector<HTMLElement>('#mrank');
+    if (rank) setInner(rank, rankCardHtml({ metrics: this.metrics, key: this.mrankKey, scope: this.mrankScope, all: this.allMarket }));
+    const news = document.querySelector<HTMLElement>('#mnews');
+    if (news) setInner(news, newsCardHtml(this.newsItems, taipeiDate(Date.now())));
+  }
+
   private renderFavChip(): void {
     const chip = $('#fav-chip');
     const n = this.favs.filter((c) => this.stockCodes.has(c)).length;
@@ -607,6 +651,14 @@ class App {
     });
     document.addEventListener('input', (e) => {
       if ((e.target as HTMLElement).id === 'sa-q') (e.target as HTMLInputElement).setCustomValidity('');
+    });
+    // 今日排行：排序方式與範圍
+    document.addEventListener('click', (e) => {
+      const t = (e.target as Element).closest<HTMLElement>('[data-mrank],[data-mscope]');
+      if (!t) return;
+      if (t.dataset.mrank) this.mrankKey = t.dataset.mrank as MarketRankKey;
+      else this.mrankScope = t.dataset.mscope as MarketRankScope;
+      this.renderPanels();
     });
     // 自選股：個股頁的 ☆ 加入／移除；熱力圖的「★ 自選」亮出自選股
     document.addEventListener('click', (e) => {

@@ -318,7 +318,9 @@ export function renderDock(el: HTMLElement, ctx: PanelContext, renderRotationInt
       <section class="card glass card-index">${title('加權指數・台指期')}<div class="fut-strip" id="fut-strip"></div><div class="chart" id="index-chart"></div></section>
       <section class="card glass card-rotation">${title('資金輪動', ' <small>每格 5 分鐘・成交佔比偏離常態的百分點</small>')}<div class="rotation" id="rotation"></div></section>
       <section class="card glass card-flow">${title('產業資金流', ' <small>億元</small>')}<div class="flow-rank" id="flow-rank"></div></section>
-      <section class="card glass card-movers">${title('個股資金流', ' <small>億元</small>')}<div class="movers" id="movers"></div></section>`;
+      <section class="card glass card-movers">${title('個股資金流', ' <small>億元</small>')}<div class="movers" id="movers"></div></section>
+      <section class="card glass card-mrank">${title('今日排行')}<div id="mrank"></div></section>
+      <section class="card glass card-mnews">${title('新聞', ' <small>國內外大事件與重大訊息</small>')}<div id="mnews"></div></section>`;
     el.dataset.ready = '1';
   }
   renderFutures(el.querySelector('#fut-strip')!, m);

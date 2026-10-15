@@ -19,7 +19,10 @@
 .s-bar i { display: block; height: 100%; border-radius: 4px; background: currentColor; opacity: 0.85; }
 .s-flow { font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
 
-.dock { grid-area: dock; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 14px; }
+.dock { grid-area: dock; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 340px 340px 460px; gap: 14px; }
+/* 第三排放今日排行與新聞：頁面改成可以往下捲 */
+.app.page-intel { height: auto; }
+html:has(.page-intel), body:has(.page-intel) { height: auto; }
 .card { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
 .chart { position: relative; flex: 1; min-height: 0; }
 .chart svg { display: block; }
@@ -144,3 +147,20 @@
 button.log-text { cursor: pointer; }
 button.log-text:hover { color: var(--ink); }
 .log-empty { color: var(--muted); }
+/* 今日排行、新聞 */
+.card-mrank, .card-mnews { display: flex; flex-direction: column; min-height: 0; }
+.card-mrank > div, .card-mnews > div { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.mrank-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.mrank-tools .seg { width: auto; display: inline-flex; }
+.mrank-tools .seg button[disabled] { opacity: 0.4; cursor: default; }
+.mrank-wrap { overflow: auto; min-height: 0; flex: 1; }
+.mrank { width: 100%; border-collapse: collapse; font-size: 12px; }
+.mrank th { position: sticky; top: 0; background: var(--glass-strong); color: var(--muted); font-weight: 600; text-align: left; padding: 4px 6px; white-space: nowrap; }
+.mrank td { padding: 4px 6px; border-top: 1px solid var(--glass-line); white-space: nowrap; }
+.mrank tbody tr { cursor: pointer; }
+.mrank tbody tr:hover { background: var(--row-hover); }
+.mrank-note { margin: 6px 0 0; font-size: 11px; }
+.mnews-date { margin: 0 0 6px; font-size: 12px; }
+.mnews { list-style: none; margin: 0; padding: 0; overflow: auto; min-height: 0; flex: 1; display: grid; gap: 6px; align-content: start; font-size: 13px; line-height: 1.5; }
+.mnews li.lv-3 { color: var(--ink); font-weight: 600; }
+.mnews li.lv-1 { color: var(--ink-2); }
