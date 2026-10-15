@@ -8,7 +8,7 @@
 }
 @media (max-width: 980px) {
   .app.page-intel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'top top' 'sectors side' 'dock dock'; grid-template-rows: auto minmax(420px, auto) auto; height: auto; }
-  .app.page-intel .dock { grid-template-rows: 280px 280px; }
+  .app.page-intel .dock { grid-template-rows: 280px 280px 440px; }
   html:has(.page-intel), body:has(.page-intel), html:has(.page-screen), body:has(.page-screen), html:has(.page-etf), body:has(.page-etf) { height: auto; }
   .app.page-screen, .app.page-etf { height: auto; }
   .etf-cats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
@@ -30,6 +30,7 @@
   .app.page-intel { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'top' 'sectors' 'side' 'dock'; grid-template-rows: auto; }
   .app.page-intel .dock { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
   .app.page-intel .dock .card { min-height: 260px; }
+  .app.page-intel .dock .card-mrank, .app.page-intel .dock .card-mnews { height: 460px; }
   .app.page-intel .side { grid-template-rows: auto 260px; }
   .sectors { overflow-x: auto; overflow-y: hidden; padding: 10px; }
   .sectors .panel-title { display: none; }
