@@ -76,3 +76,18 @@ export function loadSimFund(code: string): Promise<SimFund | null> {
   }
   return p;
 }
+
+/** 模擬盤五大選股（scripts/sim-screen.ts 產生）：日期 → 策略 → [[代號, [欄位值…]]]（那一天收盤後的結果）。 */
+export interface SimScreenMonth {
+  days: Record<string, Record<string, Array<[string, string[]]>>>;
+}
+const screens = new Map<string, Promise<SimScreenMonth | null>>();
+export function loadSimScreen(month: string): Promise<SimScreenMonth | null> {
+  let p = screens.get(month);
+  if (!p) {
+    p = json<SimScreenMonth>(`data/simscreen/${month}.json`).then((j) => (j && typeof j.days === 'object' ? j : null));
+    screens.set(month, p);
+    if (screens.size > 4) screens.delete(screens.keys().next().value!);
+  }
+  return p;
+}

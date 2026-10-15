@@ -85,7 +85,10 @@ import { buildMapDay, historyAt, snapshotAt, type SimMapDay } from './sim/heatma
 import { GlassMapView } from './glassMapView';
 import { computeMetrics } from '../domain/metrics';
 import { palette } from './colors';
-import type { SimMonth } from '../data/simData';
+import type { SimMonth, SimScreenMonth } from '../data/simData';
+import { loadSimScreen } from '../data/simData';
+import { screenHtml } from './sim/screen';
+import type { StrategyId } from '../domain/screens';
 import { baselineFor } from '../data/patternStats';
 import { RANK_NAME, rankRows, rankTableHtml, type RankKey, type RankRow } from './sim/rank';
 import { renderLearnPage } from './learnPage';
@@ -117,6 +120,7 @@ const SIM_TABS = [
   { id: 'hold', icon: '💼', title: '持股' },
   { id: 'money', icon: '💰', title: '資金' },
   { id: 'analysis', icon: '🔍', title: '分析' },
+  { id: 'screen', icon: '🎯', title: '選股' },
   { id: 'rank', icon: '🏆', title: '排行' },
   { id: 'news', icon: '📰', title: '新聞' },
   { id: 'learn', icon: '📘', title: '入門' },
@@ -208,6 +212,9 @@ export class SimPage implements SimCtx {
   private mapLoading = '';
   private mapView: GlassMapView | null = null;
   private mapKey = '';
+  /** 選股分頁。 */
+  private screenPick: StrategyId = 'value';
+  private readonly screenMonths = new Map<string, SimScreenMonth | null | undefined>();
   /** 手機版目前的分頁。 */
   private tab: SimTab = (() => {
     try {
@@ -968,6 +975,7 @@ export class SimPage implements SimCtx {
           <div class="sim-equity glass" id="sim-equity" data-pane="money"></div>
           <div class="sim-fund glass" id="sim-fund" data-pane="analysis"></div>
           <div class="sim-tech glass" id="sim-tech" data-pane="analysis"></div>
+          <div class="sim-screen glass" id="sim-screen" data-pane="screen"></div>
           <div class="sim-rank glass" id="sim-rank" data-pane="rank"></div>
           <div class="sim-news glass" id="sim-news" data-pane="news"></div>
         </div>
@@ -1175,6 +1183,9 @@ export class SimPage implements SimCtx {
     else if (a.startsWith('rank-')) {
       this.rankKey = a.slice(5) as RankKey;
       this.renderPlay();
+    } else if (a.startsWith('screen-')) {
+      this.screenPick = a.slice(7) as StrategyId;
+      this.render();
     } else if (a === 'learn') {
       this.setTab(this.tab === 'learn' ? 'trade' : 'learn', true);
     } else if (a === 'hints') {
@@ -1298,7 +1309,30 @@ export class SimPage implements SimCtx {
     setHtml($('sim-log'), this.cached('log', `${s.settings.start}|${s.trades.length}|${s.notes.length}|${named}`, () => logHtml(s, this)));
     if (this.tab === 'analysis') this.renderAnalysis(s);
     if (this.tab === 'map') this.renderMap(s);
+    if (this.tab === 'screen') this.renderScreen(s);
     if (!this.guiding) this.maybeAskGuide();
+  }
+
+  /** 選股分頁：前一個交易日收盤後的五大選股結果。 */
+  private renderScreen(s: SimState): void {
+    void this.ensureRank(s.date);
+    const day = this.data.prevDay(s.date) ?? null;
+    const month = day?.slice(0, 7) ?? '';
+    if (day && !this.screenMonths.has(month)) {
+      this.screenMonths.set(month, undefined);
+      void loadSimScreen(month).then((m) => {
+        this.screenMonths.set(month, m);
+        this.render();
+      });
+    }
+    const today = this.rankCache?.date === s.date ? this.rankCache.rows : null;
+    const t = Math.min(SESSION_MINUTES, Math.floor(s.minute));
+    setHtml(
+      this.root.querySelector<HTMLElement>('#sim-screen')!,
+      this.cached('screen', `${s.date}|${t}|${s.pre}|${this.screenPick}|${s.watch}|${this.screenMonths.get(month) === undefined ? 'l' : 'y'}|${today ? today.length : 0}`, () =>
+        screenHtml({ strategy: this.screenPick, day, month: day ? this.screenMonths.get(month) : null, today, minute: t, pre: !!s.pre, watch: s.watch, nameOf: (c) => this.nameOf(c) }),
+      ),
+    );
   }
 
   /** 熱力圖分頁：模擬當天全市場（只到現在這一分鐘）。 */
