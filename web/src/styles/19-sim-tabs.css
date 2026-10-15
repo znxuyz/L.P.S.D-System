@@ -17,6 +17,7 @@
   .sim[data-tab='hold'] .sim-panes > [data-pane]:not([data-pane='hold']),
   .sim[data-tab='money'] .sim-panes > [data-pane]:not([data-pane='money']),
   .sim[data-tab='analysis'] .sim-panes > [data-pane]:not([data-pane='analysis']),
+  .sim[data-tab='map'] .sim-panes > [data-pane]:not([data-pane='map']),
   .sim[data-tab='rank'] .sim-panes > [data-pane]:not([data-pane='rank']),
   .sim[data-tab='news'] .sim-panes > [data-pane]:not([data-pane='news']),
   .sim[data-tab='trade'] .sim-panes > [data-pane]:not([data-pane='hold']) { display: none; }
@@ -31,6 +32,7 @@
   .sim[data-tab='hold'] [data-pane]:not([data-pane='hold']),
   .sim[data-tab='money'] [data-pane]:not([data-pane='money']),
   .sim[data-tab='analysis'] [data-pane]:not([data-pane='analysis']),
+  .sim[data-tab='map'] [data-pane]:not([data-pane='map']),
   .sim[data-tab='rank'] [data-pane]:not([data-pane='rank']),
   .sim[data-tab='news'] [data-pane]:not([data-pane='news']),
   .sim[data-tab='learn'] [data-pane]:not([data-pane='learn']) { display: none !important; }
@@ -57,3 +59,11 @@
 .sim-tech-list li small { flex-basis: 100%; }
 .sim-scenario { margin: 4px 0 8px; color: var(--ink-2); }
 .sim-scenario b { color: var(--accent); }
+/* 模擬盤熱力圖 */
+.sim-map-view { height: 560px; margin: 8px 0 10px; }
+.sim-map-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 4px 18px; }
+.sim-map-flow ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.sim-map-flow li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-size: 14px; }
+@media (max-width: 720px) {
+  .sim-map-view { height: 440px; margin: 8px -6px 10px; }
+}
