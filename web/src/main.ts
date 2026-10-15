@@ -25,6 +25,7 @@ import { applyActiveEtfData, loadActiveEtfData } from './data/activeEtfData';
 import { MOCK_ETFS } from './data/mockEtfs';
 import { renderStockPage, type ExternalStock } from './ui/stockPage';
 import { SimPage } from './ui/simPage';
+import { loadFavs, toggleFav } from './data/favorites';
 import { startUpdateCheck } from './data/appUpdate';
 import { renderLearnPage } from './ui/learnPage';
 import { laplaceBusy, playLaplaceIntro, playLaplaceOutro } from './ui/laplaceIntro';
@@ -102,7 +103,10 @@ class App {
   private readonly fundamentals: Map<string, Fundamentals>;
   private strategy: StrategyId = 'value';
   /** 熱力圖上正在標示的股票群：五大選股的某個策略，或某檔 ETF 的成分股。 */
+  /** 自選股（這台裝置）。 */
+  private favs = loadFavs();
   private highlight:
+    | { kind: 'fav' }
     | { kind: 'strategy'; id: StrategyId }
     | { kind: 'etf'; code: string }
     | { kind: 'etf-changes'; code: string }
@@ -246,6 +250,7 @@ class App {
       this.ensureDaily(this.analyzed, external?.stock.prevClose);
       this.ensureChipSeries(this.analyzed);
       renderStockPage($('#page-stock'), this.analyzed, {
+        favs: this.favs,
         external,
         directory: this.directory ?? undefined,
         metrics: this.metrics,
@@ -459,6 +464,14 @@ class App {
     return PAGES.find((p) => $('.app').classList.contains(`page-${p}`)) ?? 'map';
   }
 
+  private renderFavChip(): void {
+    const chip = $('#fav-chip');
+    const n = this.favs.filter((c) => this.stockCodes.has(c)).length;
+    chip.textContent = this.favs.length ? `★ 自選 ${n} 檔` : '★ 自選';
+    chip.title = this.favs.length ? '在熱力圖上亮出自選股（熱力圖股票池以外的不會顯示）' : '在「個股分析」按 ☆ 加入自選股';
+    chip.toggleAttribute('disabled', !n);
+  }
+
   /** 熱力圖只亮出指定策略符合的股票。 */
   private applyHighlight(): void {
     const chip = $('#filter-chip');
@@ -469,7 +482,10 @@ class App {
     }
     let codes: Set<string>;
     let label: string;
-    if (this.highlight.kind === 'strategy') {
+    if (this.highlight.kind === 'fav') {
+      codes = new Set(this.favs.filter((c) => this.stockCodes.has(c)));
+      label = '自選股';
+    } else if (this.highlight.kind === 'strategy') {
       const s = strategyById(this.highlight.id);
       codes = new Set(runScreen(s, this.metrics, this.universe).filter((r) => r.status === 'match').map((r) => r.view.stock.code));
       label = s.name;
@@ -592,6 +608,23 @@ class App {
     document.addEventListener('input', (e) => {
       if ((e.target as HTMLElement).id === 'sa-q') (e.target as HTMLInputElement).setCustomValidity('');
     });
+    // 自選股：個股頁的 ☆ 加入／移除；熱力圖的「★ 自選」亮出自選股
+    document.addEventListener('click', (e) => {
+      const t = (e.target as Element).closest<HTMLElement>('[data-fav-toggle],#fav-chip');
+      if (!t) return;
+      if (t.dataset.favToggle) {
+        this.favs = toggleFav(this.favs, t.dataset.favToggle);
+        this.renderFavChip();
+        if (this.highlight?.kind === 'fav') this.applyHighlight();
+        this.renderPanels();
+      } else {
+        this.highlight = this.highlight?.kind === 'fav' ? null : { kind: 'fav' };
+        this.focus = null;
+        this.map.setFocus(null);
+        this.applyHighlight();
+      }
+    });
+    this.renderFavChip();
     $('#filter-chip').addEventListener('click', () => {
       this.highlight = null;
       this.applyHighlight();
