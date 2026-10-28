@@ -368,7 +368,13 @@ function renderChartHead(el: HTMLElement, ctx: StockPageContext, tech: TechRepor
     mock: '模擬行情（示意走勢）',
     none: '沒有真實日 K',
   };
-  const src = ctx.daily === undefined ? '載入中…' : `${SRC[ctx.daily.source]}${ctx.daily.source === 'official' && ctx.daily.note ? '（富果日 K 沒抓到）' : ''}`;
+  const splitTxt = (ctx.daily?.splits ?? [])
+    .map(([d, k]) => `${Number(d.slice(0, 4))}/${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} ${k > 1 && Number.isInteger(k) ? `一拆 ${k}` : `${k < 1 ? '減資' : '面額變更'}（×${k.toFixed(2)}）`}`)
+    .join('、');
+  const src =
+    ctx.daily === undefined
+      ? '載入中…'
+      : `${SRC[ctx.daily.source]}${ctx.daily.source === 'official' && ctx.daily.note ? '（富果日 K 沒抓到）' : ''}${splitTxt ? `・已還原分割：${splitTxt}` : ''}`;
   // 勾選框只建立一次，之後只更新標題與圖例，避免每秒重畫打斷點擊
   if (!el.dataset.ready) {
     el.innerHTML = `<div class="kc-title"></div>

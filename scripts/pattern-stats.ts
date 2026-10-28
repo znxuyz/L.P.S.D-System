@@ -14,10 +14,11 @@
  *   各自另算一份勝率與基準（regimes），看型態是不是只在某種行情有效。這個判斷只用當天以前的資料。
  * 只用一般股票（4 碼），不含 ETF。
  */
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { detectPatterns } from '../web/src/domain/patterns.ts';
 import { detectCandles } from '../web/src/domain/candlesticks.ts';
+import { adjustForSplits, detectSplits } from '../web/src/domain/splits.ts';
 import type { Candle } from '../web/src/domain/technicals.ts';
 
 const HORIZON = 20;
@@ -64,6 +65,10 @@ const byRegime = {
   bear: { patterns: new Map<string, Acc>(), candles: new Map<string, Acc>(), base20: { n: 0, up: 0 }, base5: { n: 0, up: 0 } },
 };
 const files = readdirSync(join(dir, 'candles')).filter((f) => /^\d{4}\.json$/.test(f));
+// 除權息日（分割判斷要排除）
+const exDays = new Map<string, Set<string>>();
+for (const f of existsSync(join(dir, 'exrights')) ? readdirSync(join(dir, 'exrights')).filter((f) => /^\d{4}\.json$/.test(f)) : [])
+  for (const r of JSON.parse(readFileSync(join(dir, 'exrights', f), 'utf8')) as Array<[string, string]>) (exDays.get(r[1]) ?? exDays.set(r[1], new Set()).get(r[1])!).add(r[0]);
 const patterns = new Map<string, Acc>();
 const candles = new Map<string, Acc>();
 let base20 = { n: 0, up: 0 };
@@ -80,7 +85,9 @@ for (const f of files) {
   }
   const rows = JSON.parse(readFileSync(join(dir, 'candles', f), 'utf8')) as Array<[string, number, number, number, number, number]>;
   if (rows.length < 150) continue;
-  const c: Candle[] = rows.map(([date, open, high, low, close, volume]) => ({ date, open, high, low, close, volume }));
+  // 股票分割、減資：之前的價格還原成同一個基準，不然分割那一刀會被當成大跌，型態與報酬都會算錯
+  const raw: Candle[] = rows.map(([date, open, high, low, close, volume]) => ({ date, open, high, low, close, volume }));
+  const c = adjustForSplits(raw, detectSplits(raw, exDays.get(f.slice(0, 4))), '9999-12-31');
   used++;
   if (c[0].date < from) from = c[0].date;
   if (c[c.length - 1].date > to) to = c[c.length - 1].date;

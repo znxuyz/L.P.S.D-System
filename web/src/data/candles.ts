@@ -1,4 +1,5 @@
 import type { Candle } from '../domain/technicals';
+import { adjustForSplits, detectSplits, type Split } from '../domain/splits';
 import { createRng, gaussian } from './random';
 
 /** 個股分析用的日 K（不含今天；今天的 K 棒由即時報價補上）。 */
@@ -11,9 +12,42 @@ export interface DailySeries {
   source: 'official' | 'fugle' | 'mock' | 'none';
   /** 抓不到真實日 K 時的原因（例如富果回應的錯誤）。 */
   note?: string;
+  /** 已經還原的股票分割、面額變更、減資：[日期, 股數倍數]。 */
+  splits?: Split[];
 }
 
 /** 官方日 K：一檔一個檔案（data/candles/2330.json），由 GitHub Actions 每天累積。 */
+const exYears = new Map<number, Promise<Array<[string, string]>>>();
+
+/** 某檔股票的除權息日（分割判斷要排除這些日子）。 */
+async function exDaysFor(code: string, fromYear: number, toYear: number): Promise<Set<string>> {
+  const years: Promise<Array<[string, string]>>[] = [];
+  for (let y = fromYear; y <= toYear; y++) {
+    let p = exYears.get(y);
+    if (!p) {
+      p = fetch(`data/exrights/${y}.json`, { cache: 'no-cache' })
+        .then((r) => (r.ok ? (r.json() as Promise<Array<[string, string]>>) : []))
+        .catch(() => []);
+      exYears.set(y, p);
+    }
+    years.push(p);
+  }
+  return new Set((await Promise.all(years)).flat().filter((r) => r[1] === code).map((r) => r[0]));
+}
+
+/**
+ * 還原股票分割、面額變更、減資：日 K 是交易所的原始價格，分割那天會「跳」一大段（例如一拆四股價變 1/4），
+ * 均線、型態、技術指標都會被這一刀帶歪。把之前的價格換算成現在的基準（價格 ÷ 倍數、成交量 × 倍數）。
+ */
+export async function adjustSplits(code: string, series: DailySeries): Promise<DailySeries> {
+  const c = series.candles;
+  if (c.length < 10) return series;
+  const ex = await exDaysFor(code, Number(c[0].date.slice(0, 4)), Number(c[c.length - 1].date.slice(0, 4)));
+  const splits = detectSplits(c, ex);
+  if (!splits.length) return series;
+  return { ...series, candles: adjustForSplits(c, splits, '9999-12-31'), splits };
+}
+
 export async function loadOfficialCandles(code: string): Promise<Candle[] | null> {
   try {
     const res = await fetch(`data/candles/${encodeURIComponent(code)}.json`, { cache: 'no-cache' });
