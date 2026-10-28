@@ -8,6 +8,7 @@
  * 這裡每個 API 各用一條佇列，預設每分鐘最多送 55 次，留一點餘裕避免撞到上限。
  * 回應格式只取用到的欄位，並且容忍欄位缺漏（例如盤前還沒有成交價）。
  */
+import { detectSplits } from '../domain/splits';
 
 export const FUGLE_REST = 'https://api.fugle.tw/marketdata/v1.0/stock';
 /** 期貨選擇權的行情（台指期等）。 */
@@ -110,12 +111,16 @@ export function computeBaseline(candles: FugleCandleRaw[], today: string): Basel
   if (rows.length === 0) return null;
   const last = <T>(arr: T[], n: number) => arr.slice(Math.max(0, arr.length - n));
   const mean = (arr: number[]) => arr.reduce((s, v) => s + v, 0) / Math.max(1, arr.length);
-  const closes = rows.map((c) => c.close!);
+  // 股票分割（一拆 k）：之前的價格換算成現在的基準，一年高點、均線才不會被那一刀帶歪。
+  // 這裡沒有除權息資料，只認明確的整數倍分割，避免把大額除權誤當成分割。
+  const splits = detectSplits(rows.map((c) => ({ date: c.date, open: num(c.open) ?? c.close!, close: c.close! }))).filter(([, k]) => k >= 2 && Number.isInteger(k));
+  const factor = (d: string) => splits.reduce((f, [sd, k]) => (d < sd ? f * k : f), 1);
+  const closes = rows.map((c) => c.close! / factor(c.date));
   const turnovers = last(rows, 20)
     .map((c) => num(c.turnover) ?? (num(c.volume) && num(c.close) ? c.volume! * c.close! : 0))
     .filter((v) => v > 0);
-  const highs = rows.map((c) => num(c.high) ?? c.close!);
-  const lows = rows.map((c) => num(c.low) ?? c.close!);
+  const highs = rows.map((c) => (num(c.high) ?? c.close!) / factor(c.date));
+  const lows = rows.map((c) => (num(c.low) ?? c.close!) / factor(c.date));
   return {
     asOf: rows[rows.length - 1].date,
     avgTurnover20: mean(turnovers) / YI,

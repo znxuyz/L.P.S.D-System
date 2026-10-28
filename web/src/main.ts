@@ -26,6 +26,7 @@ import { MOCK_ETFS } from './data/mockEtfs';
 import { renderStockPage, type ExternalStock } from './ui/stockPage';
 import { SimPage } from './ui/simPage';
 import { loadFavs, toggleFav } from './data/favorites';
+import { adjustSplits } from './data/candles';
 import { marketRows, newsCardHtml, rankCardHtml, type MarketRankKey, type MarketRankScope } from './ui/marketExtras';
 import { loadNames, loadNews, loadSimMonth, type NewsItem } from './data/simData';
 
@@ -470,6 +471,8 @@ class App {
       return { candles: official ?? [], source: official?.length ? 'official' : 'none', note: fugle?.note };
     };
     load()
+      // 股票分割、減資：之前的價格還原成現在的基準（模擬行情的示意資料不用）
+      .then((series) => (series.source === 'official' || series.source === 'fugle' ? adjustSplits(code, series) : series))
       .then((series) => this.daily.set(code, series))
       .catch(() => this.daily.set(code, { candles: [], source: 'none' }))
       .finally(() => {
