@@ -102,10 +102,12 @@ async function updateFutures(dir: string): Promise<void> {
   for (const m of todo) {
     if (timeUp()) break;
     const [y, mo] = m.split('-').map(Number);
-    // 結束日不能超過今天（期交所不接受未來的日期）
-    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    // 結束日不能超過已公布的最後一天（期交所不接受還沒有資料的日期；當天資料下午 4 點前還沒出來）
+    const tw = new Date(Date.now() + 8 * 3600_000);
+    const lastDay = tw.getUTCHours() >= 16 ? tw.toISOString().slice(0, 10) : shift(tw.toISOString().slice(0, 10), -1);
     const monthEnd = `${m}-${String(new Date(Date.UTC(y, mo, 0)).getUTCDate()).padStart(2, '0')}`;
-    const end = monthEnd > today ? today : monthEnd;
+    const end = monthEnd > lastDay ? lastDay : monthEnd;
+    if (end < `${m}-01`) continue;
     const body = new URLSearchParams({ queryStartDate: `${m.replace('-', '/')}/01`, queryEndDate: end.replace(/-/g, '/') });
     try {
       const res = await get('https://www.taifex.com.tw/cht/3/futContractsDateDown', { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
