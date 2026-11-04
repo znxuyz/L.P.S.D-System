@@ -4,7 +4,11 @@ const num = (v: unknown) => {
   return Number.isFinite(n) ? n : NaN;
 };
 
+/** 存檔格式版本：舊版沒有 ETF 的融資，算不出維持率，要重抓。 */
+export const MARGIN_VERSION = 2;
+
 export interface MarginDay {
+  v?: number;
   /** 融資餘額金額（仟元）。 */
   finAmt: number;
   /** 融資、融券今日餘額（張）。 */
@@ -40,9 +44,10 @@ export function parseMargin(j: any): MarginDay | null {
   for (const r of stocks.data) {
     const code = String(r[0]).trim();
     const v = num(r[bal[0]]);
-    if (/^\d{4}$/.test(code) && v > 0) perStock[code] = v;
+    // 個股與 ETF 都算（ETF 的融資也不少，少了它維持率會算不出來）
+    if (/^\d{4,6}[A-Z]?$/.test(code) && v > 0) perStock[code] = v;
   }
-  return { finAmt, finLots, shortLots, perStock };
+  return { v: MARGIN_VERSION, finAmt, finLots, shortLots, perStock };
 }
 
 /** 解析期交所「三大法人－期貨契約」CSV：外資的「多空未平倉口數淨額」，大台＋小台÷4。日期 → 口數。 */

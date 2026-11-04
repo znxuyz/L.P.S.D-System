@@ -14,7 +14,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseFutures, parseMargin, type MarginDay } from './lib/marketRisk.ts';
+import { MARGIN_VERSION, parseFutures, parseMargin, type MarginDay } from './lib/marketRisk.ts';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 L.P.L.C.-System';
 const START = process.env.ARCHIVE_START ?? '2020-01-01';
@@ -56,7 +56,12 @@ async function updateMargin(dir: string): Promise<void> {
   const empty = new Set(readJson<string[]>(emptyPath, []));
   const holidays = new Set(readJson<{ holidays?: string[] }>(join(dir, 'candles-meta.json'), {}).holidays ?? []);
   const now = new Date(Date.now() + 8 * 3600_000);
-  const have = new Set(readdirSync(out).map((f) => f.slice(0, 10)));
+  // 舊版格式（沒有 ETF）的檔案當作沒抓過
+  const have = new Set(
+    readdirSync(out)
+      .filter((f) => readJson<{ v?: number }>(join(out, f), {}).v === MARGIN_VERSION)
+      .map((f) => f.slice(0, 10)),
+  );
   const todo: string[] = [];
   for (let d = now.getUTCHours() >= 21 ? now.toISOString().slice(0, 10) : shift(now.toISOString().slice(0, 10), -1); d >= START; d = shift(d, -1)) {
     const wd = new Date(`${d}T00:00:00Z`).getUTCDay();
@@ -97,8 +102,11 @@ async function updateFutures(dir: string): Promise<void> {
   for (const m of todo) {
     if (timeUp()) break;
     const [y, mo] = m.split('-').map(Number);
-    const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
-    const body = new URLSearchParams({ queryStartDate: `${y}/${String(mo).padStart(2, '0')}/01`, queryEndDate: `${y}/${String(mo).padStart(2, '0')}/${last}` });
+    // 結束日不能超過今天（期交所不接受未來的日期）
+    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    const monthEnd = `${m}-${String(new Date(Date.UTC(y, mo, 0)).getUTCDate()).padStart(2, '0')}`;
+    const end = monthEnd > today ? today : monthEnd;
+    const body = new URLSearchParams({ queryStartDate: `${m.replace('-', '/')}/01`, queryEndDate: end.replace(/-/g, '/') });
     try {
       const res = await get('https://www.taifex.com.tw/cht/3/futContractsDateDown', { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
       const csv = new TextDecoder('big5').decode(await res.arrayBuffer());
