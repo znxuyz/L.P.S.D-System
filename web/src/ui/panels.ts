@@ -320,7 +320,8 @@ export function renderDock(el: HTMLElement, ctx: PanelContext, renderRotationInt
       <section class="card glass card-flow">${title('產業資金流', ' <small>億元</small>')}<div class="flow-rank" id="flow-rank"></div></section>
       <section class="card glass card-movers">${title('個股資金流', ' <small>億元</small>')}<div class="movers" id="movers"></div></section>
       <section class="card glass card-mrank">${title('今日排行')}<div id="mrank"></div></section>
-      <section class="card glass card-mnews">${title('新聞', ' <small>國內外大事件與重大訊息</small>')}<div id="mnews"></div></section>`;
+      <section class="card glass card-mnews">${title('新聞', ' <small>國內外大事件與重大訊息</small>')}<div id="mnews"></div></section>
+      <section class="card glass card-risk">${title('大盤風險', ' <small>融資維持率・外資期貨空單</small>')}<div id="mrisk"></div></section>`;
     el.dataset.ready = '1';
   }
   renderFutures(el.querySelector('#fut-strip')!, m);

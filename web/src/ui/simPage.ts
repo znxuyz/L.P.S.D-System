@@ -82,6 +82,8 @@ import { pickRandomStart } from '../domain/simScenarios';
 import { loadSimMonth } from '../data/simData';
 import { SimData } from './sim/dataStore';
 import { buildMapDay, historyAt, snapshotAt, type SimMapDay } from './sim/heatmap';
+import { loadMarketRisk, type MarketRisk } from '../data/marketRisk';
+import { riskCardHtml } from './marketExtras';
 import { GlassMapView } from './glassMapView';
 import { computeMetrics } from '../domain/metrics';
 import { palette } from './colors';
@@ -212,6 +214,9 @@ export class SimPage implements SimCtx {
   private mapLoading = '';
   private mapView: GlassMapView | null = null;
   private mapKey = '';
+  /** 大盤風險（融資維持率、外資期貨）。 */
+  private risk: MarketRisk | null | undefined;
+  private riskLoading = false;
   /** 選股分頁。 */
   private screenPick: StrategyId = 'value';
   private readonly screenMonths = new Map<string, SimScreenMonth | null | undefined>();
@@ -965,6 +970,7 @@ export class SimPage implements SimCtx {
           <div class="sim-map glass" id="sim-map" data-pane="map">
             <h2 class="panel-title">熱力圖 <small>面積＝成交額、顏色＝漲跌；只到現在為止</small></h2>
             <div class="sim-map-sectors" id="sim-map-sectors"></div>
+            <details class="sim-map-risk"><summary>大盤風險：融資維持率・外資期貨空單（前一個交易日）</summary><div id="sim-map-risk"></div></details>
             <div class="view sim-map-view" id="sim-map-view"></div>
             <p class="muted sim-note">股票池與首頁熱力圖相同；成交額依張數與均價估算，資金流＝成交佔比比近 20 日常態多出的成交額（錢往哪裡集中，不是買賣淨額）。點方塊看那一檔。</p>
           </div>
@@ -1349,6 +1355,15 @@ export class SimPage implements SimCtx {
 
   /** 熱力圖分頁：模擬當天全市場（只到現在這一分鐘）。 */
   private renderMap(s: SimState): void {
+    if (this.risk === undefined && !this.riskLoading) {
+      this.riskLoading = true;
+      void loadMarketRisk().then((r) => {
+        this.risk = r;
+        this.render();
+      });
+    }
+    // 只看模擬日以前（前一個交易日收盤後公布的數字），走勢圖的日期軸會洩漏年份，模擬盤不畫
+    setHtml(this.root.querySelector<HTMLElement>('#sim-map-risk')!, this.cached('risk', `${s.date}|${this.risk === undefined ? 'l' : 'y'}`, () => riskCardHtml(this.risk, { upTo: s.date, chart: false }).replace(/<small class="muted">\d{2}\/\d{2}<\/small>/g, '')));
     const sectors = this.root.querySelector<HTMLElement>('#sim-map-sectors')!;
     const viewEl = this.root.querySelector<HTMLElement>('#sim-map-view')!;
     if (this.mapDay?.date !== s.date) {

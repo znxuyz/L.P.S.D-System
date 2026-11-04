@@ -75,3 +75,6 @@
 .sim-screen-rules { margin: 0 0 10px; padding-left: 1.2em; color: var(--ink-2); font-size: 14px; line-height: 1.7; }
 .sim-screen-table th { white-space: nowrap; }
 .sim-screen-table th:nth-child(2), .sim-screen-table td:nth-child(2) { text-align: left; white-space: nowrap; }
+.sim-map-risk { margin: 8px 0 4px; }
+.sim-map-risk summary { cursor: pointer; color: var(--ink-2); font-size: 14px; }
+.sim-map-risk > div { margin-top: 6px; }
