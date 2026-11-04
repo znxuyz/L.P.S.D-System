@@ -59,6 +59,7 @@ jobs:
           EVENT_MAX: '1000'
           FIN_MAX: '100'
           TDCC_MAX: '1000000'
+          MARGIN_MAX: '400'
         run: |
           set +e
           START_S=$(date +%s)
@@ -69,6 +70,8 @@ jobs:
             if [ "$HOURLY" != true ] || [ ! -f .data/names.json ]; then node scripts/names.ts .data; fi
             node scripts/candles.ts .data
             node scripts/chips.ts .data
+            # 上市融資維持率：每天一次請求，回補 2020 年以後
+            PART=margin node scripts/market-risk.ts .data
             HISTORY_PARTS=pe,index,div,ratios node scripts/history.ts .data
             # ETF 淨值、規模、受益人數、配息與填息（用到上面的除權息與日 K）
             if [ "$HOURLY" != true ] || [ ! -f .data/etf-info.json ]; then node scripts/etf-info.ts .data; fi
@@ -79,14 +82,18 @@ jobs:
             HISTORY_PARTS=events node scripts/history.ts .data
           ) > mops.log 2>&1 &
           ( HISTORY_PARTS=tdcc node scripts/history.ts .data ) > tdcc.log 2>&1 &
+          # 期交所：外資台指期淨未平倉（每月一次請求）
+          ( PART=futures node scripts/market-risk.ts .data ) > taifex.log 2>&1 &
           wait
+          # 大盤風險指標（融資維持率、外資期貨）：兩組都抓完再整理
+          node scripts/market-risk.ts .data > risk.log 2>&1
           # 集保補完之後重算一次千張大戶變化（不發請求的部分很快）
           INST_MAX=0 HOURLY=true node scripts/chips.ts .data > chips2.log 2>&1
           # 型態歷史勝率：用全市場日 K 回測（不發請求，約 3～5 分鐘）；每日更新時跑，或還沒有結果時跑
           if [ "$HOURLY" != true ] || [ ! -f .data/pattern-stats.json ]; then
             DEADLINE=$(( $(date +%s) * 1000 + 12 * 60 * 1000 )) node --import ./scripts/lib/ts-resolve.mjs scripts/pattern-stats.ts .data > stats.log 2>&1
           fi
-          for f in twse mops tdcc chips2 stats; do [ -f $f.log ] || continue; echo "::group::$f"; tail -n 80 $f.log; echo "::endgroup::"; done
+          for f in twse mops tdcc taifex risk chips2 stats; do [ -f $f.log ] || continue; echo "::group::$f"; tail -n 80 $f.log; echo "::endgroup::"; done
           # 跑滿時間代表還有沒補完的資料
           if [ $(( $(date +%s) - START_S )) -ge $(( 45 * 60 )) ]; then echo "MORE=true" >> "$GITHUB_ENV"; fi
 

@@ -27,7 +27,8 @@ import { renderStockPage, type ExternalStock } from './ui/stockPage';
 import { SimPage } from './ui/simPage';
 import { loadFavs, toggleFav } from './data/favorites';
 import { adjustSplits } from './data/candles';
-import { marketRows, newsCardHtml, rankCardHtml, type MarketRankKey, type MarketRankScope } from './ui/marketExtras';
+import { marketRows, newsCardHtml, rankCardHtml, riskCardHtml, type MarketRankKey, type MarketRankScope } from './ui/marketExtras';
+import { loadMarketRisk, type MarketRisk } from './data/marketRisk';
 import { loadNames, loadNews, loadSimMonth, type NewsItem } from './data/simData';
 
 /** 內容沒變就不重寫（避免每秒重畫打斷捲動與點擊）。 */
@@ -119,6 +120,7 @@ class App {
   private mrankScope: MarketRankScope = 'pool';
   private allMarket: { date: string; rows: ReturnType<typeof marketRows> } | null | undefined;
   private newsItems: NewsItem[] | undefined;
+  private marketRisk: MarketRisk | null | undefined;
   /** 自選股（這台裝置）。 */
   private favs = loadFavs();
   private highlight:
@@ -492,6 +494,10 @@ class App {
       const today = taipeiDate(Date.now());
       const [y, mo] = today.split('-').map(Number);
       const prev = mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
+      void loadMarketRisk().then((r) => {
+        this.marketRisk = r;
+        this.renderPanels();
+      });
       void loadNews(today.slice(0, 4)).then((n) => {
         this.newsItems = n;
         this.renderPanels();
@@ -507,6 +513,8 @@ class App {
     if (!this.metrics) return;
     const rank = document.querySelector<HTMLElement>('#mrank');
     if (rank) setInner(rank, rankCardHtml({ metrics: this.metrics, key: this.mrankKey, scope: this.mrankScope, all: this.allMarket }));
+    const risk = document.querySelector<HTMLElement>('#mrisk');
+    if (risk) setInner(risk, riskCardHtml(this.marketRisk));
     const news = document.querySelector<HTMLElement>('#mnews');
     if (news) setInner(news, newsCardHtml(this.newsItems, taipeiDate(Date.now())));
   }
