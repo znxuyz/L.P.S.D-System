@@ -4,6 +4,13 @@
 
 🔗 **網站**：<https://znxuyz.github.io/L.P.S.D-System/>（可以「加到主畫面」當成 App 使用，離線也打得開）
 
+## 🎬 功能介紹影片
+
+[![觀看功能介紹影片（3 分 55 秒）](web/public/media/lplc-intro-poster.jpg)](https://znxuyz.github.io/L.P.S.D-System/media/lplc-intro.mp4)
+
+點上面的圖播放（[直接開影片](https://znxuyz.github.io/L.P.S.D-System/media/lplc-intro.mp4)，或在 repo 裡看 [`web/public/media/lplc-intro.mp4`](web/public/media/lplc-intro.mp4)）。
+3 分 55 秒，中文字幕：熱力圖 → 市場情報 → 大盤風險 → 五大選股 → ETF → 個股分析 → 股市入門 → 模擬盤（開局、新手指引、下單、分頁、結算、結束報告）→ 手機版。
+
 > 名稱來自「拉普拉斯惡魔」思想實驗：如果知道現在的一切，就能推算未來。
 > 這個系統把每天的行情、籌碼、財報與事件整理成看得懂的畫面；模擬盤則反過來，讓你回到過去、在看不到未來的情況下練習判斷。
 
@@ -49,6 +56,7 @@
 
 ### 熱力圖
 模擬當天全市場的熱力圖（股票池與首頁相同），跟著模擬時鐘每分鐘更新，列出資金最集中與撤出最多的產業；成交額依張數與均價估算。
+下方可以展開「大盤風險」：前一個交易日的上市融資維持率、融資餘額、券資比與外資台指期淨未平倉（不顯示日期）。
 
 ### 五大選股
 首頁五大選股的同一套條件，每個交易日收盤後用**當時看得到的資料**對全市場篩選一次（`scripts/sim-screen.ts`，部署時產生），模擬時看前一個交易日的結果。
@@ -137,7 +145,7 @@ K 線圖的三條線是 **EMA20／EMA60／EMA120**（指數移動平均，約一
 ```
 .github/workflows/   update-data（資料更新）、deploy-pages（網站部署）、deploy-firestore-rules（安全規則部署）
 scripts/             資料抓取與整理、型態勝率回測、模擬盤每日行情與新聞、開通碼工具（sim-code.mjs）
-web/                 網站原始碼（說明見 web/README.md）
+web/                 網站原始碼（說明見 web/README.md）；web/public/media/ 放功能介紹影片與封面
   src/data/          資料載入、即時行情、帳號與雲端同步
   src/domain/        資金流、選股、技術指標、型態辨識
   src/domain/sim/    模擬盤引擎，依職責分檔：config（規則參數）、types、state（新局／舊存檔）、valuation（市值）、
