@@ -6,6 +6,7 @@
  * - 程式與樣式（assets/ 檔名帶雜湊，內容不會變）：存好就直接用。
  * - 資料（data/*.json、圖示等）：先用存好的立刻顯示，同時在背景更新，下次打開就是新的。
  * - 開通碼清單、同步設定：先連網，失敗才用存好的（新增開通碼要馬上生效）。
+ * - 影片（media/*.mp4）：不經過這裡（瀏覽器分段下載，存進快取會失敗也太占空間）。
  * - 其他網站（證交所、富果、Firebase、字型）：不經過這裡。
  */
 const VERSION = 'v2';
@@ -106,6 +107,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.endsWith('/version.json')) return;
+  if (/\.(mp4|webm)$/.test(url.pathname)) return;
   if (request.mode === 'navigate') {
     event.respondWith(networkFirst(request, SHELL, 3000, true));
   } else if (url.pathname.includes('/assets/')) {
