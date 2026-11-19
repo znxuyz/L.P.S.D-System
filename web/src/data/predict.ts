@@ -2,6 +2,7 @@
  * L.P.L.C. 預測（scripts/predict.ts 部署時產生的 data/predict.json）。
  * 三個模型都是逐段往前滾訓練（只用當時看得到的資料），回測成績是樣本外的。
  */
+import { decodeAnalogs, type AnalogDay } from '../domain/intradayModel';
 import type { IntradayData } from '../ui/predictIntraday';
 import { keyedRefresh } from './refresh';
 
@@ -135,3 +136,14 @@ export function dayTradeBands(d: NonNullable<PredictData['dayTrade']>): { long: 
   // b > 0：開越高越偏多；b < 0：開越低越偏多
   return b > 0 ? { long: f(pl, '≥'), short: f(ps, '≤') } : { long: f(pl, '≤'), short: f(ps, '≥') };
 }
+
+const getAnalogs = keyedRefresh<AnalogDay[] | null>(
+  () =>
+    fetch('data/predict-analogs.json', { cache: 'no-cache' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => (Array.isArray(j) ? decodeAnalogs(j) : null))
+      .catch(() => null),
+  (j) => j != null,
+);
+/** 相似日資料庫（歷史上每天的 5 分 K 走勢）。 */
+export const loadAnalogs = (): Promise<AnalogDay[] | null> => getAnalogs('');

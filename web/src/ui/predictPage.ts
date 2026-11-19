@@ -4,10 +4,11 @@
  * - 每個模型都附上樣本外回測成績，並自動判斷「有沒有比隨便猜更好」；沒有的就直接說沒有。
  * - 點個股可以跳到個股分析頁。
  */
-import { dayTradeBands, dayTradeCall, loadPredict, loadPredictIntraday, type PredictData, type StockPick, type Verdict } from '../data/predict';
+import { dayTradeBands, dayTradeCall, loadAnalogs, loadPredict, loadPredictIntraday, type PredictData, type StockPick, type Verdict } from '../data/predict';
 import { sessionAt, taipeiDate } from '../data/liveProvider';
 import { sessionOpenMs } from '../data/twse';
 import type { IndexPoint } from '../data/types';
+import type { AnalogDay } from '../domain/intradayModel';
 import { intradayHtml, liveBars, type IntradayData, type IntradayState } from './predictIntraday';
 import { escapeHtml as esc, num } from './format';
 
@@ -188,7 +189,8 @@ function dayTradeHtml(d: NonNullable<PredictData['dayTrade']>): string {
 let data: PredictData | null | undefined;
 let intra: IntradayData | null | undefined;
 let loading = false;
-const intraState: IntradayState = { mode: '', k: -1, showActual: true };
+const intraState: IntradayState = { mode: '', k: -1, showActual: true, showAnalogs: true, showCandles: false, showBand: false };
+let analogLib: AnalogDay[] | null = null;
 /** 即時的加權指數（只有富果／證交所即時行情才有；收盤回放是模擬走勢，不能用）。 */
 export type LiveIndex = () => IndexPoint[] | null;
 let liveIndex: LiveIndex = () => null;
@@ -198,9 +200,10 @@ export function renderPredictPage(root: HTMLElement, onStock: (code: string) => 
   if (getLive) liveIndex = getLive;
   if (!loading) {
     loading = true;
-    void Promise.all([loadPredict(), loadPredictIntraday()]).then(([d, i]) => {
+    void Promise.all([loadPredict(), loadPredictIntraday(), loadAnalogs()]).then(([d, i, a]) => {
       data = d;
       intra = i;
+      analogLib = a;
       loading = false;
       draw(root, onStock);
     });
@@ -229,7 +232,7 @@ function drawIntra(root: HTMLElement): void {
   if (!el) return;
   const live = liveState();
   if (!intraState.mode) intraState.mode = live.ok ? 'live' : '';
-  el.outerHTML = intradayHtml(intra, intraState, live);
+  el.outerHTML = intradayHtml(intra, intraState, live, analogLib);
   bindIntra(root);
 }
 
@@ -238,6 +241,12 @@ function bindIntra(root: HTMLElement): void {
     intraState.mode = (e.target as HTMLSelectElement).value;
     drawIntra(root);
   });
+  root.querySelectorAll<HTMLInputElement>('#pd-intra [data-opt]').forEach((el) =>
+    el.addEventListener('change', () => {
+      (intraState as unknown as Record<string, boolean>)[el.dataset.opt!] = el.checked;
+      drawIntra(root);
+    }),
+  );
   root.querySelector<HTMLInputElement>('#pd-intra-actual')?.addEventListener('change', (e) => {
     intraState.showActual = (e.target as HTMLInputElement).checked;
     drawIntra(root);
@@ -249,9 +258,9 @@ function bindIntra(root: HTMLElement): void {
     const el = root.querySelector<HTMLElement>('#pd-intra');
     if (!el) return;
     const tmp = document.createElement('div');
-    tmp.innerHTML = intradayHtml(intra, intraState, liveState());
+    tmp.innerHTML = intradayHtml(intra, intraState, liveState(), analogLib);
     const next = tmp.firstElementChild as HTMLElement;
-    for (const sel of ['.pd-intra-stats', '.pd-intra-scroll', '.pd-intra-scroll + .pd-legend', '#pd-intra-clock', '.pd-day-err']) {
+    for (const sel of ['.pd-intra-stats', '.pd-intra-scroll', '.pd-intra-scroll + .pd-legend', '#pd-intra-clock', '.pd-day-err', '.pd-line-err']) {
       const a = el.querySelector(sel);
       const b = next.querySelector(sel);
       if (a && b) a.replaceWith(b);

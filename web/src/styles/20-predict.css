@@ -118,3 +118,33 @@
 .pd-now { stroke: var(--ink-2); stroke-dasharray: 3 3; stroke-width: 1; }
 .pd-band-key i { background: color-mix(in srgb, var(--accent) 30%, transparent) !important; height: 10px !important; }
 .pd-stats dd small { font-size: 12px; font-weight: 600; }
+
+/* 預測線 */
+.pd-ln { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.pd-ln.ln-model { stroke: var(--accent); stroke-width: 2.8; }
+.pd-ln.ln-avg { stroke: var(--accent-2); stroke-width: 2.2; stroke-dasharray: 7 4; }
+.pd-ln.ln-a1 { stroke: #ffb44a; stroke-width: 1.4; }
+.pd-ln.ln-a2 { stroke: #ff7ad9; stroke-width: 1.4; }
+.pd-ln.ln-a3 { stroke: #b6f36b; stroke-width: 1.4; }
+.pd-end { stroke: none; }
+.pd-end.ln-model { fill: var(--accent); }
+.pd-end.ln-avg { fill: var(--accent-2); }
+.pd-end.ln-a1 { fill: #ffb44a; }
+.pd-end.ln-a2 { fill: #ff7ad9; }
+.pd-end.ln-a3 { fill: #b6f36b; }
+.pd-legend [class^='lg-'] i, .pd-line-err [class^='lg-'] i, .pd-lines-table [class^='lg-'] i { display: inline-block; width: 16px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
+.lg-model i { background: var(--accent); height: 4px !important; }
+.lg-avg i { background: repeating-linear-gradient(90deg, var(--accent-2) 0 6px, transparent 6px 9px); }
+.lg-a1 i { background: #ffb44a; }
+.lg-a2 i { background: #ff7ad9; }
+.lg-a3 i { background: #b6f36b; }
+.pd-line-err { display: grid; gap: 4px; margin: 8px 0 0; font-size: 14px; }
+.pd-line-err span.is-best { color: var(--ink); }
+.pd-line-err b, .pd-table b.ok, .pd-table b.ng { color: var(--ink); }
+.pd-line-err b.ok, .pd-table b.ok { color: #6fe3b0; }
+.pd-line-err b.ng, .pd-table b.ng { color: #ff8a9d; }
+.pd-lines-table td small { color: var(--muted); }
+.pd-lines-table td:first-child { white-space: nowrap; }
+.pd-small { font-size: 12px; margin: 6px 0 0; }
+.pd-sum-row td { font-weight: 700; color: var(--ink); }
+.pd-intra-opts { margin-top: -4px; }
