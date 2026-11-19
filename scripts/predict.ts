@@ -39,7 +39,11 @@ const STEP = 5; // 截面間隔
 const REFIT = 20; // 重新訓練間隔
 
 // ---------------------------------------------------------------- 日曆與大盤
-const taiex = read<Array<[string, number, number, number, number]>>(join(dir, 'index', 'TAIEX.json'), []);
+// 加權指數下午就更新，個股日 K 晚上才更新：以「大型股都已經有資料」的最後一天為準，避免用到抓一半的資料
+const SAMPLE = ['2330', '2317', '2454', '2412', '2882'];
+const sampleLast = SAMPLE.map((c) => read<Row[]>(join(dir, 'candles', `${c}.json`), []).at(-1)?.[0]).filter((d): d is string => !!d).sort();
+const cutoff = sampleLast.length >= 3 ? sampleLast[sampleLast.length - 3] : '9999-12-31';
+const taiex = read<Array<[string, number, number, number, number]>>(join(dir, 'index', 'TAIEX.json'), []).filter((r) => r[0] <= cutoff);
 const cal = taiex.map((r) => r[0]);
 const T = cal.length;
 const calIdx = new Map(cal.map((d, i) => [d, i]));
