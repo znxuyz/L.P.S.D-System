@@ -17,7 +17,8 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { adjustForSplits, detectSplits } from '../web/src/domain/splits.ts';
-import { canArchive, readArchives, writeArchive } from './lib/archive.ts';
+import { canArchive, readPreOpen, writeArchive } from './lib/archive.ts';
+import { loadUs, usMove } from './lib/us.ts';
 import { loadFinQuarters } from './lib/finQuarters.ts';
 import { dot, logistic, maxDrawdown, mean, rankCenter, ridge, sigmoid, spearman, standardizer, std } from './lib/ml.ts';
 
@@ -699,7 +700,13 @@ if (dt) {
     { id: 'inst', name: '昨天法人買賣超（全市場）' },
     { id: 'fut', name: '昨天外資期貨增減' },
     { id: 'mRatio', name: '融資維持率變化' },
+    { id: 'usSox', name: '前一晚費城半導體' },
+    { id: 'usTsm', name: '前一晚台積電 ADR' },
+    { id: 'usSpx', name: '前一晚 S&P 500' },
   ] as const;
+  // 前一晚美股：上一個台股交易日（含）到第 i 天（不含）之間收盤的美股；i＝最後＋1 時是下一個交易日（晚上存檔時還沒收盤 → NaN）
+  const usD = loadUs(dir);
+  const usAt = (i: number) => (['SOX', 'TSM', 'GSPC'] as const).map((k) => usMove(usD[k], cal[i - 1], cal[i] ?? '9999-12-31'));
   // 第 i 天開盤時看得到的資料（只有開盤價是當天的）
   const feat = (i: number): number[] | null => {
     const o = dt.open;
@@ -716,6 +723,7 @@ if (dt) {
       instTotal[i - 1] / 100,
       Number.isFinite(futNet[i - 1]) && Number.isFinite(futNet[i - 2]) ? (futNet[i - 1] - futNet[i - 2]) / 1e4 : NaN,
       Number.isFinite(mRatio[i - 1]) && Number.isFinite(mRatio[i - 2]) ? mRatio[i - 1] - mRatio[i - 2] : NaN,
+      ...usAt(i),
     ];
   };
   const y = (i: number) => (dt.has[i] && dt.open[i] > 0 ? dt.close[i] / dt.open[i] - 1 : NaN);
@@ -762,7 +770,7 @@ if (dt) {
     const i = T; // 下一天
     const f = [NaN, o[i - 1] > 0 ? c[i - 1] / o[i - 1] - 1 : NaN, ret(c, i - 1, 1), ret(c, i - 1, 5), ret(c, i - 1, 20), (dt.high[i - 1] - dt.low[i - 1]) / c[i - 1], retStd(c, i - 1, 20), instTotal[i - 1] / 100,
       Number.isFinite(futNet[i - 1]) && Number.isFinite(futNet[i - 2]) ? (futNet[i - 1] - futNet[i - 2]) / 1e4 : NaN,
-      Number.isFinite(mRatio[i - 1]) && Number.isFinite(mRatio[i - 2]) ? mRatio[i - 1] - mRatio[i - 2] : NaN];
+      Number.isFinite(mRatio[i - 1]) && Number.isFinite(mRatio[i - 2]) ? mRatio[i - 1] - mRatio[i - 2] : NaN, ...usAt(i)];
     return f;
   })();
   // 用最新資料重新訓練一次（給下一天用）
@@ -820,7 +828,7 @@ if (process.env.ARCHIVE_DIR) {
     stocks: { all: stockOut.all, top: stockOut.top.map((x) => x.code), bottom: stockOut.bottom.map((x) => x.code) },
     dayTrade: dtr ? { code: dtr.code, lastClose: dtr.lastClose, cost: dtr.cost, rule: dtr.rule } : null,
   };
-  if (canArchive(asOf)) console.log(writeArchive(process.env.ARCHIVE_DIR, 'daily', asOf, data) ? `事前存檔：${asOf} 收盤後的預測` : `事前存檔：${asOf} 已經存過`);
+  if (canArchive(asOf)) console.log(writeArchive(process.env.ARCHIVE_DIR, 'daily' + (process.env.ARCHIVE_KIND_SUFFIX ?? ''), asOf, data) ? `事前存檔：${asOf} 收盤後的預測` : `事前存檔：${asOf} 已經存過`);
   else console.log(`事前存檔：現在不是 ${asOf} 收盤後到下一個交易日開盤前，不存`);
 }
 type DailyArch = { market: { probUp: number; expReturn: number }; stocks: { all: Record<string, number>; top: string[]; bottom: string[] }; dayTrade: DayTradeRule | null };
@@ -829,7 +837,7 @@ const fw = {
   market: [] as Array<{ asOf: string; probUp: number; actual: number }>,
   dayTrade: [] as Array<{ asOf: string; date: string; gap: number; pred: number; action: number; actual: number; pnl: number }>,
 };
-for (const a of readArchives<DailyArch>(process.env.FORECASTS_DIR, 'daily')) {
+for (const a of readPreOpen<DailyArch>(process.env.FORECASTS_DIR, 'daily')) {
   const i = calIdx.get(a.asOf);
   if (i == null) continue;
   // 個股與大盤：20 個交易日後才知道結果
