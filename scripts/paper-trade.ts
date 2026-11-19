@@ -12,6 +12,9 @@
  * - 成本：手續費 0.1425% × 6 折（買賣各一次）、證交稅（個股 0.3%、ETF 0.1%）。
  *
  * 輸出 paper.json。
+ *
+ * 歷史回測：PAPER_FROM／PAPER_TO 限制期間、PAPER_OUT 換輸出檔名，FORECASTS_DIR 指向 predict.ts／predict-intraday.ts
+ * 用 BACKFILL_DIR 寫出的「歷史模擬存檔」（逐段往前滾，每天只用那天以前的資料）。
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -85,10 +88,12 @@ let dtCash = CAPITAL * W.dayTrade;
 let rgCash = CAPITAL * W.range;
 let held: { buyIdx: number; pos: Array<{ code: string; shares: number; cost: number }> } | null = null;
 
-const startIdx = firstArch ? cal.findIndex((d) => d > firstArch) : -1;
+const FROM = process.env.PAPER_FROM ?? '0000';
+const TO = process.env.PAPER_TO ?? '9999';
+const startIdx = firstArch ? cal.findIndex((d) => d > firstArch && d >= FROM) : -1;
 if (startIdx > 0) {
   const ix0 = taiex[startIdx - 1][4];
-  for (let i = startIdx; i < cal.length; i++) {
+  for (let i = startIdx; i < cal.length && cal[i] <= TO; i++) {
     const D = cal[i];
     const prev = cal[i - 1];
     const dArch = daily.get(prev);
@@ -156,6 +161,27 @@ if (startIdx > 0) {
 }
 
 const last = equityRows.at(-1);
+const lastDay = last?.[0] ?? cal.at(-1)!;
+let peak = -Infinity;
+let maxDD = 0;
+for (const r of equityRows) (peak = Math.max(peak, r[1])), (maxDD = Math.min(maxDD, r[1] / peak - 1));
+const bookStat = (b: Trade['book']) => {
+  const t = trades.filter((x) => x.book === b && x.pnl != null);
+  return { trades: t.length, win: t.length ? r5(t.filter((x) => x.pnl! > 0).length / t.length) : null };
+};
+// 每個月的報酬（帳戶與大盤）
+const monthly: Array<[string, number | null, number | null]> = [];
+{
+  let prevEq = CAPITAL;
+  let prevBm = CAPITAL;
+  equityRows.forEach((r, k) => {
+    const nx = equityRows[k + 1];
+    if (nx && nx[0].slice(0, 7) === r[0].slice(0, 7)) return;
+    monthly.push([r[0].slice(0, 7), r5(r[1] / prevEq - 1), r5(r[5] / prevBm - 1)]);
+    prevEq = r[1];
+    prevBm = r[5];
+  });
+}
 const out = {
   generatedAt: new Date().toISOString(),
   capital: CAPITAL,
@@ -171,9 +197,12 @@ const out = {
     : { stocks: 0, dayTrade: 0, range: 0 },
   // 同期間把 100 萬買加權指數放著
   benchmark: last ? r5(last[5] / CAPITAL - 1) : 0,
+  maxDD: r5(maxDD),
+  stats: { stocks: bookStat('stocks'), dayTrade: bookStat('dayTrade'), range: bookStat('range') },
+  monthly,
   curve: equityRows,
   positions: (held?.pos ?? []).map((p) => {
-    const k = [...kOf(p.code).entries()].at(-1)?.[1];
+    const k = [...kOf(p.code).entries()].filter(([d]) => d <= lastDay).at(-1)?.[1];
     return { code: p.code, name: names[p.code] ?? '', shares: p.shares, cost: r2(p.cost), price: k ? r2(k[3]) : null, ret: k ? r5(k[3] / p.cost - 1) : null };
   }),
   heldSince: held ? cal[held.buyIdx] : null,
@@ -181,5 +210,6 @@ const out = {
   trades: trades.slice(-60).reverse(),
   tradeCount: trades.length,
 };
-writeFileSync(join(dir, 'paper.json'), JSON.stringify(out));
-console.log(`模擬帳戶：${out.days} 天（${out.start ?? '—'} ～ ${out.asOf ?? '—'}），總報酬 ${out.ret}，大盤 ${out.benchmark}，交易 ${trades.length} 筆`);
+writeFileSync(join(dir, process.env.PAPER_OUT ?? 'paper.json'), JSON.stringify(out));
+console.log(`模擬帳戶：${out.days} 天（${out.start ?? '—'} ～ ${out.asOf ?? '—'}），總報酬 ${out.ret}，大盤 ${out.benchmark}，最大回落 ${out.maxDD}，交易 ${trades.length} 筆`);
+console.log('  各部位：', JSON.stringify(out.books), JSON.stringify(out.stats));
