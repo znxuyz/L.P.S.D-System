@@ -5,7 +5,8 @@
  * - version.json（自動更新用）：不經過這裡，一定連網。
  * - 程式與樣式（assets/ 檔名帶雜湊，內容不會變）：存好就直接用。
  * - 資料（data/*.json、圖示等）：先用存好的立刻顯示，同時在背景更新，下次打開就是新的。
- * - 開通碼清單、同步設定：先連網，失敗才用存好的（新增開通碼要馬上生效）。
+ * - 開通碼清單、同步設定，以及每天更新的資料（大盤風險、收盤、新聞、全市場行情、股票名稱）：
+ *   先連網，失敗才用存好的（新增開通碼要馬上生效；資料不能停在好幾天前）。
  * - 影片（media/*.mp4）：不經過這裡（瀏覽器分段下載，存進快取會失敗也太占空間）。
  * - 其他網站（證交所、富果、Firebase、字型）：不經過這裡。
  */
@@ -15,7 +16,7 @@ const ASSETS = `lplc-assets-${VERSION}`;
 const DATA = `lplc-data-${VERSION}`;
 const KEEP = [SHELL, ASSETS, DATA];
 const LIMITS = { [ASSETS]: 60, [DATA]: 400 };
-const NETWORK_FIRST = /\/(sim-codes|sync-config)\.json$/;
+const NETWORK_FIRST = /\/(sim-codes|sync-config|market-risk|close|names)\.json$|\/data\/(news|simday)\//;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

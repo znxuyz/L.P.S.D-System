@@ -5,6 +5,8 @@
  * - data/names.json：股票名稱（含已下市）
  */
 
+import { keyedRefresh } from './refresh';
+
 export type DayRow = [number, number, number, number, number, number];
 
 export interface SimMonth {
@@ -21,33 +23,24 @@ const json = <T>(url: string): Promise<T | null> =>
     .then((r) => (r.ok ? (r.json() as Promise<T>) : null))
     .catch(() => null);
 
-let names: Promise<Record<string, string>> | null = null;
-export function loadNames(): Promise<Record<string, string>> {
-  names ??= json<Record<string, string>>('data/names.json').then((n) => n ?? {});
-  return names;
-}
+// 這三種每天都會更新（新的交易日、新聞），記住的結果超過 30 分鐘會重抓
+const getNames = keyedRefresh(
+  () => json<Record<string, string>>('data/names.json').then((n) => n ?? {}),
+  (n) => Object.keys(n).length > 0,
+);
+export const loadNames = (): Promise<Record<string, string>> => getNames('');
 
-const months = new Map<string, Promise<SimMonth | null>>();
-export function loadSimMonth(month: string): Promise<SimMonth | null> {
-  let p = months.get(month);
-  if (!p) {
-    p = json<SimMonth>(`data/simday/${month}.json`).then((j) => (j && Array.isArray(j.codes) ? j : null));
-    months.set(month, p);
-    // 最多留 3 個月在記憶體
-    if (months.size > 3) months.delete(months.keys().next().value!);
-  }
-  return p;
-}
+/** 最多留 3 個月在記憶體。 */
+export const loadSimMonth = keyedRefresh(
+  (month) => json<SimMonth>(`data/simday/${month}.json`).then((j) => (j && Array.isArray(j.codes) ? j : null)),
+  (j) => j != null,
+  { max: 3 },
+);
 
-const news = new Map<string, Promise<NewsItem[]>>();
-export function loadNews(year: string): Promise<NewsItem[]> {
-  let p = news.get(year);
-  if (!p) {
-    p = json<NewsItem[]>(`data/news/${year}.json`).then((j) => (Array.isArray(j) ? j : []));
-    news.set(year, p);
-  }
-  return p;
-}
+export const loadNews = keyedRefresh(
+  (year) => json<NewsItem[]>(`data/news/${year}.json`).then((j) => (Array.isArray(j) ? j : [])),
+  (j) => j.length > 0,
+);
 
 /** 新聞時間（"09:00"）換成盤中第幾分鐘。 */
 export function newsMinute(time: string): number {
