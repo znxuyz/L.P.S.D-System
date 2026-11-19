@@ -36,6 +36,18 @@ export interface IntradayData {
   record?: Array<{ date: string; origin: number; ref: number; blend?: number; model: number; avg: number; actual: number }>;
   /** 各預測時間點自動挑的設定：相似日平均用幾天（n）、綜合預測給模型的權重（w）。 */
   choice?: Array<{ origin: number; n: number; w: number }>;
+  /** 回放用的模型：回放那幾天開始之前的模型與設定（回放時不會看到答案）。 */
+  replay?: { m: IntradayModel; dm: DayModel; choice: Array<{ origin: number; n: number; w: number }> } | null;
+  /** 分期間的成績：hold＝調整模型時從沒看過的期間；dev＝開發期間（看過，可能偏樂觀）。 */
+  periods?: Record<'hold' | 'dev', { from: string; to: string; days: number; byOrigin: IntradayData['backtest']['byOrigin']; lines: NonNullable<IntradayData['lines']> } | null>;
+  devStart?: string;
+  /** 事前存檔的實盤成績。 */
+  forward?: {
+    days: number;
+    hit: Record<'blend' | 'model' | 'avg', number>;
+    rmse: Record<'blend' | 'model' | 'avg' | 'flat', number>;
+    rows: Array<{ asOf: string; date: string; P0: number; actual: number; blend: number; model: number; avg: number; rmse: Record<string, number>; hiErr: number; loErr: number }>;
+  };
   next: { after: string; P0: number; L0: number | null; ctx: Record<keyof DailyCtx, number | null> };
   recent: Array<{ date: string; P0: number; L0: number | null; ix: Bar[]; ctx: Record<keyof DailyCtx, number | null> }>;
 }
@@ -85,14 +97,18 @@ interface View {
   open: number | null;
   /** 預測時間：-1 開盤前、0 開盤、k 第 k 根收盤後。 */
   k: number;
+  /** 這一天用的模型與設定（回放用「回放之前」的模型）。 */
+  m: IntradayModel;
+  dm: DayModel;
+  choice: IntradayData['choice'];
 }
 
 type Analogs = ReturnType<typeof analogLines> | null;
 
 /** 各條預測線：c 的索引（0＝開盤、b＝第 b 根收盤）→ 價格，含起點。 */
 /** 預測時間 k 對應的自動設定（用最接近的回測時間點）。 */
-function choiceFor(d: IntradayData, k: number): { n: number; w: number } {
-  const cs = d.choice ?? [];
+function choiceFor(choice: IntradayData['choice'], k: number): { n: number; w: number } {
+  const cs = choice ?? [];
   if (!cs.length) return { n: 5, w: 1 };
   return cs.reduce((best, c) => (Math.abs(c.origin - k) < Math.abs(best.origin - k) ? c : best), cs[0]);
 }
@@ -121,7 +137,7 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
   const L = (x: number) => (v.L0 ? toLeveraged(x, v.P0, v.L0, d.beta) : x);
   const known = v.ix.slice(0, f.from);
   const future = st.showActual && !v.live ? v.ix.slice(f.from) : [];
-  const series = lineSeries(v, f, an, choiceFor(d, v.k));
+  const series = lineSeries(v, f, an, choiceFor(v.choice, v.k));
   const shown = LINE_IDS.filter((id) => series[id] && (id === 'blend' || id === 'model' || st.showAnalogs));
   const vals = [
     ...known.flatMap((b) => [b[1], b[2]]),
@@ -181,16 +197,16 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
   </svg></div>
   <p class="pd-legend pd-intra-legend">
     ${series.blend ? '<span class="lg-blend"><i></i>綜合預測（主要預測線）</span>' : ''}<span class="lg-model"><i></i>模型主線</span>
-    ${st.showAnalogs && series.avg ? `<span class="lg-avg"><i></i>相似日平均（前 ${choiceFor(d, v.k).n} 名）</span>${dates.map((dt, i) => `<span class="lg-a${i + 1}"><i></i>相似日 ${i + 1}：${esc(dt)}</span>`).join('')}` : ''}
+    ${st.showAnalogs && series.avg ? `<span class="lg-avg"><i></i>相似日平均（前 ${choiceFor(v.choice, v.k).n} 名）</span>${dates.map((dt, i) => `<span class="lg-a${i + 1}"><i></i>相似日 ${i + 1}：${esc(dt)}</span>`).join('')}` : ''}
     <span class="pd-key-real"><i></i>已走完</span>${future.length ? '<span class="pd-key-actual"><i></i>實際走勢（當時還不知道）</span>' : ''}
     <span class="pd-key-hl"><i></i>預估今日最高／最低</span>${band ? '<span class="pd-band-key"><i></i>收盤約 80% 區間</span>' : ''}
   </p>`;
 }
 
 /** 回放：這一天每條線的誤差與收盤方向對不對。 */
-function lineErrors(d: IntradayData, v: View, f: DayForecast, an: Analogs, lev: number): Array<{ id: LineId; rmse: number; dirOk: boolean }> | null {
+function lineErrors(v: View, f: DayForecast, an: Analogs, lev: number): Array<{ id: LineId; rmse: number; dirOk: boolean }> | null {
   if (v.live || v.ix.length < BARS) return null;
-  const series = lineSeries(v, f, an, choiceFor(d, v.k));
+  const series = lineSeries(v, f, an, choiceFor(v.choice, v.k));
   const ref = v.k < 0 ? v.P0 : f.from === 0 ? f.open : v.ix[f.from - 1][3];
   const act = (i: number) => (i === 0 ? v.ix[0][0] : v.ix[i - 1][3]);
   const actClose = v.ix[BARS - 1][3];
@@ -243,6 +259,7 @@ function logicHtml(d: IntradayData): string {
       <li><b>相似日走勢</b>：把歷史上每一天都跟今天比——開盤前的資料、跳空、到目前為止的走勢形狀（最近 6 根加重）都先除以各自的波動——找出最像的 20 天。前 3 名各畫一條（依波動比例縮放、接在現在的價格後面），前 n 名平均成「相似日平均」。</li>
       <li><b>綜合預測</b>：模型主線與相似日平均依權重混合。相似日要取幾天（5／10／20）、模型佔多少（0～100%），每個預測時間點分開挑：用「到前一天為止」所有回測日的實際誤差，選誤差最小的組合。目前：${esc(ch)}。</li>
       <li><b>振幅與高低點</b>：每根 K 棒的振幅＝這個時段平常的振幅 × 今天／昨天的波動延續；今天剩下時間的最高最低另外預測。80% 區間依時段與當天波動放大縮小，回測校準過。</li>
+      <li><b>不看答案</b>：回測一律逐段往前滾；網頁的回放用「回放那幾天之前」訓練的模型；成績分成「從沒看過的期間」與「開發期間」（模型是看著開發期間調的，可能偏樂觀）；另外每天收盤後把隔天的預測事前存檔，之後才打「實盤成績」。</li>
       <li><b>持續修正</b>：每天資料更新、網站部署時，用最新的全部資料重新訓練、重新挑設定、重新計算所有回測成績；回測一律「逐段往前滾」——每一天只用那天以前的資料預測，跟實際使用時一樣。</li>
     </ol>
   </details>`;
@@ -250,6 +267,18 @@ function logicHtml(d: IntradayData): string {
 
 /** 各條預測線的回測成績表。 */
 function linesTable(d: IntradayData, lev: number): string {
+  const hold = d.periods?.hold;
+  const dev = d.periods?.dev;
+  const blocks = [
+    hold ? { title: `從沒看過的期間（${hold.from} ～ ${hold.to}，${num(hold.days)} 天）`, note: '調整模型時完全沒看過這段資料，這是公正的成績', lines: hold.lines } : null,
+    dev ? { title: `開發期間（${dev.from} ～ ${dev.to}，${num(dev.days)} 天）`, note: '調整模型時看過這段的成績，可能偏樂觀', lines: dev.lines } : null,
+  ].filter((x): x is NonNullable<typeof x> => !!x);
+  if (!blocks.length) return linesTableOf(d.lines ?? [], lev, `每條線準不準（回測 ${esc(d.backtest.from)} ～ ${esc(d.backtest.to)}，樣本外）`, '');
+  return blocks.map((b) => linesTableOf(b.lines, lev, `每條線準不準：${esc(b.title)}`, b.note)).join('') + (hold ? '' : '<p class="muted pd-small">「從沒看過的期間」等 5 分 K 回補到 2020 年後就會出現。</p>');
+}
+
+function linesTableOf(lines: NonNullable<IntradayData['lines']>, lev: number, title: string, note: string): string {
+  const d = { lines };
   if (!d.lines?.length) return '';
   const head = d.lines.map((o) => `<th class="num">${esc(o.label)}</th>`).join('');
   const rows = LINE_IDS.map((id) => {
@@ -260,9 +289,29 @@ function linesTable(d: IntradayData, lev: number): string {
     });
     return `<tr><td><span class="lg-${id}"><i></i>${LINE_NAME[id]}</span></td>${cells.join('')}</tr>`;
   }).join('');
-  return `<h3 class="pd-sub">每條線準不準（回測 ${esc(d.backtest.from)} ～ ${esc(d.backtest.to)}，${num(d.backtest.days)} 天，樣本外）</h3>
+  return `<h3 class="pd-sub">${title}</h3>${note ? `<p class="muted pd-small">${esc(note)}</p>` : ''}
     <div class="pd-table-wrap"><table class="pd-table pd-lines-table"><thead><tr><th>預測線＼預測時間</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
     <p class="muted pd-small">大字：每根 5 分 K 收盤價的平均誤差（換算成 00631L，越小越準，紅色是該時間點最準的線）。方向：預測的收盤比現在高或低，跟實際一致的比例（50% 等於擲硬幣）。最準：五條線裡這條最接近實際走勢的天數比例。</p>`;
+}
+
+/** 事前存檔的實盤成績：每天收盤後就存好的預測 vs 之後的實際走勢。 */
+function forwardHtml(d: IntradayData, lev: number): string {
+  const f = d.forward;
+  const head = '<h3 class="pd-sub">實盤成績（事前存檔，完全不可能看答案）</h3>';
+  const intro = '<p class="muted pd-small">每天收盤後，下一個交易日開盤前的預測就存進 forecasts 分支（只會新增、不會修改，git 時間證明是事前做的），之後只拿存檔的數字跟實際比。</p>';
+  if (!f || !f.days) return `${head}${intro}<p class="muted">從今天開始存檔，下一個交易日收盤後就會出現第一筆。</p>`;
+  const p = (x: number, ref: number) => pctTxt(Math.log(x / ref) * lev);
+  const mark = (x: number, r: (typeof f.rows)[number]) => (Math.sign(x - r.P0) === Math.sign(r.actual - r.P0) ? '<b class="ok">✓</b>' : '<b class="ng">✗</b>');
+  return `${head}${intro}
+    <dl class="pd-stats">
+      <div><dt>存檔天數</dt><dd class="num">${num(f.days)}</dd></div>
+      <div><dt>收盤方向猜對（綜合／模型／相似日）</dt><dd class="num">${f.hit.blend}／${f.hit.model}／${f.hit.avg} <small>共 ${f.days} 天</small></dd></div>
+      <div><dt>每根誤差（綜合／不會動）</dt><dd class="num">${num(f.rmse.blend * lev * 100, 2)}%／${num(f.rmse.flat * lev * 100, 2)}%</dd></div>
+    </dl>
+    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>交易日</th><th class="num">綜合預測</th><th class="num">模型主線</th><th class="num">相似日平均</th><th class="num">實際</th><th class="num">每根誤差<br><small>綜合／不會動</small></th></tr></thead>
+    <tbody>${f.rows
+      .map((r) => `<tr><td class="num">${esc(r.date)}</td><td class="num ${cls(r.blend - r.P0)}">${p(r.blend, r.P0)} ${mark(r.blend, r)}</td><td class="num ${cls(r.model - r.P0)}">${p(r.model, r.P0)} ${mark(r.model, r)}</td><td class="num ${cls(r.avg - r.P0)}">${p(r.avg, r.P0)} ${mark(r.avg, r)}</td><td class="num ${cls(r.actual - r.P0)}">${p(r.actual, r.P0)}</td><td class="num">${num(r.rmse.blend * lev * 100, 2)}%／${num(r.rmse.flat * lev * 100, 2)}%</td></tr>`)
+      .join('')}</tbody></table></div>`;
 }
 
 /** 最近的預測紀錄（開盤前預測的收盤 vs 實際）。 */
@@ -272,7 +321,7 @@ function recordTable(d: IntradayData, lev: number): string {
   const p = (x: number, ref: number) => Math.log(x / ref) * lev;
   const mark = (x: number, r: (typeof rec)[number]) => (Math.sign(x - r.ref) === Math.sign(r.actual - r.ref) ? '<b class="ok">✓</b>' : '<b class="ng">✗</b>');
   const ok = (key: 'blend' | 'model' | 'avg') => rec.filter((r) => Math.sign((r[key] ?? r.model) - r.ref) === Math.sign(r.actual - r.ref)).length;
-  return `<details class="pd-more" open><summary>最近 ${rec.length} 天的預測紀錄（開盤前預測的收盤漲跌 vs 實際）</summary>
+  return `<details class="pd-more" open><summary>回測：最近 ${rec.length} 天的開盤前預測（逐段往前滾，只用那天以前的資料）</summary>
     <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>日期</th><th class="num">綜合預測</th><th class="num">模型主線</th><th class="num">相似日平均</th><th class="num">實際</th></tr></thead>
     <tbody>${rec
       .map((r) => `<tr><td class="num">${esc(r.date)}</td><td class="num ${cls((r.blend ?? r.model) - r.ref)}">${pctTxt(p(r.blend ?? r.model, r.ref))} ${mark(r.blend ?? r.model, r)}</td><td class="num ${cls(r.model - r.ref)}">${pctTxt(p(r.model, r.ref))} ${mark(r.model, r)}</td><td class="num ${cls(r.avg - r.ref)}">${pctTxt(p(r.avg, r.ref))} ${mark(r.avg, r)}</td><td class="num ${cls(r.actual - r.ref)}">${pctTxt(p(r.actual, r.ref))}</td></tr>`)
@@ -303,13 +352,14 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
   let v: View;
   if (st.mode === 'live' && live.ok) {
     const k = Math.min(BARS - 1, live.bars.length);
-    v = { live: true, P0: d.next.P0, L0: d.next.L0, ctx: ctxOf(d.next.ctx), ix: live.bars, open: live.open, k: live.open == null ? -1 : k };
+    v = { live: true, P0: d.next.P0, L0: d.next.L0, ctx: ctxOf(d.next.ctx), ix: live.bars, open: live.open, k: live.open == null ? -1 : k, m: d.model, dm: d.day, choice: d.choice };
   } else {
     const day = d.recent.find((r) => r.date === st.mode) ?? d.recent[d.recent.length - 1];
     st.mode = day.date;
-    v = { live: false, P0: day.P0, L0: day.L0, ctx: ctxOf(day.ctx), ix: day.ix, open: day.ix[0][0], k: Math.max(-1, Math.min(BARS - 1, st.k)) };
+    const rp = d.replay;
+    v = { live: false, P0: day.P0, L0: day.L0, ctx: ctxOf(day.ctx), ix: day.ix, open: day.ix[0][0], k: Math.max(-1, Math.min(BARS - 1, st.k)), m: rp?.m ?? d.model, dm: rp?.dm ?? d.day, choice: rp?.choice ?? d.choice };
   }
-  const f = forecastDay(d.model, d.day, v.ix, v.k, v.k < 0 ? null : v.open, v.P0, v.ctx);
+  const f = forecastDay(v.m, v.dm, v.ix, v.k, v.k < 0 ? null : v.open, v.P0, v.ctx);
   // 相似日：只從這一天以前的日子找（回放時不會用到之後的資料）
   const viewDate = v.live ? '9999' : st.mode;
   const an: Analogs = lib && lib.length
@@ -326,9 +376,9 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
   const last = f.bars[f.bars.length - 1];
   const now = v.k < 0 ? null : f.from === 0 ? f.open : v.ix[f.from - 1][3];
   const err = dayErrors(d, v, f);
-  const lerr = lineErrors(d, v, f, an, lev);
+  const lerr = lineErrors(v, f, an, lev);
   // 上方的「預測收盤」用綜合預測（主要預測線）；沒有相似日資料時用模型主線
-  const mainSeries = lineSeries(v, f, an, choiceFor(d, v.k)).blend;
+  const mainSeries = lineSeries(v, f, an, choiceFor(v.choice, v.k)).blend;
   const mainClose = mainSeries?.length ? mainSeries[mainSeries.length - 1][1] : last?.c;
   const actualClose = !v.live && v.ix.length === BARS ? v.ix[BARS - 1][3] : null;
   const opts = [
@@ -343,7 +393,8 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
       00631L 的價格用「加權指數 × ${num(d.beta, 2)} 倍」換算（近一年日報酬估計）。</p>
     <div class="pd-intra-ctrl">
       <label>看哪一天<select id="pd-intra-day">${opts}</select></label>
-      ${v.live ? `<span class="muted">每 30 秒更新</span>` : `<label class="pd-intra-k">預測時間 <b class="num" id="pd-intra-clock">${kLabel(v.k)}</b><input type="range" id="pd-intra-k" min="-1" max="${BARS - 1}" step="1" value="${v.k}" /></label>
+      ${v.live ? `<span class="muted">每 30 秒更新</span>` : `<span class="muted pd-small">回放用的是 ${esc(d.recent[0]?.date ?? '')} 之前訓練的模型，沒看過這幾天的答案</span>`}
+      ${v.live ? '' : `<label class="pd-intra-k">預測時間 <b class="num" id="pd-intra-clock">${kLabel(v.k)}</b><input type="range" id="pd-intra-k" min="-1" max="${BARS - 1}" step="1" value="${v.k}" /></label>
       <label class="pd-check"><input type="checkbox" id="pd-intra-actual" ${st.showActual ? 'checked' : ''} />疊上實際走勢</label>`}
     </div>
     <div class="pd-intra-ctrl pd-intra-opts">
@@ -375,6 +426,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
         : ''
     }
     ${logicHtml(d)}
+    ${forwardHtml(d, lev)}
     ${linesTable(d, lev)}
     ${recordTable(d, lev)}
     <h3 class="pd-sub">振幅、高低點與 80% 區間的回測（${b.from} ～ ${b.to}，${num(b.days)} 天，樣本外；誤差換算成 00631L）</h3>

@@ -92,11 +92,22 @@ jobs:
           node scripts/market-risk.ts .data > risk.log 2>&1
           # 集保補完之後重算一次千張大戶變化（不發請求的部分很快）
           INST_MAX=0 HOURLY=true node scripts/chips.ts .data > chips2.log 2>&1
+          # 事前存檔：收盤後把「下一個交易日」的預測存進 forecasts 分支（只新增、不覆蓋、不強制推送；
+          # 程式只在收盤後到下一個交易日 08:45 前存，git 的提交時間可以證明是事前做的）
+          if git ls-remote --exit-code --heads "$DATA_REMOTE" forecasts >/dev/null; then
+            git clone -q --branch forecasts "$DATA_REMOTE" .forecasts
+          else
+            git init -q -b forecasts .forecasts && git -C .forecasts remote add origin "$DATA_REMOTE"
+          fi
+          ( ARCHIVE_DIR=.forecasts ARCHIVE_ONLY=1 node scripts/predict.ts .data; ARCHIVE_DIR=.forecasts ARCHIVE_ONLY=1 node scripts/predict-intraday.ts .data ) > archive.log 2>&1
+          ( cd .forecasts && git add -A && if ! git diff --cached --quiet; then
+              git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Forecasts $(date -u +'%F %H:%M')" && git push -q origin HEAD:forecasts && echo "已推送存檔"
+            fi ) >> archive.log 2>&1
           # 型態歷史勝率：用全市場日 K 回測（不發請求，約 3～5 分鐘）；每日更新時跑，或還沒有結果時跑
           if [ "$HOURLY" != true ] || [ ! -f .data/pattern-stats.json ]; then
             DEADLINE=$(( $(date +%s) * 1000 + 12 * 60 * 1000 )) node --import ./scripts/lib/ts-resolve.mjs scripts/pattern-stats.ts .data > stats.log 2>&1
           fi
-          for f in twse mops tdcc taifex risk chips2 stats; do [ -f $f.log ] || continue; echo "::group::$f"; tail -n 80 $f.log; echo "::endgroup::"; done
+          for f in twse mops tdcc taifex risk chips2 archive stats; do [ -f $f.log ] || continue; echo "::group::$f"; tail -n 80 $f.log; echo "::endgroup::"; done
           # 跑滿時間代表還有沒補完的資料
           if [ $(( $(date +%s) - START_S )) -ge $(( 45 * 60 )) ]; then echo "MORE=true" >> "$GITHUB_ENV"; fi
 

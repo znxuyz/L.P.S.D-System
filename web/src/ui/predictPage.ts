@@ -77,7 +77,37 @@ function pickTable(rows: StockPick[], kind: 'top' | 'bottom'): string {
       .join('')}</tbody></table></div>`;
 }
 
-function marketHtml(m: PredictData['market'], h: number): string {
+/** 實盤成績（事前存檔）的小區塊。 */
+const FW_INTRO = '每天收盤後就把預測存進 forecasts 分支（只會新增、不會修改，git 時間證明是事前做的），結果出來後只拿存檔的數字打分數，完全不可能看答案。';
+function fwBlock(title: string, n: number, body: string, wait: string): string {
+  return `<div class="pd-fw"><h3 class="pd-sub">實盤成績（事前存檔）</h3><p class="muted pd-small">${FW_INTRO}</p>${n ? `<p class="pd-fw-sum">${title}</p>${body}` : `<p class="muted">${wait}</p>`}</div>`;
+}
+function fwStocks(f: PredictData['forward']): string {
+  const x = f?.stocks;
+  if (!x) return '';
+  const rows = x.rows.map((r) => `<tr><td class="num">${esc(r.asOf)}</td><td class="num">${num(r.ic, 3)}</td><td class="num ${cls(r.top - r.all)}">${pctTxt(r.top - r.all)}</td><td class="num ${cls(r.bottom - r.all)}">${pctTxt(r.bottom - r.all)}</td><td class="num ${cls(r.market)}">${pctTxt(r.market)}</td></tr>`).join('');
+  return fwBlock(
+    `${x.n} 期：平均 IC <b>${num(x.icMean ?? 0, 3)}</b>・最看好 30 檔比全部平均 <b class="${cls(x.topExcess)}">${pctTxt(x.topExcess)}</b>・最該避開 15 檔比全部平均 <b class="${cls(x.bottomExcess)}">${pctTxt(x.bottomExcess)}</b>`,
+    x.n,
+    `<div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>預測日</th><th class="num">IC</th><th class="num">最看好 vs 平均</th><th class="num">最該避開 vs 平均</th><th class="num">大盤</th></tr></thead><tbody>${rows}</tbody></table></div>`,
+    '從今天開始存檔；個股看 20 個交易日，所以約一個月後出現第一筆。',
+  );
+}
+function fwMarket(f: PredictData['forward']): string {
+  const x = f?.market;
+  if (!x) return '';
+  const rows = x.rows.map((r) => `<tr><td class="num">${esc(r.asOf)}</td><td class="num">${num(r.probUp * 100, 0)}%</td><td class="num ${cls(r.actual)}">${pctTxt(r.actual)}</td><td>${(r.probUp > 0.5) === (r.actual > 0) ? '<b class="ok">✓</b>' : '<b class="ng">✗</b>'}</td></tr>`).join('');
+  return fwBlock(`${x.n} 期：方向猜對 <b>${x.hit}</b> 期`, x.n, `<div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>預測日</th><th class="num">上漲機率</th><th class="num">之後 20 日</th><th>對錯</th></tr></thead><tbody>${rows}</tbody></table></div>`, '從今天開始存檔；看 20 個交易日，約一個月後出現第一筆。');
+}
+function fwDayTrade(f: PredictData['forward']): string {
+  const x = f?.dayTrade;
+  if (!x) return '';
+  const act = (a: number) => (a > 0 ? '<span class="up">做多</span>' : a < 0 ? '<span class="down">做空</span>' : '<span class="muted">觀望</span>');
+  const rows = x.rows.map((r) => `<tr><td class="num">${esc(r.date)}</td><td class="num ${cls(r.gap)}">${pctTxt(r.gap, 2)}</td><td>${act(r.action)}</td><td class="num ${cls(r.actual)}">${pctTxt(r.actual, 2)}</td><td class="num ${cls(r.pnl)}">${r.action ? pctTxt(r.pnl, 2) : '—'}</td></tr>`).join('');
+  return fwBlock(`${x.n} 天、出手 ${x.trades} 次，累計（扣成本）<b class="${cls(x.total)}">${pctTxt(x.total, 2)}</b>`, x.n, `<div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>交易日</th><th class="num">跳空</th><th>動作</th><th class="num">開→收</th><th class="num">損益</th></tr></thead><tbody>${rows}</tbody></table></div>`, '從今天開始存檔；下一個交易日收盤後出現第一筆。');
+}
+
+function marketHtml(m: PredictData['market'], h: number, f?: PredictData['forward']): string {
   const b = m.backtest;
   const p = m.probUp;
   const tone = p >= 0.6 ? 'up' : p <= 0.4 ? 'down' : '';
@@ -106,10 +136,11 @@ function marketHtml(m: PredictData['market'], h: number): string {
         ? '這個模型回測時<b>沒有比「一直猜漲」更準</b>：近幾年大盤多半在漲，用目前的資料（台股自己的走勢、融資、法人、外資期貨）很難判斷一個月後的方向。機率只能當參考，不要拿來決定進出場。'
         : '這個模型回測時比「一直猜漲」更準，但樣本只有幾年、獨立的 20 日區間不到 100 段，仍可能是運氣。'
     }</p>
+    ${fwMarket(f)}
   </section>`;
 }
 
-function stocksHtml(s: PredictData['stocks'], h: number): string {
+function stocksHtml(s: PredictData['stocks'], h: number, f?: PredictData['forward']): string {
   const b = s.backtest;
   return `<section class="pd-card glass" id="pd-stocks">
     <header class="pd-head"><div><p class="eyebrow">Stocks · ${h} 日</p><h2>個股排名</h2></div>${badge(s.verdict)}</header>
@@ -138,10 +169,11 @@ function stocksHtml(s: PredictData['stocks'], h: number): string {
         .join('')}</ul>
       <p class="muted">只列線性部分；模型另外有每個因子的平方項，抓「太極端反而不好」的關係（例如漲太多、波動太大）。</p>
     </details>
+    ${fwStocks(f)}
   </section>`;
 }
 
-function dayTradeHtml(d: NonNullable<PredictData['dayTrade']>): string {
+function dayTradeHtml(d: NonNullable<PredictData['dayTrade']>, f?: PredictData['forward']): string {
   const b = d.backtest;
   const bands = dayTradeBands(d);
   const act = (a: number) => (a > 0 ? '<span class="up">做多</span>' : a < 0 ? '<span class="down">做空</span>' : '<span class="muted">觀望</span>');
@@ -183,6 +215,7 @@ function dayTradeHtml(d: NonNullable<PredictData['dayTrade']>): string {
         ? '回測扣掉成本後<b>是虧錢的</b>：日內漲跌大多是雜訊，現有資料（台股收盤後的資料＋開盤跳空）不足以穩定勝過交易成本。<b>不建議照這個訊號當沖</b>；影響台股開盤後走勢最大的美股、台積電 ADR 夜盤資料目前還沒有收集。'
         : '回測扣掉成本後有賺，但當沖風險高、滑價與手續費差異都會吃掉優勢，請小量驗證。'
     }</p>
+    ${fwDayTrade(f)}
   </section>`;
 }
 
@@ -271,7 +304,8 @@ function bindIntra(root: HTMLElement): void {
 function draw(root: HTMLElement, onStock: (code: string) => void): void {
   const head = `<div class="pd-hero glass"><p class="eyebrow">L.P.L.C. Predict</p><h2>預測</h2>
     <p>拉普拉斯預測核心：用 2020 年以來的日 K、法人、融資、估值、財報與外資期貨，每天收盤後重新計算。
-      所有模型都是<b>逐段往前滾</b>訓練（每個時間點只用當時看得到的資料），下面的回測成績都是<b>樣本外</b>的；沒有預測能力的會直接標出來。</p></div>`;
+      所有模型都是<b>逐段往前滾</b>訓練（每個時間點只用當時看得到的資料），下面的回測成績都是<b>樣本外</b>的；沒有預測能力的會直接標出來。</p>
+    <p class="pd-honest">⚖️ 公正性：模型的設計（用哪些因子、參數）是看著回測成績調整的，回測成績可能<b>偏樂觀</b>。最公正的是每個模型的<b>「實盤成績（事前存檔）」</b>：每天收盤後先把預測存起來（只能新增、不能修改），結果出來後才打分數，完全不可能看答案。</p></div>`;
   if (data === undefined) {
     root.innerHTML = `<div class="pd-main">${head}<p class="muted">載入中⋯⋯</p></div>`;
     return;
@@ -288,9 +322,9 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
     ${intra?.ready ? `<a href="#pd-intra" class="pd-sum glass"><span>00631L 整天 5 分 K</span>${badge(intra.rangeVerdict ?? intra.verdict)}</a>` : ''}
   </div>`;
   root.innerHTML = `<div class="pd-main">${head}${summary}
-    ${stocksHtml(d.stocks, d.horizon)}
-    ${marketHtml(d.market, d.horizon)}
-    ${d.dayTrade ? dayTradeHtml(d.dayTrade) : ''}
+    ${stocksHtml(d.stocks, d.horizon, d.forward)}
+    ${marketHtml(d.market, d.horizon, d.forward)}
+    ${d.dayTrade ? dayTradeHtml(d.dayTrade, d.forward) : ''}
     <section id="pd-intra"></section>
     <p class="muted pd-foot">預測是依歷史資料統計的結果，<b>不構成投資建議</b>；過去的回測成績不代表未來。更新時間 ${esc(new Date(d.generatedAt).toLocaleString('zh-TW', { hour12: false }))}。</p>
   </div>`;
