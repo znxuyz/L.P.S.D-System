@@ -36,3 +36,14 @@ export function readArchives<T>(root: string | undefined, kind: string): Array<T
     })
     .filter((x) => x != null);
 }
+
+/**
+ * 開盤前的存檔：同一天如果有早上（加了前一晚美股，kind＋'-am'）那份就用早上的，否則用前一晚收盤後那份。
+ * 兩份都是開盤前存的；早上那份資訊比較完整。
+ */
+export function readPreOpen<T>(root: string | undefined, kind: string): Array<T & { madeAt: string; asOf: string; am?: boolean }> {
+  const byDay = new Map<string, T & { madeAt: string; asOf: string; am?: boolean }>();
+  for (const a of readArchives<T>(root, kind)) byDay.set(a.asOf, a);
+  for (const a of readArchives<T>(root, `${kind}-am`)) byDay.set(a.asOf, { ...a, am: true });
+  return [...byDay.values()].sort((a, b) => (a.asOf < b.asOf ? -1 : 1));
+}

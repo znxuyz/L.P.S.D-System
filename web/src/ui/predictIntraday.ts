@@ -73,6 +73,9 @@ const ctxOf = (c: Record<keyof DailyCtx, number | null>): DailyCtx => ({
   prevIntra: c.prevIntra ?? NaN,
   futChg: c.futChg ?? NaN,
   prevRange: c.prevRange ?? NaN,
+  usSox: c.usSox ?? NaN,
+  usTsm: c.usTsm ?? NaN,
+  usSpx: c.usSpx ?? NaN,
 });
 /** 第 bar 根的開始時間。 */
 const clock = (bar: number) => {

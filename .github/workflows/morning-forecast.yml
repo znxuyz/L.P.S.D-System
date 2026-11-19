@@ -1,0 +1,68 @@
+name: Morning forecast
+
+# 開盤前預測：美股收盤（台北約 04:00～05:00）後、台股開盤前，抓前一晚的美股，
+# 用包含美股的資料把「今天」的預測存進 forecasts 分支（事前存檔，只新增不覆蓋），再更新網站。
+# - 平日台北 07:13（排程可能延遲；存檔程式只在 08:45 前存）
+# - 抓美股的程式有改動時：馬上跑一次（驗證抓得到）
+on:
+  schedule:
+    - cron: '13 23 * * 0-4'
+  push:
+    branches: [main]
+    paths: ['scripts/us-market.ts', '.github/workflows/morning-forecast.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+# 跟每日資料更新共用：data 分支一次只讓一個工作寫入
+concurrency:
+  group: data-branch
+  cancel-in-progress: false
+
+jobs:
+  morning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATA_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 取出 data 與 forecasts 分支
+        run: |
+          git clone -q --depth 1 --branch data "$DATA_REMOTE" .data
+          if git ls-remote --exit-code --heads "$DATA_REMOTE" forecasts >/dev/null; then
+            git clone -q --branch forecasts "$DATA_REMOTE" .forecasts
+          else
+            git init -q -b forecasts .forecasts && git -C .forecasts remote add origin "$DATA_REMOTE"
+          fi
+
+      - name: 抓美股
+        run: node scripts/us-market.ts .data
+
+      - name: 存回 data 分支
+        working-directory: .data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q --orphan snapshot
+          git add -A
+          git commit -q -m "Market data $(date -u +'%F %H:%M')（美股）"
+          git push -q -f origin snapshot:data
+
+      - name: 開盤前預測存檔
+        run: |
+          ARCHIVE_DIR=.forecasts ARCHIVE_KIND_SUFFIX=-am ARCHIVE_ONLY=1 node scripts/predict.ts .data || true
+          ARCHIVE_DIR=.forecasts ARCHIVE_KIND_SUFFIX=-am ARCHIVE_ONLY=1 node scripts/predict-intraday.ts .data || true
+          cd .forecasts
+          git add -A
+          if ! git diff --cached --quiet; then
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Forecasts (morning) $(date -u +'%F %H:%M')"
+            git push -q origin HEAD:forecasts
+            echo "已推送開盤前存檔"
+          fi

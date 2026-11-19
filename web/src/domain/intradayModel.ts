@@ -27,7 +27,12 @@ export interface DailyCtx {
   futChg: number;
   /** 昨天的振幅 ln(最高 ÷ 最低)。 */
   prevRange: number;
+  /** 前一晚美股（開盤前就知道）：費城半導體、台積電 ADR、S&P 500 的漲跌（對數）；沒有資料是 NaN。 */
+  usSox?: number;
+  usTsm?: number;
+  usSpx?: number;
 }
+const us = (v: number | undefined) => (v == null ? NaN : v);
 
 export const FEATURE_NAMES = [
   '時間（越接近收盤越大）',
@@ -43,6 +48,9 @@ export const FEATURE_NAMES = [
   '近 5 日漲跌',
   '昨天開盤到收盤',
   '外資期貨昨天增減',
+  '前一晚費城半導體',
+  '前一晚台積電 ADR',
+  '前一晚 S&P 500',
 ] as const;
 
 const lr = (a: number, b: number) => (a > 0 && b > 0 ? Math.log(a / b) : 0);
@@ -73,6 +81,9 @@ export function features(c: ArrayLike<number>, k: number, P0: number, d: DailyCt
     d.prev5,
     d.prevIntra,
     d.futChg,
+    us(d.usSox),
+    us(d.usTsm),
+    us(d.usSpx),
   ];
 }
 
@@ -96,13 +107,14 @@ export const timeBucket = (k: number) => (k <= 0 ? 0 : 1 + Math.min(5, Math.floo
 export const horizonScale = (h: number, k: number) => (h === 54 ? Math.sqrt(Math.max(1, BARS - k) / BARS) : 1);
 
 export function standardize(m: Pick<IntradayModel, 'mean' | 'sd'>, x: number[]): number[] {
-  return x.map((v, j) => (Number.isFinite(v) ? Math.max(-4, Math.min(4, (v - m.mean[j]) / (m.sd[j] || 1))) : 0));
+  // 模型沒有的特徵（例如瀏覽器還拿著舊版模型）當作 0＝平均
+  return x.map((v, j) => (Number.isFinite(v) && j < m.mean.length ? Math.max(-4, Math.min(4, (v - m.mean[j]) / (m.sd[j] || 1))) : 0));
 }
 
 /** 時間點 k 對各個 horizon 的預測（對數報酬）。 */
 export function predictAt(m: IntradayModel, c: ArrayLike<number>, k: number, P0: number, d: DailyCtx): number[] {
   const z = standardize(m, features(c, k, P0, d));
-  return m.coef.map((b, i) => (b[0] + z.reduce((s, v, j) => s + b[j + 1] * v, 0)) * horizonScale(HORIZONS[i], k));
+  return m.coef.map((b, i) => (b[0] + z.reduce((s, v, j) => s + (b[j + 1] ?? 0) * v, 0)) * horizonScale(HORIZONS[i], k));
 }
 
 export interface ForecastPoint {
@@ -179,7 +191,7 @@ export interface LinModel {
 }
 export const linPredict = (m: LinModel, x: number[]) => {
   const z = standardize(m, x);
-  return m.coef[0] + z.reduce((s, v, j) => s + m.coef[j + 1] * v, 0);
+  return m.coef[0] + z.reduce((s, v, j) => s + (m.coef[j + 1] ?? 0) * v, 0);
 };
 
 export interface DayModel {
@@ -223,7 +235,7 @@ export function excursionFeatures(ix: Bar[], c: ArrayLike<number>, k: number, P0
   return [todayVol(ix, k, base), d.prevRange, Math.abs(lr(c[0], P0)), Math.log((BARS - k) / BARS), lr(c[k], c[0]), hi > lo ? (c[k] - lo) / (hi - lo) : 0.5];
 }
 
-export const gapFeatures = (d: DailyCtx) => [d.prevDay, d.prev5, d.prevIntra, d.futChg, d.prevRange];
+export const gapFeatures = (d: DailyCtx) => [d.prevDay, d.prev5, d.prevIntra, d.futChg, d.prevRange, us(d.usSox), us(d.usTsm), us(d.usSpx)];
 
 export interface DayForecast {
   /** 從哪一根開始是預測的（0～53）。 */
@@ -301,6 +313,8 @@ export function analogDistance(t: TodayState, a: AnalogDay): number {
   const sa = sigmaOf(a.ctx);
   const sq = (x: number, y: number) => (Number.isFinite(x) && Number.isFinite(y) ? (x - y) ** 2 : 0);
   let dist = 0.5 * sq(t.ctx.prevDay / st, a.ctx.prevDay / sa) + 0.5 * sq(t.ctx.prevIntra / st, a.ctx.prevIntra / sa) + 0.25 * sq(t.ctx.prev5 / st, a.ctx.prev5 / sa) + Math.log(st / sa) ** 2;
+  // 前一晚美股走勢像不像（開盤前最重要的資訊）
+  dist += 1 * sq(us(t.ctx.usSox) / st, us(a.ctx.usSox) / sa) + 1 * sq(us(t.ctx.usTsm) / st, us(a.ctx.usTsm) / sa) + 0.5 * sq(us(t.ctx.usSpx) / st, us(a.ctx.usSpx) / sa);
   if (t.k >= 0) dist += 2 * sq(t.gap / st, a.gap / sa);
   if (t.k >= 1) {
     let p = 0;
@@ -365,7 +379,7 @@ const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / (a.length || 1);
 /** predict-analogs.json：[日期, 跳空, 走勢, 開盤前資料]，數值 ×1e4 取整。 */
 export function decodeAnalogs(raw: Array<[string, number | null, Array<number | null>, Array<number | null>]>): AnalogDay[] {
   const f = (v: number | null) => (v == null ? NaN : v / 1e4);
-  return raw.map(([date, gap, r, c]) => ({ date, gap: f(gap), r: r.map(f), ctx: { prevDay: f(c[0]), prev5: f(c[1]), prevIntra: f(c[2]), futChg: f(c[3]), prevRange: f(c[4]) } }));
+  return raw.map(([date, gap, r, c]) => ({ date, gap: f(gap), r: r.map(f), ctx: { prevDay: f(c[0]), prev5: f(c[1]), prevIntra: f(c[2]), futChg: f(c[3]), prevRange: f(c[4]), usSox: f(c[5] ?? null), usTsm: f(c[6] ?? null), usSpx: f(c[7] ?? null) } }));
 }
 
 // ================================================================ 00631L 當天進出場點（區間來回）

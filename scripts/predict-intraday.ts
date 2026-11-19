@@ -46,7 +46,8 @@ import {
   type LinModel,
 } from '../web/src/domain/intradayModel.ts';
 import { adjustForSplits, detectSplits } from '../web/src/domain/splits.ts';
-import { canArchive, readArchives, writeArchive } from './lib/archive.ts';
+import { canArchive, readPreOpen, writeArchive } from './lib/archive.ts';
+import { loadUs, usMove } from './lib/us.ts';
 import { mean, ridge, standardizer, std } from './lib/ml.ts';
 
 const dir = process.argv[2] ?? 'data';
@@ -67,6 +68,7 @@ const dIdx = new Map(taiex.map((r, i) => [r[0], i]));
 const fut = new Map<string, number>();
 for (const r of read<{ rows: Array<[string, unknown, unknown, unknown, unknown, number | null]> }>(join(dir, 'market-risk.json'), { rows: [] }).rows) if (r[5] != null) fut.set(r[0], r[5]);
 
+const usData = loadUs(dir);
 /** 第 i 天開盤前看得到的資料。 */
 function dailyCtx(i: number): DailyCtx | null {
   if (i < 6) return null;
@@ -79,6 +81,10 @@ function dailyCtx(i: number): DailyCtx | null {
     prevIntra: Math.log(c(i - 1) / taiex[i - 1][1]),
     futChg: f1 != null && f2 != null ? (f1 - f2) / 1e4 : NaN,
     prevRange: Math.log(taiex[i - 1][2] / taiex[i - 1][3]),
+    // 前一晚美股：上一個台股交易日（含）到今天（不含）之間收盤的美股；i＝最後＋1 時是「下一個交易日」
+    usSox: usMove(usData.SOX, taiex[i - 1][0], taiex[i]?.[0] ?? '9999-12-31'),
+    usTsm: usMove(usData.TSM, taiex[i - 1][0], taiex[i]?.[0] ?? '9999-12-31'),
+    usSpx: usMove(usData.GSPC, taiex[i - 1][0], taiex[i]?.[0] ?? '9999-12-31'),
   };
 }
 
@@ -564,13 +570,13 @@ function nextDayForecast() {
 }
 const ARCHIVE_DIR = process.env.ARCHIVE_DIR;
 if (ARCHIVE_DIR) {
-  if (canArchive(lastDate)) console.log(writeArchive(ARCHIVE_DIR, 'intraday', lastDate, nextDayForecast()) ? `事前存檔：${lastDate} 收盤後 → 下一個交易日` : `事前存檔：${lastDate} 已經存過`);
+  if (canArchive(lastDate)) console.log(writeArchive(ARCHIVE_DIR, 'intraday' + (process.env.ARCHIVE_KIND_SUFFIX ?? ''), lastDate, nextDayForecast()) ? `事前存檔：${lastDate} 收盤後 → 下一個交易日` : `事前存檔：${lastDate} 已經存過`);
   else console.log(`事前存檔：現在不是 ${lastDate} 收盤後到下一個交易日開盤前，不存`);
 }
 // 實盤成績：存檔裡的預測 vs 之後實際的走勢（只用存檔的數字）
 type Arch = { P0: number; model: number[]; avg: number[]; blend: number[]; dayHigh: number; dayLow: number };
 const fwRows: Array<{ asOf: string; date: string; P0: number; actual: number; blend: number; model: number; avg: number; rmse: Record<string, number>; hiErr: number; loErr: number }> = [];
-for (const a of readArchives<Arch>(process.env.FORECASTS_DIR, 'intraday')) {
+for (const a of readPreOpen<Arch>(process.env.FORECASTS_DIR, 'intraday')) {
   const i = dIdx.get(a.asOf);
   const next = i == null ? undefined : taiex[i + 1]?.[0];
   const d = next ? days.find((x) => x.date === next) : undefined;
@@ -599,7 +605,7 @@ const forward = {
 // 進出場的實盤成績：用存檔的模型與規則，在實際走勢上算出當天的價位並模擬
 type RangeArch = { P0: number; ctx: DailyCtx; range?: { plan: RangePlan; dm: DayModel; beta: number } };
 const fwRange: Array<{ date: string; side: number; how: string; pnl: number }> = [];
-for (const a of readArchives<RangeArch>(process.env.FORECASTS_DIR, 'intraday')) {
+for (const a of readPreOpen<RangeArch>(process.env.FORECASTS_DIR, 'intraday')) {
   if (!a.range || !a.ctx) continue;
   const i = dIdx.get(a.asOf);
   const next = i == null ? undefined : taiex[i + 1]?.[0];
@@ -650,6 +656,6 @@ writeFileSync(
 );
 // 相似日資料庫（網頁即時找相似日用）：[日期, 跳空, 走勢（×1e4 取整）, 開盤前資料]
 const i4 = (v: number) => (Number.isFinite(v) ? Math.round(v * 1e4) : null);
-writeFileSync(join(dir, 'predict-analogs.json'), JSON.stringify(lib.map((a) => [a.date, i4(a.gap), a.r.map((v) => i4(v)), [a.ctx.prevDay, a.ctx.prev5, a.ctx.prevIntra, a.ctx.futChg, a.ctx.prevRange].map(i4)])));
+writeFileSync(join(dir, 'predict-analogs.json'), JSON.stringify(lib.map((a) => [a.date, i4(a.gap), a.r.map((v) => i4(v)), [a.ctx.prevDay, a.ctx.prev5, a.ctx.prevIntra, a.ctx.futChg, a.ctx.prevRange, a.ctx.usSox ?? NaN, a.ctx.usTsm ?? NaN, a.ctx.usSpx ?? NaN].map(i4)])));
 for (const o of ORIGINS) console.log(`  ${ORIGIN_LABEL[o]}（n=${bestChoice(o).n}、w=${bestChoice(o).w}）：` + LINES.map((l) => { const t = lineAcc[o][l]; return `${l} ${(Math.sqrt(t.se / (t.n || 1)) * 100).toFixed(2)}%/${((t.hit / (t.days || 1)) * 100).toFixed(0)}%/${((t.best / (t.days || 1)) * 100).toFixed(0)}%`; }).join('  '));
 console.log(`β ${beta.toFixed(3)}；predict-intraday.json 完成（${((Date.now() - t0) / 1000).toFixed(1)}s）`);

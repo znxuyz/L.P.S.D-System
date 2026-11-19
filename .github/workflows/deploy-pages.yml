@@ -7,7 +7,7 @@ on:
     branches: [main]
   workflow_dispatch:
   workflow_run:
-    workflows: ['Update market data']
+    workflows: ['Update market data', 'Morning forecast']
     types: [completed]
 
 permissions:
