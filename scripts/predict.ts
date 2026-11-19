@@ -46,7 +46,7 @@ const REFIT = 20; // 重新訓練間隔
 const BF_DIR = process.env.BACKFILL_DIR;
 const BF_FROM = process.env.BACKFILL_FROM ?? '0000';
 const BF_TO = process.env.BACKFILL_TO ?? '9999';
-const bfDaily = new Map<string, { stocks?: { top: string[] }; dayTrade?: unknown }>();
+const bfDaily = new Map<string, { stocks?: { top: string[]; all?: Record<string, number>; turn?: Record<string, number> }; dayTrade?: unknown }>();
 const bfPut = (asOf: string, part: object) => {
   if (!BF_DIR || asOf < BF_FROM || asOf > BF_TO) return;
   bfDaily.set(asOf, { ...(bfDaily.get(asOf) ?? {}), ...part });
@@ -336,7 +336,17 @@ for (let si = 0; si < sections.length; si++) {
   const sc = new Float64Array(sec.codes.length);
   for (let n = 0; n < sec.codes.length; n++) sc[n] = dot(beta, rowOf(sec, n));
   scoreBy.push(sc);
-  bfPut(cal[sec.i], { stocks: { top: [...sec.codes.keys()].sort((a, b) => sc[b] - sc[a]).slice(0, 30).map((n) => stocks[sec.codes[n]].code) } });
+  if (BF_DIR) {
+    const ord = [...sec.codes.keys()].sort((a, b) => sc[b] - sc[a]);
+    // all：每檔的排名分數（100＝最看好）；turn：近 20 日平均成交額（億），給「只在大型股裡挑」之類的策略用
+    bfPut(cal[sec.i], {
+      stocks: {
+        top: ord.slice(0, 30).map((n) => stocks[sec.codes[n]].code),
+        all: Object.fromEntries(ord.map((n, r) => [stocks[sec.codes[n]].code, Math.round((1 - r / Math.max(1, ord.length - 1)) * 1000) / 10])),
+        turn: Object.fromEntries(sec.codes.map((k) => [stocks[k].code, Math.round(rollMean(stocks[k].turn, 20, sec.i) * 100) / 100])),
+      },
+    });
+  }
 }
 
 // 回測：每個截面的 IC；每 20 天換一次的「前 10%」組合
