@@ -43,15 +43,18 @@ jobs:
             git init -q -b forecasts .forecasts && git -C .forecasts remote add origin "$DATA_REMOTE"
           fi
 
-      - name: 抓美股
-        run: node scripts/us-market.ts .data
+      - name: 抓美股與臺指期夜盤
+        run: |
+          node scripts/us-market.ts .data
+          node scripts/taifex-daily.ts .data || true
 
-      - name: 存回 data 分支（只更新美股）
+      - name: 存回 data 分支（只更新美股與夜盤）
         run: |
           for t in 1 2 3; do
             rm -rf .data-latest
             git clone -q --depth 1 --branch data "$DATA_REMOTE" .data-latest
             rm -rf .data-latest/us && cp -r .data/us .data-latest/us
+            if [ -d .data/txdaily ]; then rm -rf .data-latest/txdaily && cp -r .data/txdaily .data-latest/txdaily; fi
             cd .data-latest
             base=$(git rev-parse HEAD)
             git config user.name "github-actions[bot]"
