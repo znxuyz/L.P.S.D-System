@@ -506,7 +506,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
     <dl class="pd-stats pd-intra-stats">
       <div><dt>預測時間</dt><dd class="num">${kLabel(v.k)}</dd></div>
       <div><dt>${now == null ? '預測開盤' : '現在'}</dt><dd class="num">${num(L(now ?? f.open), 2)}${now == null ? ` <small class="${cls(f.open - v.P0)}">${pctTxt(Math.log(f.open / v.P0) * lev)}</small>` : ''}</dd></div>
-      <div><dt>預測收盤（綜合）</dt><dd class="num ${cls((mainClose ?? v.P0) - v.P0)}">${mainClose ? num(L(mainClose), 2) : '—'} <small>${mainClose ? pctTxt(Math.log(mainClose / v.P0) * lev) : ''}</small></dd></div>
+      <div><dt>${v.k >= 0 ? '預測收盤<small class="muted">（開盤後方向沒把握，回測約 52～57%）</small>' : '預測收盤（綜合）'}</dt><dd class="num ${v.k >= 0 ? '' : cls((mainClose ?? v.P0) - v.P0)}">${mainClose ? num(L(mainClose), 2) : '—'} <small>${mainClose ? pctTxt(Math.log(mainClose / v.P0) * lev) : ''}</small></dd></div>
       <div><dt>收盤約 80% 區間</dt><dd class="num">${last ? `${num(L(last.lo), 2)}～${num(L(last.hi), 2)}` : '—'}</dd></div>
       <div><dt>預估今日最高／最低</dt><dd class="num"><span class="up">${num(L(f.dayHigh), 2)}</span>／<span class="down">${num(L(f.dayLow), 2)}</span></dd></div>
       ${actualClose != null ? `<div><dt>實際收盤／最高／最低</dt><dd class="num">${num(L(actualClose), 2)} <small>${num(L(Math.max(...v.ix.map((x) => x[1]))), 2)}／${num(L(Math.min(...v.ix.map((x) => x[2]))), 2)}</small></dd></div>` : ''}
