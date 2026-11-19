@@ -33,8 +33,12 @@ export interface DailyCtx {
   usSpx?: number;
   /** 臺指期夜盤（開盤前結束）：夜盤收盤 ÷ 上一個交易日一般時段收盤（對數）；沒有資料是 NaN。 */
   night?: number;
+  /** 前一晚 VIX 的變化（對數）；夜盤振幅 ln(高÷低)；夜盤收在夜盤高低區間的位置（0～1）。沒有資料是 NaN。 */
+  usVix?: number;
+  nightRange?: number;
+  nightPos?: number;
 }
-const us = (v: number | undefined) => (v == null ? NaN : v);
+const us = (v: number | undefined | null) => (v == null ? NaN : v);
 
 export const FEATURE_NAMES = [
   '時間（越接近收盤越大）',
@@ -54,15 +58,120 @@ export const FEATURE_NAMES = [
   '前一晚台積電 ADR',
   '前一晚 S&P 500',
   '臺指期夜盤',
+  '自創指標 1',
+  '自創指標 2',
+  '自創指標 3',
+  '自創指標 4',
 ] as const;
 /** 可以整組拿掉的資料（模型每次訓練自己決定要不要用）：在 features() 裡的位置。 */
-export const PATH_GROUPS = { us: [13, 14, 15], night: [16] } as const;
+export const PATH_GROUPS = { us: [13, 14, 15], night: [16], disc: [17, 18, 19, 20] } as const;
 export const GAP_GROUPS = { us: [5, 6, 7], night: [8] } as const;
 
 const lr = (a: number, b: number) => (a > 0 && b > 0 ? Math.log(a / b) : 0);
 
-/** 時間點 k 的特徵；c 至少要有 c[0..k]，P0 是昨收。 */
-export function features(c: ArrayLike<number>, k: number, P0: number, d: DailyCtx): number[] {
+// ---------------------------------------------------------------- 自創指標
+/**
+ * 模型自己「發明」的指標：從下面這些原始數據兩兩組合（相乘、乘上另一個的大小、看另一個的正負號），
+ * 每次訓練時挑出最能解釋「現有模型預測不到的部分」的幾個（只用那次訓練之前的資料）。
+ */
+export const RAW_NAMES = [
+  '時間',
+  '開盤跳空',
+  '開盤到現在',
+  '最近 1 根',
+  '最近 3 根',
+  '最近 6 根',
+  '今天的波動',
+  '在今天高低區間的位置',
+  '昨天漲跌',
+  '近 5 日漲跌',
+  '昨天開盤到收盤',
+  '外資期貨昨天增減',
+  '前一晚費半',
+  '前一晚台積電 ADR',
+  '前一晚 S&P 500',
+  '前一晚 VIX 變化',
+  '夜盤漲跌',
+  '夜盤振幅',
+  '夜盤收在高低的位置',
+  '費半減 S&P（半導體相對強弱）',
+  '跳空減夜盤（開盤比夜盤多跳多少）',
+  '昨天振幅',
+  '離今天最高點多遠',
+  '離今天最低點多遠',
+] as const;
+/** 組合方式：0＝a×b、1＝a×|b|、2＝a×b 的正負號、3＝只用 a。 */
+export interface DiscSpec {
+  a: number;
+  b: number;
+  op: 0 | 1 | 2 | 3;
+}
+export const DISC_SLOTS = 4;
+/** 指標的中文名稱。 */
+export const discName = (s: DiscSpec) =>
+  s.op === 3 ? RAW_NAMES[s.a] : s.op === 0 ? `${RAW_NAMES[s.a]} × ${RAW_NAMES[s.b]}` : s.op === 1 ? `${RAW_NAMES[s.a]} × ${RAW_NAMES[s.b]}的大小` : `${RAW_NAMES[s.a]} × ${RAW_NAMES[s.b]}的方向`;
+
+/** 時間點 k 的原始數據（自創指標的材料）；只用今天到 k 為止的價格與開盤前就知道的資料。 */
+export function rawBlocks(c: ArrayLike<number>, k: number, P0: number, d: DailyCtx): number[] {
+  let rv = 0;
+  for (let i = 1; i <= k; i++) rv += lr(c[i], c[i - 1]) ** 2;
+  rv = k >= 1 ? Math.sqrt(rv / k) : NaN;
+  let hi = c[0];
+  let lo = c[0];
+  for (let i = 1; i <= k; i++) {
+    if (c[i] > hi) hi = c[i];
+    if (c[i] < lo) lo = c[i];
+  }
+  const gap = lr(c[0], P0);
+  return [
+    k / BARS,
+    gap,
+    lr(c[k], c[0]),
+    k >= 1 ? lr(c[k], c[k - 1]) : NaN,
+    k >= 3 ? lr(c[k], c[k - 3]) : NaN,
+    k >= 6 ? lr(c[k], c[k - 6]) : NaN,
+    rv,
+    hi > lo ? (c[k] - lo) / (hi - lo) - 0.5 : 0,
+    d.prevDay,
+    d.prev5,
+    d.prevIntra,
+    d.futChg,
+    us(d.usSox),
+    us(d.usTsm),
+    us(d.usSpx),
+    us(d.usVix),
+    us(d.night),
+    us(d.nightRange),
+    d.nightPos == null || !Number.isFinite(d.nightPos) ? NaN : d.nightPos - 0.5,
+    us(d.usSox) - us(d.usSpx),
+    gap - us(d.night),
+    d.prevRange,
+    lr(hi, c[k]),
+    lr(c[k], lo),
+  ];
+}
+export function discValue(raw: number[], s: DiscSpec): number {
+  const a = raw[s.a];
+  const b = raw[s.b];
+  return s.op === 0 ? a * b : s.op === 1 ? a * Math.abs(b) : s.op === 2 ? a * Math.sign(b) : a;
+}
+/** 所有候選組合（約 1400 個）。 */
+export function discCandidates(): DiscSpec[] {
+  const n = RAW_NAMES.length;
+  const out: DiscSpec[] = [];
+  for (let a = 0; a < n; a++) {
+    out.push({ a, b: a, op: 3 });
+    for (let b = 0; b < n; b++) {
+      if (a === b) continue;
+      if (a < b) out.push({ a, b, op: 0 });
+      out.push({ a, b, op: 1 }, { a, b, op: 2 });
+    }
+  }
+  return out;
+}
+
+/** 時間點 k 的特徵；c 至少要有 c[0..k]，P0 是昨收；disc 是這個模型自創的指標（沒有就補 0）。 */
+export function features(c: ArrayLike<number>, k: number, P0: number, d: DailyCtx, disc?: DiscSpec[]): number[] {
   const t = k / BARS;
   let rv = 0;
   for (let i = 1; i <= k; i++) rv += lr(c[i], c[i - 1]) ** 2;
@@ -91,7 +200,15 @@ export function features(c: ArrayLike<number>, k: number, P0: number, d: DailyCt
     us(d.usTsm),
     us(d.usSpx),
     us(d.night),
+    ...discSlots(c, k, P0, d, disc),
   ];
+}
+function discSlots(c: ArrayLike<number>, k: number, P0: number, d: DailyCtx, disc?: DiscSpec[]): number[] {
+  const out = new Array(DISC_SLOTS).fill(0);
+  if (!disc?.length) return out;
+  const raw = rawBlocks(c, k, P0, d);
+  disc.slice(0, DISC_SLOTS).forEach((s, i) => (out[i] = discValue(raw, s)));
+  return out;
 }
 
 export interface IntradayModel {
@@ -101,6 +218,10 @@ export interface IntradayModel {
   coef: number[][];
   /** 殘差標準差：[horizon][時段]（見 timeBucket）。 */
   resid: number[][];
+  /** 這個模型自創的指標（每次訓練自己挑）。 */
+  disc?: DiscSpec[];
+  /** 挑選時的統計 t 值（跟 disc 同順序，顯示用）。 */
+  discT?: number[];
 }
 
 /** 殘差分段：剛開盤（還不知道今天的波動）單獨一段，之後每 9 根一段。 */
@@ -120,7 +241,7 @@ export function standardize(m: Pick<IntradayModel, 'mean' | 'sd'>, x: number[]):
 
 /** 時間點 k 對各個 horizon 的預測（對數報酬）。 */
 export function predictAt(m: IntradayModel, c: ArrayLike<number>, k: number, P0: number, d: DailyCtx): number[] {
-  const z = standardize(m, features(c, k, P0, d));
+  const z = standardize(m, features(c, k, P0, d, m.disc));
   return m.coef.map((b, i) => (b[0] + z.reduce((s, v, j) => s + (b[j + 1] ?? 0) * v, 0)) * horizonScale(HORIZONS[i], k));
 }
 
@@ -386,7 +507,7 @@ const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / (a.length || 1);
 /** predict-analogs.json：[日期, 跳空, 走勢, 開盤前資料]，數值 ×1e4 取整。 */
 export function decodeAnalogs(raw: Array<[string, number | null, Array<number | null>, Array<number | null>]>): AnalogDay[] {
   const f = (v: number | null) => (v == null ? NaN : v / 1e4);
-  return raw.map(([date, gap, r, c]) => ({ date, gap: f(gap), r: r.map(f), ctx: { prevDay: f(c[0]), prev5: f(c[1]), prevIntra: f(c[2]), futChg: f(c[3]), prevRange: f(c[4]), usSox: f(c[5] ?? null), usTsm: f(c[6] ?? null), usSpx: f(c[7] ?? null), night: f(c[8] ?? null) } }));
+  return raw.map(([date, gap, r, c]) => ({ date, gap: f(gap), r: r.map(f), ctx: { prevDay: f(c[0]), prev5: f(c[1]), prevIntra: f(c[2]), futChg: f(c[3]), prevRange: f(c[4]), usSox: f(c[5] ?? null), usTsm: f(c[6] ?? null), usSpx: f(c[7] ?? null), night: f(c[8] ?? null), usVix: f(c[9] ?? null), nightRange: f(c[10] ?? null), nightPos: f(c[11] ?? null) } }));
 }
 
 // ================================================================ 00631L 當天進出場點（區間來回）

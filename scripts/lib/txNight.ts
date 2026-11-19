@@ -26,3 +26,12 @@ export function nightMove(tx: Map<string, TxDay>, prev: string, D: string | null
   }
   return p && n ? Math.log(n / p) : NaN;
 }
+
+/** 同上，但回傳整根夜盤 K（開高低收量）；給夜盤振幅、收在高低哪裡用。 */
+export function nightBar(tx: Map<string, TxDay>, prev: string, D: string | null): number[] | null {
+  if (!tx.get(prev)?.d) return null;
+  if (D) return tx.get(D)?.n ?? null;
+  let n: number[] | null = null;
+  for (const k of [...tx.keys()].filter((k) => k > prev).sort()) if (tx.get(k)?.n) n = tx.get(k)!.n!;
+  return n;
+}

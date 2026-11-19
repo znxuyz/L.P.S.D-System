@@ -7,7 +7,7 @@
  * - 00631L 的價格由加權指數換算（β 倍），不是 00631L 真實的 5 分 K。
  */
 import type { IndexPoint } from '../data/types';
-import { BARS, DAYTRADE_COST, analogLines, avgOf, barRange, blendLine, rangeLevels, simulateRange, type RangeLevels, type RangePlan, forecastDay, toLeveraged, type AnalogDay, type Bar, type DailyCtx, type DayForecast, type DayModel, type IntradayModel } from '../domain/intradayModel';
+import { BARS, DAYTRADE_COST, analogLines, avgOf, barRange, blendLine, rangeLevels, simulateRange, type RangeLevels, type RangePlan, forecastDay, toLeveraged, type AnalogDay, type Bar, type DailyCtx, type DayForecast, type DayModel, type IntradayModel, discName } from '../domain/intradayModel';
 import { escapeHtml as esc, num } from './format';
 
 type Verdict = 'signal' | 'none';
@@ -78,6 +78,10 @@ const ctxOf = (c: Record<keyof DailyCtx, number | null>): DailyCtx => ({
   usSox: c.usSox ?? NaN,
   usTsm: c.usTsm ?? NaN,
   usSpx: c.usSpx ?? NaN,
+  night: c.night ?? NaN,
+  usVix: c.usVix ?? NaN,
+  nightRange: c.nightRange ?? NaN,
+  nightPos: c.nightPos ?? NaN,
 });
 /** 第 bar 根的開始時間。 */
 const clock = (bar: number) => {
@@ -335,9 +339,11 @@ function rangeHtml(d: IntradayData, v: View): string {
 const usedTxt = (u?: Record<string, string[]>) => {
   if (!u) return '—';
   const nm = (k: string) => (k === 'gap' ? '開盤跳空' : k === 'path54' ? '到收盤' : `${Number(k.slice(4)) * 5} 分鐘`);
-  const g = (x: string[]) => (x.length ? x.map((v) => (v === 'us' ? '美股' : '夜盤')).join('＋') : '都不用');
+  const g = (x: string[]) => (x.length ? x.map((v) => (v === 'us' ? '美股' : v === 'night' ? '夜盤' : '自創指標')).join('＋') : '都不用');
   return Object.entries(u).map(([k, v]) => `${nm(k)}：${g(v)}`).join('、');
 };
+const discTxt = (m: IntradayModel) =>
+  m.disc?.length ? m.disc.map((s, i) => `「${esc(discName(s))}」（t＝${num(m.discT?.[i] ?? NaN, 1)}${(m.discT?.[i] ?? 0) > 0 ? '，越大越容易漲' : '，越大越容易跌'}）`).join('、') : '這次訓練沒有找到夠強的（寧缺勿濫）';
 /** 預測邏輯（白話）。 */
 function logicHtml(d: IntradayData): string {
   const ch = (d.choice ?? []).map((c) => `${c.origin < 0 ? '開盤前' : c.origin === 0 ? '開盤' : clock(c.origin)}：相似日 ${c.n} 天、模型 ${Math.round(c.w * 100)}%`).join('；');
@@ -350,6 +356,7 @@ function logicHtml(d: IntradayData): string {
       <li><b>綜合預測</b>：模型主線與相似日平均依權重混合。相似日要取幾天（5／10／20）、模型佔多少（0～100%），每個預測時間點分開挑：用「到前一天為止」所有回測日的實際誤差，選誤差最小的組合。目前：${esc(ch)}。</li>
       <li><b>振幅與高低點</b>：每根 K 棒的振幅＝這個時段平常的振幅 × 今天／昨天的波動延續；今天剩下時間的最高最低另外預測。80% 區間依時段與當天波動放大縮小，回測校準過。</li>
       <li><b>自己決定用哪些資料</b>：前一晚美股（費半、台積電 ADR、S&P 500）與臺指期夜盤可以整組不用；每次訓練用最後 20% 的資料比較「都不用／只用美股／只用夜盤／都用」，挑誤差最小的。目前：${esc(usedTxt(d.used))}。</li>
+      <li><b>模型自創指標</b>：除了上面這些現成的數據，模型自己「發明」指標——把 24 種開盤前與盤中已知的原始數據（例如夜盤振幅、夜盤收在高點還是低點、費半減 S&amp;P、跳空減夜盤、VIX 變化、離今天高低點多遠）兩兩相乘、乘上另一個的大小或方向，產生約 1400 個候選；每次訓練只用訓練資料，挑出最能解釋「基本模型預測不到的部分」的最多 4 個（統計 t 值要超過 4，彼此不能太像），再交給上一條的驗證決定要不要用。目前：${discTxt(d.model)}。</li>
       <li><b>不看答案</b>：回測一律逐段往前滾；網頁的回放用「回放那幾天之前」訓練的模型；成績分成「從沒看過的期間」與「開發期間」（模型是看著開發期間調的，可能偏樂觀）；另外每天收盤後把隔天的預測事前存檔，之後才打「實盤成績」。</li>
       <li><b>持續修正</b>：每天資料更新、網站部署時，用最新的全部資料重新訓練、重新挑設定、重新計算所有回測成績；回測一律「逐段往前滾」——每一天只用那天以前的資料預測，跟實際使用時一樣。</li>
     </ol>
