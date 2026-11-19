@@ -90,6 +90,12 @@ export interface PredictData {
       recent: Array<[string, number, number, number, number, number]>;
     };
   } | null;
+  /** 事前存檔的實盤成績（每天收盤後存的預測 vs 之後的實際）。 */
+  forward?: {
+    stocks: { n: number; icMean: number | null; topExcess: number | null; bottomExcess: number | null; rows: Array<{ asOf: string; ic: number; top: number; bottom: number; all: number; market: number }> };
+    market: { n: number; hit: number; rows: Array<{ asOf: string; probUp: number; actual: number }> };
+    dayTrade: { n: number; trades: number; total: number | null; rows: Array<{ asOf: string; date: string; gap: number; pred: number; action: number; actual: number; pnl: number }> };
+  };
 }
 
 const get = keyedRefresh<PredictData | null>(

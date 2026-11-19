@@ -42,6 +42,7 @@ import {
   type LinModel,
 } from '../web/src/domain/intradayModel.ts';
 import { adjustForSplits, detectSplits } from '../web/src/domain/splits.ts';
+import { canArchive, readArchives, writeArchive } from './lib/archive.ts';
 import { mean, ridge, standardizer, std } from './lib/ml.ts';
 
 const dir = process.argv[2] ?? 'data';
@@ -212,7 +213,34 @@ const REFIT = 20;
 const ORIGINS = [-1, 0, 12, 24, 36, 48]; // 開盤前、開盤、10:00、11:00、12:00、13:00
 const ORIGIN_LABEL: Record<number, string> = { [-1]: '開盤前', 0: '09:00 開盤', 12: '10:00', 24: '11:00', 36: '12:00', 48: '13:00' };
 type Acc = { pe: number[]; pn: number[]; cov: number; covN: number; re: number[]; rn: number[]; rl: number[]; rlb: number[]; he: number[]; hn: number[] };
-const acc: Record<number, Acc> = Object.fromEntries(ORIGINS.map((o) => [o, { pe: [], pn: [], cov: 0, covN: 0, re: [], rn: [], rl: [], rlb: [], he: [], hn: [] }]));
+/**
+ * 成績分期間記：開發期間（我調整模型時看過的回測，從 DEV_START 起）與「從沒看過的期間」（之前回補的歷史）。
+ * 開發期間的成績可能偏樂觀；沒看過的期間才是公正的成績。
+ */
+const DEV_START = '2025-11-03';
+type Period = 'all' | 'hold' | 'dev';
+const PERIODS: Period[] = ['all', 'hold', 'dev'];
+const newAcc = (): Record<number, Acc> => Object.fromEntries(ORIGINS.map((o) => [o, { pe: [], pn: [], cov: 0, covN: 0, re: [], rn: [], rl: [], rlb: [], he: [], hn: [] }]));
+const accBy: Record<Period, Record<number, Acc>> = { all: newAcc(), hold: newAcc(), dev: newAcc() };
+const acc = accBy.all;
+/** 同時寫進「全部」與所屬期間的累計器（陣列 push 兩邊、數字 += 兩邊）。 */
+function tee<T extends object>(a: T, b: T): T {
+  return new Proxy(a, {
+    get(t, k) {
+      const v = (t as Record<string | symbol, unknown>)[k];
+      if (Array.isArray(v)) return { push: (...xs: unknown[]) => (v.push(...xs), ((b as Record<string | symbol, unknown[]>)[k]).push(...xs)) };
+      return v;
+    },
+    set(t, k, val) {
+      const rec = t as Record<string | symbol, number>;
+      const d = (val as number) - rec[k];
+      rec[k] = val as number;
+      (b as Record<string | symbol, number>)[k] += d;
+      return true;
+    },
+  });
+}
+const periodOf = (date: string): Period => (date >= DEV_START ? 'dev' : 'hold');
 // 樣本外殘差（收盤走勢），給網頁畫區間
 const residBy = HORIZONS.map(() => Array.from({ length: TIME_BUCKETS }, () => [] as number[]));
 let fitted: ReturnType<typeof fitAll> | null = null;
@@ -232,9 +260,13 @@ function bestChoice(o: number): { n: number; w: number } {
   return best;
 }
 const choiceLog: Record<number, Array<{ n: number; w: number }>> = Object.fromEntries(ORIGINS.map((o) => [o, []]));
-const lineAcc: Record<number, Record<string, { se: number; n: number; hit: number; days: number; best: number }>> = Object.fromEntries(
-  ORIGINS.map((o) => [o, Object.fromEntries(LINES.map((l) => [l, { se: 0, n: 0, hit: 0, days: 0, best: 0 }]))]),
-);
+type LineAcc = Record<number, Record<string, { se: number; n: number; hit: number; days: number; best: number }>>;
+const newLineAcc = (): LineAcc => Object.fromEntries(ORIGINS.map((o) => [o, Object.fromEntries(LINES.map((l) => [l, { se: 0, n: 0, hit: 0, days: 0, best: 0 }]))]));
+const lineAccBy: Record<Period, LineAcc> = { all: newLineAcc(), hold: newLineAcc(), dev: newLineAcc() };
+const lineAcc = lineAccBy.all;
+// 回放用的模型：回放的最後 10 天開始之前那一刻的模型與設定（回放時不會看到答案）
+const REPLAY = 10;
+let replaySnap: { m: IntradayModel; dm: DayModel; choice: Array<{ origin: number; n: number; w: number }> } | null = null;
 // 預測紀錄：開盤前與 10:00 的預測收盤 vs 實際
 const record: Array<{ date: string; origin: number; ref: number; blend: number; model: number; avg: number; actual: number }> = [];
 const dbg: number[][] = [];
@@ -254,10 +286,12 @@ for (let n = FIRST; n < days.length; n++) {
   // 區間用「之前的日子」累積的樣本外殘差（今天的還沒加進去）
   const inRes = fitted.m.inRes ?? (fitted.m.inRes = m.resid.map((r) => r.slice()));
   m.resid = residBy.map((row, hi) => row.map((e, tb) => (e.length > 30 ? std(e) : inRes[hi][tb])));
+  if (n === days.length - REPLAY) replaySnap = JSON.parse(JSON.stringify({ m, dm, choice: ORIGINS.map((o) => ({ origin: o, ...bestChoice(o) })) }));
   for (const o of ORIGINS) {
     const k = Math.max(0, o);
     const f = forecastDay(m, dm, d.ix, o, o < 0 ? null : d.c[0], d.P0, d.ctx);
-    const a = acc[o];
+    const per = periodOf(d.date);
+    const a = tee(acc[o], accBy[per][o]);
     const ref = o < 0 ? d.P0 : d.c[k]; // 「不會動」的猜法：開盤前用昨收，盤中用現價
     // 相似日：只能從之前的日子找
     {
@@ -298,14 +332,14 @@ for (let n = FIRST; n < days.length; n++) {
         if (xs.length !== actual.length) continue;
         let se = 0;
         xs.forEach((v, i) => (se += Math.log(v / actual[i]) ** 2));
-        const t = lineAcc[o][l];
+        const t = tee(lineAcc[o][l], lineAccBy[per][o][l]);
         t.se += se;
         t.n += xs.length;
         t.days++;
         if (Math.sign(xs[xs.length - 1] - ref) === Math.sign(actual[actual.length - 1] - ref)) t.hit++;
         if (se < bestE) (bestE = se), (bestL = l);
       }
-      if (bestL) lineAcc[o][bestL].best++;
+      if (bestL) tee(lineAcc[o][bestL], lineAccBy[per][o][bestL]).best += 1;
       if (o === -1 || o === 12) record.push({ date: d.date, origin: o, ref, blend: lines.blend[lines.blend.length - 1], model: modelCloses[modelCloses.length - 1], avg: avgN[avgN.length - 1] ?? NaN, actual: d.c[BARS] });
     }
     for (const b of f.bars) {
@@ -343,26 +377,46 @@ for (let n = FIRST; n < days.length; n++) {
 }
 const rmse = (a: number[]) => Math.sqrt(mean(a.map((v) => v * v)));
 const mae = (a: number[]) => mean(a.map(Math.abs));
-const byOrigin = ORIGINS.map((o) => {
-  const a = acc[o];
-  return {
+/** 各預測時間點的成績（振幅、高低點、區間、走勢）。 */
+const summarize = (set: Record<number, Acc>) =>
+  ORIGINS.map((o) => {
+    const a = set[o];
+    return {
+      origin: o,
+      label: ORIGIN_LABEL[o],
+      // 收盤走勢：每根 K 棒收盤價的誤差（RMSE），模型 vs 不會動
+      pathRmse: r5(rmse(a.pe)),
+      pathNaive: r5(rmse(a.pn)),
+      // 約 80% 區間實際涵蓋的比例
+      coverage: r5(a.cov / (a.covN || 1)),
+      // 每根 K 棒振幅的平均誤差，模型 vs 時段平均
+      rangeMae: r5(mean(a.re)),
+      rangeNaive: r5(mean(a.rn)),
+      // 振幅（ln）的 R²：比時段平均好多少
+      rangeR2: r5(1 - mean(a.rl.map((v) => v * v)) / (mean(a.rlb.map((v) => v * v)) || 1)),
+      // 今天最高、最低點的平均誤差，模型 vs 平均高低點
+      hlMae: r5(mae(a.he)),
+      hlNaive: r5(mae(a.hn)),
+    };
+  });
+/** 各條預測線的成績（每根收盤誤差、收盤方向命中率、最接近實際的比例）。 */
+const summarizeLines = (set: LineAcc) =>
+  ORIGINS.map((o) => ({
     origin: o,
     label: ORIGIN_LABEL[o],
-    // 收盤走勢：每根 K 棒收盤價的誤差（RMSE），模型 vs 不會動
-    pathRmse: r5(rmse(a.pe)),
-    pathNaive: r5(rmse(a.pn)),
-    // 約 80% 區間實際涵蓋的比例
-    coverage: r5(a.cov / (a.covN || 1)),
-    // 每根 K 棒振幅的平均誤差，模型 vs 時段平均
-    rangeMae: r5(mean(a.re)),
-    rangeNaive: r5(mean(a.rn)),
-    // 振幅（ln）的 R²：比時段平均好多少
-    rangeR2: r5(1 - mean(a.rl.map((v) => v * v)) / (mean(a.rlb.map((v) => v * v)) || 1)),
-    // 今天最高、最低點的平均誤差，模型 vs 平均高低點
-    hlMae: r5(mae(a.he)),
-    hlNaive: r5(mae(a.hn)),
-  };
-});
+    ...Object.fromEntries(
+      LINES.map((l) => {
+        const t = set[o][l];
+        return [l, { rmse: r5(Math.sqrt(t.se / (t.n || 1))), hit: r5(t.hit / (t.days || 1)), best: r5(t.best / (t.days || 1)) }];
+      }),
+    ),
+  }));
+const byOrigin = summarize(acc);
+const oosDays = days.slice(FIRST);
+const periodInfo = (p: Period) => {
+  const ds = oosDays.filter((d) => p === 'all' || periodOf(d.date) === p);
+  return ds.length ? { from: ds[0].date, to: ds[ds.length - 1].date, days: ds.length, byOrigin: summarize(accBy[p]), lines: summarizeLines(lineAccBy[p]) } : null;
+};
 console.log('回測（樣本外）：');
 for (const b of byOrigin)
   console.log(`  ${b.label}：走勢 ${(b.pathRmse! * 100).toFixed(3)}% vs 不動 ${(b.pathNaive! * 100).toFixed(3)}%、區間涵蓋 ${(b.coverage! * 100).toFixed(0)}%、振幅誤差 ${(b.rangeMae! * 100).toFixed(3)}% vs ${(b.rangeNaive! * 100).toFixed(3)}%（R² ${b.rangeR2}）、高低點 ${(b.hlMae! * 100).toFixed(3)}% vs ${(b.hlNaive! * 100).toFixed(3)}%`);
@@ -397,6 +451,57 @@ const ctxOut = (c: DailyCtx) => Object.fromEntries(Object.entries(c).map(([k, v]
 const lin = (x: LinModel) => ({ mean: x.mean.map(r5), sd: x.sd.map(r5), coef: x.coef.map(r5) });
 const verdictOf = (b: (typeof byOrigin)[number]) => (b.pathRmse ?? 1) < (b.pathNaive ?? 0) * 0.995;
 
+// ---------------------------------------------------------------- 事前存檔與實盤成績
+const finalChoice = ORIGINS.map((o) => ({ origin: o, ...bestChoice(o) }));
+/** 下一個交易日開盤前的預測（全部資料訓練的模型，只用到最後一個交易日收盤為止）。 */
+function nextDayForecast() {
+  const ctx = dailyCtx(taiex.length)!;
+  const P0 = taiex[taiex.length - 1][4];
+  const f = forecastDay(final.m, final.dm, [], -1, null, P0, ctx);
+  const model = [f.open, ...f.bars.map((b) => b.c)];
+  const an = analogLines(lib, { k: -1, gap: NaN, r: [0], ctx }, P0, 20, 20);
+  const ch = finalChoice.find((c) => c.origin === -1)!;
+  const avg = avgOf(an.lines, ch.n);
+  const r = (xs: number[]) => xs.map((v) => r5(v));
+  return { P0, model: r(model), avg: r(avg), blend: r(blendLine(model, avg, ch.w)), analogs: an.lines.slice(0, 3).map((l) => ({ date: l.date, closes: r(l.closes) })), dayHigh: r5(f.dayHigh), dayLow: r5(f.dayLow), choice: ch };
+}
+const ARCHIVE_DIR = process.env.ARCHIVE_DIR;
+if (ARCHIVE_DIR) {
+  if (canArchive(lastDate)) console.log(writeArchive(ARCHIVE_DIR, 'intraday', lastDate, nextDayForecast()) ? `事前存檔：${lastDate} 收盤後 → 下一個交易日` : `事前存檔：${lastDate} 已經存過`);
+  else console.log(`事前存檔：現在不是 ${lastDate} 收盤後到下一個交易日開盤前，不存`);
+}
+// 實盤成績：存檔裡的預測 vs 之後實際的走勢（只用存檔的數字）
+type Arch = { P0: number; model: number[]; avg: number[]; blend: number[]; dayHigh: number; dayLow: number };
+const fwRows: Array<{ asOf: string; date: string; P0: number; actual: number; blend: number; model: number; avg: number; rmse: Record<string, number>; hiErr: number; loErr: number }> = [];
+for (const a of readArchives<Arch>(process.env.FORECASTS_DIR, 'intraday')) {
+  const i = dIdx.get(a.asOf);
+  const next = i == null ? undefined : taiex[i + 1]?.[0];
+  const d = next ? days.find((x) => x.date === next) : undefined;
+  if (!d) continue;
+  const rm = (xs: number[]) => Math.sqrt(mean(xs.map((v, j) => Math.log(v / d.c[j]) ** 2)));
+  fwRows.push({
+    asOf: a.asOf,
+    date: d.date,
+    P0: a.P0,
+    actual: d.c[BARS],
+    blend: a.blend.at(-1)!,
+    model: a.model.at(-1)!,
+    avg: a.avg.at(-1)!,
+    rmse: { blend: r5(rm(a.blend))!, model: r5(rm(a.model))!, avg: r5(rm(a.avg))!, flat: r5(rm(a.model.map(() => a.P0)))! },
+    hiErr: r5(Math.log(a.dayHigh / Math.max(...d.ix.map((b) => b[1]))))!,
+    loErr: r5(Math.log(a.dayLow / Math.min(...d.ix.map((b) => b[2]))))!,
+  });
+}
+const hitOf = (k: 'blend' | 'model' | 'avg') => fwRows.filter((r) => Math.sign(r[k] - r.P0) === Math.sign(r.actual - r.P0)).length;
+const forward = {
+  days: fwRows.length,
+  hit: { blend: hitOf('blend'), model: hitOf('model'), avg: hitOf('avg') },
+  rmse: Object.fromEntries(['blend', 'model', 'avg', 'flat'].map((k) => [k, r5(Math.sqrt(mean(fwRows.map((r) => r.rmse[k] ** 2))))])),
+  rows: fwRows.slice(-30).reverse(),
+};
+console.log(`實盤成績：${forward.days} 天（事前存檔）`);
+if (process.env.ARCHIVE_ONLY) process.exit(0);
+
 writeFileSync(
   join(dir, 'predict-intraday.json'),
   JSON.stringify({
@@ -417,14 +522,14 @@ writeFileSync(
     next: { after: lastDate, P0: taiex[taiex.length - 1][4], L0: lClose.get(lastDate) ?? null, ctx: ctxOut(dailyCtx(taiex.length)!) },
     recent: days.slice(-10).map((d) => ({ date: d.date, P0: d.P0, L0: prevL(d.date), ix: d.ix, ctx: ctxOut(d.ctx) })),
     // 各種預測線的樣本外成績（每根收盤誤差 RMSE、收盤方向命中率、最接近實際的比例）
-    lines: ORIGINS.map((o) => ({
-      origin: o,
-      label: ORIGIN_LABEL[o],
-      ...Object.fromEntries(LINES.map((l) => {
-        const t = lineAcc[o][l];
-        return [l, { rmse: r5(Math.sqrt(t.se / (t.n || 1))), hit: r5(t.hit / (t.days || 1)), best: r5(t.best / (t.days || 1)) }];
-      })),
-    })),
+    lines: summarizeLines(lineAcc),
+    // 分期間：hold＝調整模型時從沒看過的期間（公正）、dev＝開發期間（看過，可能偏樂觀）
+    periods: { hold: periodInfo('hold'), dev: periodInfo('dev') },
+    devStart: DEV_START,
+    // 回放用的模型（回放那幾天開始之前的模型，不會看到答案）
+    replay: replaySnap,
+    // 事前存檔的實盤成績
+    forward,
     // 最近 20 天的預測紀錄
     record: record.slice(-40).map((r) => ({ ...r, ref: r5(r.ref), blend: r5(r.blend), model: r5(r.model), avg: r5(r.avg), actual: r5(r.actual) })),
     // 自動挑的設定（到最後一天為止誤差最小；網頁畫相似日平均與綜合預測用）

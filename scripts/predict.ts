@@ -17,6 +17,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { adjustForSplits, detectSplits } from '../web/src/domain/splits.ts';
+import { canArchive, readArchives, writeArchive } from './lib/archive.ts';
 import { loadFinQuarters } from './lib/finQuarters.ts';
 import { dot, logistic, maxDrawdown, mean, rankCenter, ridge, sigmoid, spearman, standardizer, std } from './lib/ml.ts';
 
@@ -651,5 +652,59 @@ if (dt) {
   console.log(`00631L 當沖：${b.trades} 筆、勝率 ${b.winRate}、累計 ${b.total}（一直做多 ${b.alwaysLong}）`);
 }
 
-writeFileSync(join(dir, 'predict.json'), JSON.stringify({ generatedAt: new Date().toISOString(), horizon: H, market: marketOut, stocks: stockOut, dayTrade: dayTradeOut }));
+// ================================================================ 事前存檔與實盤成績
+// 收盤後把「今天收盤算出來的預測」存進 forecasts 分支（只新增不覆蓋），之後只用存檔的數字打分數
+type DayTradeRule = { lastClose: number; cost: number; rule: { a: number; b: number; gapMean: number; gapSd: number } };
+const asOf = cal[T - 1];
+if (process.env.ARCHIVE_DIR) {
+  const dtr = dayTradeOut as (DayTradeRule & { code: string }) | null;
+  const data = {
+    market: { probUp: marketOut.probUp, expReturn: marketOut.expReturn },
+    stocks: { all: stockOut.all, top: stockOut.top.map((x) => x.code), bottom: stockOut.bottom.map((x) => x.code) },
+    dayTrade: dtr ? { code: dtr.code, lastClose: dtr.lastClose, cost: dtr.cost, rule: dtr.rule } : null,
+  };
+  if (canArchive(asOf)) console.log(writeArchive(process.env.ARCHIVE_DIR, 'daily', asOf, data) ? `事前存檔：${asOf} 收盤後的預測` : `事前存檔：${asOf} 已經存過`);
+  else console.log(`事前存檔：現在不是 ${asOf} 收盤後到下一個交易日開盤前，不存`);
+}
+type DailyArch = { market: { probUp: number; expReturn: number }; stocks: { all: Record<string, number>; top: string[]; bottom: string[] }; dayTrade: DayTradeRule | null };
+const fw = {
+  stocks: [] as Array<{ asOf: string; ic: number; top: number; bottom: number; all: number; market: number }>,
+  market: [] as Array<{ asOf: string; probUp: number; actual: number }>,
+  dayTrade: [] as Array<{ asOf: string; date: string; gap: number; pred: number; action: number; actual: number; pnl: number }>,
+};
+for (const a of readArchives<DailyArch>(process.env.FORECASTS_DIR, 'daily')) {
+  const i = calIdx.get(a.asOf);
+  if (i == null) continue;
+  // 個股與大盤：20 個交易日後才知道結果
+  if (i + H < T) {
+    const codes = Object.keys(a.stocks.all).filter((c) => sIdx.has(c));
+    const r = (c: string) => ret(stocks[sIdx.get(c)!].close, i + H, H);
+    const rets = codes.map(r);
+    const ok = codes.map((c, n) => [a.stocks.all[c], rets[n]] as [number, number]).filter(([, v]) => Number.isFinite(v));
+    const allMean = mean(ok.map((x) => x[1]));
+    const avgOf = (cs: string[]) => mean(cs.map(r).filter(Number.isFinite));
+    fw.stocks.push({ asOf: a.asOf, ic: r4(spearman(ok.map((x) => x[0]), ok.map((x) => x[1])))!, top: r4(avgOf(a.stocks.top))!, bottom: r4(avgOf(a.stocks.bottom))!, all: r4(allMean)!, market: r4(ixClose[i + H] / ixClose[i] - 1)! });
+    fw.market.push({ asOf: a.asOf, probUp: a.market.probUp, actual: r4(ixClose[i + H] / ixClose[i] - 1)! });
+  }
+  // 00631L 當沖：下一個交易日開盤進場、收盤出場
+  if (a.dayTrade && dt && i + 1 < T && dt.has[i + 1]) {
+    const o = dt.open[i + 1];
+    const c = dt.close[i + 1];
+    const { a: ra, b: rb, gapMean, gapSd } = a.dayTrade.rule;
+    const gap = o / a.dayTrade.lastClose - 1;
+    const pred = ra + rb * Math.max(-4, Math.min(4, (gap - gapMean) / (gapSd || 1)));
+    const action = pred > a.dayTrade.cost ? 1 : pred < -a.dayTrade.cost ? -1 : 0;
+    const actual = c / o - 1;
+    fw.dayTrade.push({ asOf: a.asOf, date: cal[i + 1], gap: r4(gap)!, pred: r4(pred)!, action, actual: r4(actual)!, pnl: r4(action ? action * actual - a.dayTrade.cost : 0)! });
+  }
+}
+const forward = {
+  stocks: { n: fw.stocks.length, icMean: r4(mean(fw.stocks.map((x) => x.ic))), topExcess: r4(mean(fw.stocks.map((x) => x.top - x.all))), bottomExcess: r4(mean(fw.stocks.map((x) => x.bottom - x.all))), rows: fw.stocks.slice(-20).reverse() },
+  market: { n: fw.market.length, hit: fw.market.filter((x) => (x.probUp > 0.5) === (x.actual > 0)).length, rows: fw.market.slice(-20).reverse() },
+  dayTrade: { n: fw.dayTrade.length, trades: fw.dayTrade.filter((x) => x.action).length, total: r4(fw.dayTrade.reduce((s, x) => s + x.pnl, 0)), rows: fw.dayTrade.slice(-20).reverse() },
+};
+console.log(`實盤成績（事前存檔）：個股 ${forward.stocks.n} 期、大盤 ${forward.market.n} 期、當沖 ${forward.dayTrade.n} 天`);
+if (process.env.ARCHIVE_ONLY) process.exit(0);
+
+writeFileSync(join(dir, 'predict.json'), JSON.stringify({ generatedAt: new Date().toISOString(), horizon: H, market: marketOut, stocks: stockOut, dayTrade: dayTradeOut, forward }));
 console.log(`predict.json 完成（${((Date.now() - t0) / 1000).toFixed(1)}s）`);

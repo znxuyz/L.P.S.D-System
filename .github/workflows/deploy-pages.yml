@@ -41,6 +41,13 @@ jobs:
             mkdir .data
           fi
 
+      # 預測的事前存檔（forecasts 分支，update-data.yml 每天收盤後新增）：給預測頁打「實盤成績」
+      - name: 取出預測存檔
+        run: |
+          if git ls-remote --exit-code --heads "$DATA_REMOTE" forecasts >/dev/null; then
+            git clone --depth 1 --branch forecasts "$DATA_REMOTE" .forecasts
+          fi
+
       # 模擬盤用：每天全市場行情（排行榜、偽即時行情）與新聞，由 data 分支的資料產生，不另外存
       - name: 產生模擬盤資料
         run: |
@@ -50,9 +57,9 @@ jobs:
           # 模擬盤「選股」分頁：每個交易日收盤後、用當時看得到的資料跑一次五大選股
           if [ -d .data/ratios ] && [ -d .data/candles ]; then node scripts/sim-screen.ts .data; fi
           # 「預測」頁：個股 20 日排名、大盤 20 日方向、00631L 當沖（逐段往前滾訓練，含樣本外回測）
-          if [ -d .data/candles ] && [ -f .data/index/TAIEX.json ]; then node scripts/predict.ts .data; fi
+          if [ -d .data/candles ] && [ -f .data/index/TAIEX.json ]; then FORECASTS_DIR=.forecasts node scripts/predict.ts .data; fi
           # 00631L 5 分 K 走勢預測（加權指數 5 分 K，資料不夠時輸出 ready: false）
-          if [ -f .data/index/TAIEX.json ]; then node scripts/predict-intraday.ts .data; fi
+          if [ -f .data/index/TAIEX.json ]; then FORECASTS_DIR=.forecasts node scripts/predict-intraday.ts .data; fi
           # 沒有即時行情金鑰時首頁用的最近一個交易日收盤資料
           node scripts/close-snapshot.ts .data
 
