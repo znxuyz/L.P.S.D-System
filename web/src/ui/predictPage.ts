@@ -4,7 +4,7 @@
  * - 每個模型都附上樣本外回測成績，並自動判斷「有沒有比隨便猜更好」；沒有的就直接說沒有。
  * - 點個股可以跳到個股分析頁。
  */
-import { dayTradeBands, dayTradeCall, loadAnalogs, loadPaper, loadPaperBacktest, loadPredict, loadPredictIntraday, type PaperData, type PredictData, type StockPick, type Verdict } from '../data/predict';
+import { dayTradeBands, dayTradeCall, loadAnalogs, loadPaper, loadPaperBacktest, loadPredict, loadPredictIntraday, type PaperData, type PredictData, type RevStocks, type StockPick, type Verdict } from '../data/predict';
 import { sessionAt, taipeiDate } from '../data/liveProvider';
 import { sessionOpenMs } from '../data/twse';
 import type { IndexPoint } from '../data/types';
@@ -141,10 +141,9 @@ function paperHtml(p: PaperData | null, bt: PaperData | null): string {
   const tr = p?.trend ?? bt?.trend;
   const head = `<header class="pd-head"><div><p class="eyebrow">Paper trading · 100 萬</p><h2>模型模擬帳戶</h2></div></header>
     <p class="pd-lead">完全照規則與「開盤前就存檔」的預測自動交易，用之後實際的開盤價、收盤價成交，扣手續費 6 折與證交稅。<b>這是判斷模型能不能賺錢的依據</b>，每週檢查時也依它來修正。</p>
-    <ul class="pd-rules"><li><b>趨勢 80%</b>：前一天加權指數收盤在 200 日均線之上 → 持有 00631L（2 倍槓桿），跌破 → 全部換現金，隔天開盤換。這是公開研究的經典規則（槓桿 ETF＋200 日均線），不是用我們的資料調出來的。</li>
-      <li><b>個股 10%</b>：最看好前 10 檔，隔天開盤平均買進，持有 20 個交易日後收盤賣出。</li>
-      <li><b>00631L 開盤當沖 10%</b>：開盤看跳空決定做多／做空／觀望，收盤出場。</li></ul>
-    <p class="muted pd-small">個股排名與開盤當沖在 2022～2026 的回測都沒有贏大盤，所以只放小比例繼續觀察；實盤證明有用才加碼。區間進出場模型一直判斷「不交易」，不放錢。</p>
+    <ul class="pd-rules"><li><b>趨勢 50%</b>：前一天加權指數收盤在 200 日均線之上 → 持有 00631L（2 倍槓桿），跌破 → 全部換現金，隔天開盤換。這是公開研究的經典規則（槓桿 ETF＋200 日均線），不是用我們的資料調出來的。</li>
+      <li><b>營收選股 50%</b>：每月 12 日後第一個交易日開盤，換成下面「營收選股」的 20 檔（留在名單的不動）；大盤在 200 日均線之下就全部持有現金。</li></ul>
+    <p class="muted pd-small">舊的逆勢個股排名、00631L 開盤當沖、區間進出場，2022～2026 回測都沒有贏大盤，不放錢（成績在各自的區塊）。</p>
     ${tr ? `<p class="pd-advice">下一個交易日：<b class="${tr.nextHold ? 'up' : 'down'}">${tr.nextHold ? '持有 00631L' : '持有現金（不持有 00631L）'}</b>　<span class="muted">加權指數 ${esc(tr.asOf)} 收盤 ${num(tr.close, 0)}，200 日均線 ${num(tr.ma, 0)}（${tr.dist >= 0 ? '高於' : '低於'}均線 ${num(Math.abs(tr.dist) * 100, 1)}%）</span></p>` : ''}`;
   const book: Record<string, string> = { stocks: '個股', dayTrade: '開盤當沖', trend: '趨勢', range: '區間進出場' };
   const live = !p || !p.days
@@ -154,10 +153,10 @@ function paperHtml(p: PaperData | null, bt: PaperData | null): string {
       <div><dt>帳戶總值</dt><dd class="num ${cls(p.ret)}">${num(p.equity, 0)}</dd></div>
       <div><dt>總報酬</dt><dd class="num ${cls(p.ret)}">${pct(p.ret)}</dd></div>
       <div><dt>同期間買大盤</dt><dd class="num ${cls(p.benchmark)}">${pct(p.benchmark)}</dd></div>
-      <div><dt>趨勢／個股／當沖</dt><dd class="num"><span class="${cls(p.books.trend)}">${pct(p.books.trend)}</span>／<span class="${cls(p.books.stocks)}">${pct(p.books.stocks)}</span>／<span class="${cls(p.books.dayTrade)}">${pct(p.books.dayTrade)}</span></dd></div>
+      <div><dt>趨勢／營收選股</dt><dd class="num"><span class="${cls(p.books.trend)}">${pct(p.books.trend)}</span>／<span class="${cls(p.books.stocks)}">${pct(p.books.stocks)}</span></dd></div>
     </dl>
     ${p.curve.length >= 2 ? lineChart(p.curve.map((c) => [c[0], c[1] / p.capital, c[5] / p.capital] as [string, number, number]), [{ name: '模型模擬帳戶', cls: 's1' }, { name: '同額買大盤', cls: 's3' }]) : ''}
-    ${p.positions.length ? `<h3 class="pd-sub">目前持股（${esc(p.heldSince ?? '')} 買進，持有 20 個交易日）</h3><div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>股票</th><th class="num">股數</th><th class="num">成本</th><th class="num">現價</th><th class="num">報酬</th></tr></thead><tbody>${p.positions.map((x) => `<tr><td><b>${esc(x.code)}</b> ${esc(x.name)}</td><td class="num">${num(x.shares)}</td><td class="num">${num(x.cost, 2)}</td><td class="num">${x.price == null ? '—' : num(x.price, 2)}</td><td class="num ${cls(x.ret)}">${pct(x.ret)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${p.positions.length ? `<h3 class="pd-sub">營收選股目前持股（${esc(p.heldSince ?? '')} 換股，每月 12 日後換一次）</h3><div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>股票</th><th class="num">股數</th><th class="num">成本</th><th class="num">現價</th><th class="num">報酬</th></tr></thead><tbody>${p.positions.map((x) => `<tr><td><b>${esc(x.code)}</b> ${esc(x.name)}</td><td class="num">${num(x.shares)}</td><td class="num">${num(x.cost, 2)}</td><td class="num">${x.price == null ? '—' : num(x.price, 2)}</td><td class="num ${cls(x.ret)}">${pct(x.ret)}</td></tr>`).join('')}</tbody></table></div>` : ''}
     <details class="pd-more"><summary>最近的交易（共 ${num(p.tradeCount)} 筆）</summary>
       <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>日期</th><th>部位</th><th>標的</th><th>動作</th><th class="num">價格</th><th class="num">損益</th><th>說明</th></tr></thead>
       <tbody>${p.trades.map((t) => `<tr><td class="num">${esc(t.date)}</td><td>${book[t.book] ?? t.book}</td><td><b>${esc(t.code)}</b> ${esc(t.name)}</td><td>${t.side === 'buy' ? '買進' : t.side === 'sell' ? '賣出' : t.side === 'long' ? '做多' : '做空'}</td><td class="num">${t.price == null ? '—' : num(t.price, 2)}</td><td class="num ${cls(t.pnl)}">${t.pnl == null ? '—' : num(t.pnl, 0)}</td><td class="muted">${esc(t.note)}</td></tr>`).join('')}</tbody></table></div>
@@ -168,11 +167,11 @@ function paperHtml(p: PaperData | null, bt: PaperData | null): string {
       <div><dt>總報酬</dt><dd class="num ${cls(bt.ret)}">${pct(bt.ret)}</dd></div>
       <div><dt>同期間買大盤</dt><dd class="num ${cls(bt.benchmark)}">${pct(bt.benchmark)}</dd></div>
       <div><dt>最大回落</dt><dd class="num down">${pct(bt.maxDD)}</dd></div>
-      <div><dt>趨勢／個股／當沖</dt><dd class="num"><span class="${cls(bt.books.trend)}">${pct(bt.books.trend)}</span>／<span class="${cls(bt.books.stocks)}">${pct(bt.books.stocks)}</span>／<span class="${cls(bt.books.dayTrade)}">${pct(bt.books.dayTrade)}</span></dd></div>
+      <div><dt>趨勢／營收選股</dt><dd class="num"><span class="${cls(bt.books.trend)}">${pct(bt.books.trend)}</span>／<span class="${cls(bt.books.stocks)}">${pct(bt.books.stocks)}</span></dd></div>
     </dl>
     ${lineChart(bt.curve.filter((_, i) => i % 5 === 0 || i === bt.curve.length - 1).map((c) => [c[0], c[1] / bt.capital, c[5] / bt.capital] as [string, number, number]), [{ name: '模擬帳戶（回測）', cls: 's1' }, { name: '同額買大盤', cls: 's3' }], { log: true })}
     <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>年度</th><th class="num">帳戶</th><th class="num">大盤</th><th class="num">差距</th></tr></thead><tbody>${yearly(bt).map(([y, a, b]) => `<tr><td>${esc(y)}</td><td class="num ${cls(a)}">${pct(a)}</td><td class="num ${cls(b)}">${pct(b)}</td><td class="num ${cls(a - b)}">${pct(a - b)}</td></tr>`).join('')}</tbody></table></div>
-    <p class="pd-note is-warn">回測的個股與當沖預測都是逐段往前滾（每天只用那天以前的資料）。但要誠實說：這套配置是看過 2022～2026 的回測後才決定的（個股、當沖降到 10%）；趨勢規則本身是公開文獻的標準設定（200 日均線），沒有用這段資料調參數。槓桿 ETF 的回落比大盤大，而且盤整來回震盪時會被巴（2020～2026 共換手約 18 次）。真正公正的成績看上面的「實盤」。</p>`
+    <p class="pd-note is-warn">回測的個股與當沖預測都是逐段往前滾（每天只用那天以前的資料）。但要誠實說：這套配置是看過 2022～2026 的回測後才決定的（個股改用營收選股、拿掉當沖）；趨勢規則本身是公開文獻的標準設定（200 日均線），沒有用這段資料調參數。槓桿 ETF 的回落比大盤大，而且盤整來回震盪時會被巴（2020～2026 共換手約 18 次）。真正公正的成績看上面的「實盤」。</p>`
     : '';
   return `<section class="pd-card glass" id="pd-paper">${head}${live}${hist}</section>`;
 }
@@ -210,12 +209,43 @@ function marketHtml(m: PredictData['market'], h: number, f?: PredictData['forwar
   </section>`;
 }
 
+function revStocksHtml(r: RevStocks): string {
+  const b = r.backtest;
+  const pct = (v: number | null | undefined, d = 0) => (v == null ? '—' : pctTxt(v, d));
+  const status = !r.trendOk
+    ? `<b class="down">下一次換股（約 ${esc(md(r.nextRebalance))}）如果加權指數仍在 200 日均線之下，就全部持有現金</b>；名單照樣每天更新給你參考。`
+    : r.rebalanceTomorrow
+      ? `<b class="up">明天（${esc(md(r.tradeDate))}）是換股日</b>，開盤照下面名單換股。`
+      : `下一次換股約 <b>${esc(md(r.nextRebalance))}</b>（每月 12 日後第一個交易日），名單到時候以前一天收盤後的為準。`;
+  const v = (x: number | null | undefined, d = 0) => (x == null ? '—' : pctTxt(x, d));
+  return `<section class="pd-card glass" id="pd-rev">
+    <header class="pd-head"><div><p class="eyebrow">Revenue picks · 每月換股</p><h2>營收選股</h2></div>${badge((b.total ?? 0) > (b.market ?? 0) ? 'signal' : 'none')}</header>
+    <p class="pd-lead">從根本原因選股：股價長期跟著<b>公司賺多少錢</b>走，而<b>每月營收</b>是台股最早公布的獲利資料（次月 10 日前，比季報早 1～2 個月）。每月替 ${num(r.universe)} 檔（近 20 日平均成交額 0.5 億以上）打分數，分數是下面四項在全部股票裡的排名平均，買最高的 ${r.n} 檔、等權持有一個月：</p>
+    <ul class="pd-rules"><li><b>營收成長加速</b>：近 3 個月年增率 − 近 12 個月年增率（生意正在變好，而不只是一直很好）</li>
+      <li><b>營收創新高</b>：近 3 個月營收 ÷ 過去 3 年最好的 3 個月</li>
+      <li><b>毛利率改善</b>：最新一季毛利率 − 去年同季（產品漲價、缺貨的證據）</li>
+      <li><b>法人買超</b>：近 20 日法人買超 ÷ 成交量（拿到研究資料的人在買）</li></ul>
+    <p class="pd-advice">${status}<br><span class="muted">用到的營收：${esc(r.revMonth ?? '—')}；資料到 ${esc(md(r.asOf))}。</span></p>
+    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>#</th><th>股票</th><th class="num">收盤</th><th class="num">分數</th><th class="num">近 3 月營收年增</th><th class="num">成長加速</th><th class="num">營收 ÷ 3 年最高</th><th class="num">毛利率變化</th></tr></thead>
+    <tbody>${r.top.map((x, i) => `<tr data-code="${esc(x.code)}" tabindex="0" title="看 ${esc(x.code)} 個股分析"><td class="num muted">${i + 1}</td><td><b>${esc(x.code)}</b> ${esc(x.name)}</td><td class="num">${x.close == null ? '—' : num(x.close, x.close < 100 ? 2 : 1)}</td><td class="num">${num(x.score)}</td><td class="num ${cls(x.vals.revYoy3)}">${v(x.vals.revYoy3)}</td><td class="num ${cls(x.vals.revAccel)}">${v(x.vals.revAccel)}</td><td class="num">${x.vals.revHigh == null ? '—' : num(x.vals.revHigh, 2) + ' 倍'}</td><td class="num ${cls(x.vals.gmChg)}">${v(x.vals.gmChg, 1)}</td></tr>`).join('')}</tbody></table></div>
+    <h3 class="pd-sub">回測（${esc(b.from ?? '')} ～ ${esc(b.to)}，${num(b.periods)} 次換股，逐段往前滾、扣交易成本）</h3>
+    <dl class="pd-stats">
+      <div><dt>選股總報酬</dt><dd class="num ${cls(b.total)}">${pct(b.total)}</dd></div>
+      <div><dt>同期間加權指數</dt><dd class="num ${cls(b.market)}">${pct(b.market)}</dd></div>
+      <div><dt>每月贏大盤的比例</dt><dd class="num">${b.win == null ? '—' : num(b.win * 100, 0) + '%'}</dd></div>
+    </dl>
+    ${b.curve.length >= 2 ? lineChart(b.curve, [{ name: '營收選股（含跌破 200 日均線持有現金）', cls: 's1' }, { name: '加權指數', cls: 's3' }], { log: true }) : ''}
+    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>年度</th><th class="num">營收選股</th><th class="num">加權指數</th><th class="num">差距</th></tr></thead><tbody>${b.years.map((y) => `<tr><td>${esc(y.year)}</td><td class="num ${cls(y.ret)}">${pct(y.ret)}</td><td class="num ${cls(y.market)}">${pct(y.market)}</td><td class="num ${cls((y.ret ?? 0) - (y.market ?? 0))}">${pct((y.ret ?? 0) - (y.market ?? 0))}</td></tr>`).join('')}</tbody></table></div>
+    <p class="pd-note">怎麼確定沒看答案：每一次換股只用當時已經公布的資料（M 月營收從次月 11 日起才算知道、季報過了申報期限才算）；四項訊號、20 檔、每月 12 日換股都是看結果之前就定好的，換成 10、30、50 檔也都贏大盤。要誠實說的是：單看「營收創新高」那一項成績更好，但它是看過結果才知道的，所以沒有改用它。2024 年（台積電一枝獨秀）輸大盤；大盤在 200 日均線之下時持有現金，所以 2022 年空頭沒有大虧。真正的考驗是模擬帳戶的實盤。</p>
+  </section>`;
+}
+
 function stocksHtml(s: PredictData['stocks'], h: number, f?: PredictData['forward']): string {
   const b = s.backtest;
   return `<section class="pd-card glass" id="pd-stocks">
-    <header class="pd-head"><div><p class="eyebrow">Stocks · ${h} 日</p><h2>個股排名</h2></div>${badge(s.verdict)}</header>
+    <header class="pd-head"><div><p class="eyebrow">Stocks · ${h} 日</p><h2>舊個股排名 <small class="muted">（逆勢模型，觀察用）</small></h2></div>${badge(s.verdict)}</header>
     <p class="pd-lead">每天收盤後替 ${num(s.universe)} 檔（近 20 日平均成交額 0.3 億以上）打分數：預測未來 ${h} 個交易日<b>相對其他股票</b>的強弱。分數是全市場排名百分位（100＝最看好）。資料到 ${md(s.asOf)}。</p>
-    <p class="pd-note is-warn"><b>目前僅供觀察，不是買進建議。</b>這版模型偏好「跌深、離一年高點遠、高殖利率」的股票（逆勢撿便宜），2022～2026 逐段往前滾回測，「最看好」名單<b>沒有贏大盤</b>，連全部股票的平均都輸；比較有用的是「最該避開」那一邊。正在改用第一手資料（每月營收的成長與加速、毛利率、法人買賣）重建，證明能贏大盤才會拿掉這段提醒。</p>
+    <p class="pd-note is-warn"><b>目前僅供觀察，不是買進建議。</b>這版模型偏好「跌深、離一年高點遠、高殖利率」的股票（逆勢撿便宜），2022～2026 逐段往前滾回測，「最看好」名單<b>沒有贏大盤</b>，連全部股票的平均都輸；比較有用的是「最該避開」那一邊。正式的選股請看上面的「營收選股」。</p>
     <div class="pd-cols">
       <div><h3 class="pd-sub">最看好 <small class="muted">前 30 名</small></h3>${pickTable(s.top, 'top')}</div>
       <div><h3 class="pd-sub">最該避開 <small class="muted">後 15 名</small></h3>${pickTable(s.bottom, 'bottom')}</div>
@@ -399,8 +429,9 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
   </div>`;
   root.innerHTML = `<div class="pd-main">${head}${summary}
     ${paperHtml(paper, paperBt)}
-    ${stocksHtml(d.stocks, d.horizon, d.forward)}
+    ${d.revStocks ? revStocksHtml(d.revStocks) : ''}
     ${marketHtml(d.market, d.horizon, d.forward)}
+    ${stocksHtml(d.stocks, d.horizon, d.forward)}
     ${d.dayTrade ? dayTradeHtml(d.dayTrade, d.forward) : ''}
     <section id="pd-intra"></section>
     <p class="muted pd-foot">預測是依歷史資料統計的結果，<b>不構成投資建議</b>；過去的回測成績不代表未來。更新時間 ${esc(new Date(d.generatedAt).toLocaleString('zh-TW', { hour12: false }))}。</p>
