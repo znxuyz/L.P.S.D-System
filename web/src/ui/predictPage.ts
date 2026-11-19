@@ -215,6 +215,7 @@ function stocksHtml(s: PredictData['stocks'], h: number, f?: PredictData['forwar
   return `<section class="pd-card glass" id="pd-stocks">
     <header class="pd-head"><div><p class="eyebrow">Stocks · ${h} 日</p><h2>個股排名</h2></div>${badge(s.verdict)}</header>
     <p class="pd-lead">每天收盤後替 ${num(s.universe)} 檔（近 20 日平均成交額 0.3 億以上）打分數：預測未來 ${h} 個交易日<b>相對其他股票</b>的強弱。分數是全市場排名百分位（100＝最看好）。資料到 ${md(s.asOf)}。</p>
+    <p class="pd-note is-warn"><b>目前僅供觀察，不是買進建議。</b>這版模型偏好「跌深、離一年高點遠、高殖利率」的股票（逆勢撿便宜），2022～2026 逐段往前滾回測，「最看好」名單<b>沒有贏大盤</b>，連全部股票的平均都輸；比較有用的是「最該避開」那一邊。正在改用第一手資料（每月營收的成長與加速、毛利率、法人買賣）重建，證明能贏大盤才會拿掉這段提醒。</p>
     <div class="pd-cols">
       <div><h3 class="pd-sub">最看好 <small class="muted">前 30 名</small></h3>${pickTable(s.top, 'top')}</div>
       <div><h3 class="pd-sub">最該避開 <small class="muted">後 15 名</small></h3>${pickTable(s.bottom, 'bottom')}</div>
