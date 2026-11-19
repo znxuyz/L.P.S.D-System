@@ -4,9 +4,12 @@
  * - 部署時產生 version.json（這一版的程式檔名），網頁打開時、從背景回來時、每 15 分鐘檢查一次。
  * - 版本不一樣就重新載入；模擬盤正在播放時不打斷，等暫停、離開 App 或按提示再更新。
  * - 同一個新版本最多每 5 分鐘自動重新載入一次（CDN 還沒換好時不會一直重整）。
+ * - 程式沒改、只有資料更新時版本不會變；所以放在背景超過 1 小時再叫回來，也重新載入一次（行情、收盤、大盤風險才會是新的）。
  */
 const CHECK_MS = 15 * 60_000;
 const RETRY_KEY = 'lplc.update.tried';
+/** 在背景放超過這麼久，叫回來時重新載入（每天的資料可能已經更新）。 */
+const STALE_MS = 60 * 60_000;
 
 /** 這一頁載入的程式與樣式檔名（跟 version.json 用同樣的算法）。 */
 function currentVersion(): string {
@@ -90,10 +93,14 @@ export function startUpdateCheck(canReload: () => boolean): void {
     }
   };
 
+  let hiddenAt = 0;
   document.addEventListener('visibilitychange', () => {
     // 切到背景時如果有新版，先重新載入（模擬盤已經在 hidden 時存檔），回來就是新版
     if (document.visibilityState === 'hidden') {
+      hiddenAt = Date.now();
       if (pending) reload();
+    } else if (hiddenAt && Date.now() - hiddenAt > STALE_MS && navigator.onLine && canReload()) {
+      location.reload();
     } else void check();
   });
   window.addEventListener('pageshow', (e) => e.persisted && void check());

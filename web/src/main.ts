@@ -29,6 +29,7 @@ import { loadFavs, toggleFav } from './data/favorites';
 import { adjustSplits } from './data/candles';
 import { marketRows, newsCardHtml, rankCardHtml, riskCardHtml, type MarketRankKey, type MarketRankScope } from './ui/marketExtras';
 import { loadMarketRisk, type MarketRisk } from './data/marketRisk';
+import { DATA_TTL } from './data/refresh';
 import { loadNames, loadNews, loadSimMonth, type NewsItem } from './data/simData';
 
 /** 內容沒變就不重寫（避免每秒重畫打斷捲動與點擊）。 */
@@ -115,7 +116,8 @@ class App {
   private strategy: StrategyId = 'value';
   /** 熱力圖上正在標示的股票群：五大選股的某個策略，或某檔 ETF 的成分股。 */
   /** 市場情報頁的今日排行與新聞。 */
-  private extrasLoading = false;
+  /** 市場情報的資料上次載入時間（超過 30 分鐘、或從背景叫回來時重新載入）。 */
+  private extrasAt = 0;
   private mrankKey: MarketRankKey = 'up';
   private mrankScope: MarketRankScope = 'pool';
   private allMarket: { date: string; rows: ReturnType<typeof marketRows> } | null | undefined;
@@ -487,10 +489,10 @@ class App {
     return PAGES.find((p) => $('.app').classList.contains(`page-${p}`)) ?? 'map';
   }
 
-  /** 市場情報頁的今日排行與新聞（第一次打開時才載入資料）。 */
+  /** 市場情報頁的今日排行、新聞與大盤風險（打開時才載入；資料每天更新，超過 30 分鐘就重新載入）。 */
   private renderExtras(): void {
-    if (!this.extrasLoading) {
-      this.extrasLoading = true;
+    if (Date.now() - this.extrasAt > DATA_TTL) {
+      this.extrasAt = Date.now();
       const today = taipeiDate(Date.now());
       const [y, mo] = today.split('-').map(Number);
       const prev = mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
@@ -589,6 +591,10 @@ class App {
       tab.addEventListener('click', () => this.showPage(tab.dataset.page as Page));
     }
     window.addEventListener('hashchange', () => this.showPage(pageFromHash()));
+    // 從背景叫回來時，市場情報的資料如果放太久了就重新載入（renderExtras 會檢查時間）
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && this.page === 'intel') this.renderPanels();
+    });
     $('#sim-exit').addEventListener('click', () => this.leaveSim());
     // 左上角的拉普拉斯之眼：播放甦醒動畫後進入模擬盤
     $('#logo-btn').addEventListener('click', () => {

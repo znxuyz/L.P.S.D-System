@@ -2,6 +2,8 @@
  * 大盤風險指標（scripts/market-risk.ts 產生的 data/market-risk.json）：
  * 上市融資維持率、融資與融券餘額、外資台指期淨未平倉。
  */
+import { keyedRefresh } from './refresh';
+
 /** [日期, 維持率(%)／null, 融資餘額(億), 融資張數, 融券張數, 外資淨未平倉(口，大台＋小台÷4)／null] */
 export type RiskRow = [string, number | null, number, number, number, number | null];
 
@@ -10,14 +12,16 @@ export interface MarketRisk {
   rows: RiskRow[];
 }
 
-let pending: Promise<MarketRisk | null> | null = null;
-export function loadMarketRisk(): Promise<MarketRisk | null> {
-  pending ??= fetch('data/market-risk.json', { cache: 'no-cache' })
-    .then((r) => (r.ok ? (r.json() as Promise<MarketRisk>) : null))
-    .then((j) => (j && Array.isArray(j.rows) ? j : null))
-    .catch(() => null);
-  return pending;
-}
+const get = keyedRefresh<MarketRisk | null>(
+  () =>
+    fetch('data/market-risk.json', { cache: 'no-cache' })
+      .then((r) => (r.ok ? (r.json() as Promise<MarketRisk>) : null))
+      .then((j) => (j && Array.isArray(j.rows) ? j : null))
+      .catch(() => null),
+  (j) => j != null,
+);
+/** 每天收盤後更新；記住的結果超過 30 分鐘會重抓。 */
+export const loadMarketRisk = (): Promise<MarketRisk | null> => get('');
 
 /** 融資維持率的白話判斷（大盤約 140% 以下常出現斷頭賣壓；個股 130% 以下追繳）。 */
 export function ratioLevel(r: number): { cls: 'ok' | 'warn' | 'bad'; text: string } {
