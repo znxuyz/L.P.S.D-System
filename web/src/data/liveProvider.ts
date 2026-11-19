@@ -1,5 +1,6 @@
 import { FUGLE_WS, FugleClient, FugleError, TAIEX, computeBaseline, parseQuote, type Baseline, type ParsedQuote } from './fugle';
 import { MIS_BATCH, MIS_TAIEX, MisClient, MisError, misChannel, parseMis, type MisExchange } from './twseMis';
+import { fillBars, hasGap } from './backfill';
 import type { DailySeries } from './candles';
 import { nearMonthContract, type FuturesQuote } from './futures';
 import { buildMockUniverse } from './mockUniverse';
@@ -25,6 +26,7 @@ import type { EtfMeta, Fundamentals, IndexPoint, MarketSnapshot, Quote, SessionS
  * - 基本面、籌碼、配息與事件由 main 套上官方資料（overlay）；5 年本益比區間仍是示意值。
  *
  * 當天的報價與每分鐘紀錄也存在瀏覽器，重新整理頁面不會從零開始。
+ * 網頁晚開或中途關掉時，用富果當日 1 分 K 補上開盤以來缺的分鐘（data/backfill.ts）。
  */
 
 export type LiveState = 'connecting' | 'live' | 'closed' | 'error';
@@ -147,6 +149,9 @@ export class LiveProvider implements MarketDataProvider {
   private emitTimer: ReturnType<typeof setTimeout> | undefined;
   private barTimer: ReturnType<typeof setInterval> | undefined;
   private started = false;
+  /** 補抓開盤後缺的分鐘：上次嘗試的時間、是否進行中。 */
+  private backfillTried = 0;
+  private backfilling = false;
 
   private ws?: WebSocket;
   private wsReady = false;
@@ -286,6 +291,7 @@ export class LiveProvider implements MarketDataProvider {
       this.roundMs = Date.now() - started;
       this.persist();
       this.updateStatus();
+      void this.backfill();
       // 收盤或假日只需要確認一次最新資料，之後放慢；開盤前每分鐘確認一次
       const clock = sessionAt(Date.now());
       const minimum = this.mode === 'twse' ? Math.max(0, MIS_ROUND_MS - this.roundMs) : 0;
@@ -648,6 +654,40 @@ export class LiveProvider implements MarketDataProvider {
     }
     this.bars.push({ t, byStock, prices });
     if (this.bars.length % 5 === 0) this.persist();
+  }
+
+  /**
+   * 網頁晚開或中途關掉時，用富果當日 1 分 K 補上開盤以來缺的分鐘（需要富果金鑰；證交所模式有填金鑰也會補）。
+   * 等第一輪報價回來（用真實累計成交額校正）才補；同一天最多每 15 分鐘試一次。
+   */
+  private async backfill(): Promise<void> {
+    const client = this.client;
+    const now = Date.now();
+    if (!client || this.fatal || this.backfilling || now - this.backfillTried < 15 * 60_000) return;
+    const wd = taipeiWeekday(now);
+    if (wd === 0 || wd === 6 || (this.lastQuoteDate && this.lastQuoteDate !== this.today)) return;
+    const open = sessionOpenMs(new Date(now));
+    const until = Math.min(now, open + SESSION_MINUTES * 60_000);
+    if (until <= open || !hasGap(this.bars, open, until)) return;
+    const codes = this.symbols.filter((c) => !this.missing.has(c) && this.quotes[c]);
+    if (codes.length < this.symbols.length / 2) return;
+    this.backfilling = true;
+    this.backfillTried = now;
+    const day = this.today;
+    try {
+      const got = new Map<string, Awaited<ReturnType<FugleClient['intradayCandles']>>>();
+      await Promise.all(codes.map((code) => client.intradayCandles(code).then((rows) => void got.set(code, rows), (e) => this.onError(e, code))));
+      if (this.today !== day || this.fatal) return;
+      const turnoverNow = Object.fromEntries(Object.entries(this.quotes).map(([c, q]) => [c, q.turnover]));
+      const before = this.bars.length;
+      this.bars = fillBars(this.bars, got, turnoverNow, open, until);
+      if (this.bars.length !== before) {
+        this.persist();
+        this.scheduleEmit();
+      }
+    } finally {
+      this.backfilling = false;
+    }
   }
 
   private snapshot(): MarketSnapshot {
