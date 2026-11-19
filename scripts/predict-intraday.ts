@@ -25,6 +25,8 @@ import {
   gapFeatures,
   horizonScale,
   rangeFeatures,
+  PATH_GROUPS,
+  GAP_GROUPS,
   volScale,
   windowVol,
   analogLines,
@@ -48,6 +50,7 @@ import {
 import { adjustForSplits, detectSplits } from '../web/src/domain/splits.ts';
 import { canArchive, readPreOpen, writeArchive } from './lib/archive.ts';
 import { loadUs, usMove } from './lib/us.ts';
+import { loadTx, nightMove } from './lib/txNight.ts';
 import { mean, ridge, standardizer, std } from './lib/ml.ts';
 
 const dir = process.argv[2] ?? 'data';
@@ -68,7 +71,13 @@ const dIdx = new Map(taiex.map((r, i) => [r[0], i]));
 const fut = new Map<string, number>();
 for (const r of read<{ rows: Array<[string, unknown, unknown, unknown, unknown, number | null]> }>(join(dir, 'market-risk.json'), { rows: [] }).rows) if (r[5] != null) fut.set(r[0], r[5]);
 
+// 只存檔（ARCHIVE_ONLY）而且不在存檔時間內：不用算（整套要跑幾分鐘）
+if (process.env.ARCHIVE_ONLY && !canArchive(taiex[taiex.length - 1][0])) {
+  console.log(`事前存檔：現在不是 ${taiex[taiex.length - 1][0]} 收盤後到下一個交易日開盤前，不算`);
+  process.exit(0);
+}
 const usData = loadUs(dir);
+const txData = loadTx(dir);
 /** 第 i 天開盤前看得到的資料。 */
 function dailyCtx(i: number): DailyCtx | null {
   if (i < 6) return null;
@@ -85,6 +94,7 @@ function dailyCtx(i: number): DailyCtx | null {
     usSox: usMove(usData.SOX, taiex[i - 1][0], taiex[i]?.[0] ?? '9999-12-31'),
     usTsm: usMove(usData.TSM, taiex[i - 1][0], taiex[i]?.[0] ?? '9999-12-31'),
     usSpx: usMove(usData.GSPC, taiex[i - 1][0], taiex[i]?.[0] ?? '9999-12-31'),
+    night: nightMove(txData, taiex[i - 1][0], taiex[i]?.[0] ?? null),
   };
 }
 
@@ -119,32 +129,48 @@ if (days.length < 60) {
 /** 樣本：特徵、目標（每一天一組，方便切驗證集）。 */
 type Samples = Array<{ X: number[][]; y: number[] }>;
 /** 用最後 20% 的日子挑 λ（驗證誤差最小），再用全部重新訓練。 */
-function fitLin(byDay: Samples): LinModel & { lambda: number } {
+/**
+ * 用最後 20% 的日子挑 λ 與「要用哪些資料」（驗證誤差最小），再用全部重新訓練。
+ * groups：可以整組拿掉的特徵（例如美股、夜盤）；不用的那組係數為 0。模型每次訓練自己決定，資料有用就用、沒用就不用。
+ */
+function fitLin(byDay: Samples, groups: Record<string, readonly number[]> = {}): LinModel & { lambda: number; use: string[] } {
   const flat = (s: Samples) => ({ X: s.flatMap((d) => d.X), y: s.flatMap((d) => d.y) });
+  const names = Object.keys(groups);
+  // 所有組合：每一組用或不用
+  const masks = Array.from({ length: 1 << names.length }, (_, b) => names.filter((_, i) => b & (1 << i)));
+  const dropOf = (use: string[]) => new Set(names.filter((n) => !use.includes(n)).flatMap((n) => groups[n]));
+  const zap = (z: number[], drop: Set<number>) => (drop.size ? z.map((v, j) => (drop.has(j) ? 0 : v)) : z);
   const cut = Math.floor(byDay.length * 0.8);
   const tr = flat(byDay.slice(0, cut));
   const va = flat(byDay.slice(cut));
-  let best = { lambda: LAMBDAS[1], err: Infinity };
+  let best = { lambda: LAMBDAS[1], use: names, err: Infinity };
   if (tr.X.length > 50 && va.X.length > 10) {
     const st = standardizer(tr.X);
-    const Zt = tr.X.map(st.apply);
-    const Zv = va.X.map(st.apply);
-    for (const lambda of LAMBDAS) {
-      const b = ridge(Zt, tr.y, lambda);
-      let err = 0;
-      Zv.forEach((z, i) => (err += (va.y[i] - (b[0] + z.reduce((s, v, j) => s + b[j + 1] * v, 0))) ** 2));
-      if (err < best.err) best = { lambda, err };
+    const Zt0 = tr.X.map(st.apply);
+    const Zv0 = va.X.map(st.apply);
+    for (const use of masks) {
+      const drop = dropOf(use);
+      const Zt = Zt0.map((z) => zap(z, drop));
+      const Zv = Zv0.map((z) => zap(z, drop));
+      for (const lambda of LAMBDAS) {
+        const b = ridge(Zt, tr.y, lambda);
+        let err = 0;
+        Zv.forEach((z, i) => (err += (va.y[i] - (b[0] + z.reduce((s, v, j) => s + b[j + 1] * v, 0))) ** 2));
+        if (err < best.err) best = { lambda, use, err };
+      }
     }
   }
   const all = flat(byDay);
   const st = standardizer(all.X);
-  return { mean: st.mean, sd: st.sd, coef: ridge(all.X.map(st.apply), all.y, best.lambda), lambda: best.lambda };
+  const drop = dropOf(best.use);
+  return { mean: st.mean, sd: st.sd, coef: ridge(all.X.map((x) => zap(st.apply(x), drop)), all.y, best.lambda), lambda: best.lambda, use: best.use };
 }
 const target = (d: Day, k: number, h: number) => Math.log(d.c[h === 54 ? BARS : Math.min(BARS, k + h)] / d.c[k]);
 const validK = (k: number, h: number) => (h === 54 ? k < BARS : k + h <= BARS);
 
-function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: DayModel; lambdas: Record<string, number> } {
+function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: DayModel; lambdas: Record<string, number>; used: Record<string, string[]> } {
   const lambdas: Record<string, number> = {};
+  const used: Record<string, string[]> = {};
   // 收盤走勢：每個長度一組
   const path = HORIZONS.map((h) => {
     const fit = fitLin(train.map((d) => {
@@ -152,7 +178,8 @@ function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: 
       const y: number[] = [];
       for (let k = 0; k < BARS; k++) if (validK(k, h)) X.push(features(d.c, k, d.P0, d.ctx)), y.push(target(d, k, h) / horizonScale(h, k));
       return { X, y };
-    }));
+    }), PATH_GROUPS);
+    used[`path${h}`] = fit.use;
     lambdas[`path${h}`] = fit.lambda;
     return fit;
   });
@@ -194,7 +221,8 @@ function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: 
     }));
   const up = ex(1);
   const down = ex(-1);
-  const gap = fitLin(train.map((d) => ({ X: [gapFeatures(d.ctx)], y: [Math.log(d.c[0] / d.P0)] })));
+  const gap = fitLin(train.map((d) => ({ X: [gapFeatures(d.ctx)], y: [Math.log(d.c[0] / d.P0)] })), GAP_GROUPS);
+  used.gap = gap.use;
   // 跳空的誤差（訓練資料內；開盤前的區間要加上它）
   const gapSd = std(train.map((d) => Math.log(d.c[0] / d.P0) - (gap.coef[0] + gapFeatures(d.ctx).reduce((s, v, j) => s + gap.coef[j + 1] * (Number.isFinite(v) ? Math.max(-4, Math.min(4, (v - gap.mean[j]) / (gap.sd[j] || 1))) : 0), 0))));
   Object.assign(lambdas, { rng: rng.lambda, up: up.lambda, down: down.lambda, gap: gap.lambda });
@@ -214,7 +242,7 @@ function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: 
     }
   m.resid = rb.map((row) => row.map((e) => (e.length > 10 ? std(e) : 0.5)));
   void inSampleResid;
-  return { m, dm: { base, rng: strip(rng), up: strip(up), down: strip(down), gap: strip(gap), gapSd }, lambdas };
+  return { m, dm: { base, rng: strip(rng), up: strip(up), down: strip(down), gap: strip(gap), gapSd }, lambdas, used };
 }
 
 // ---------------------------------------------------------------- 00631L 日 K（槓桿倍數）
@@ -498,6 +526,7 @@ console.log('挑到的 λ：', Object.fromEntries(Object.entries(lambdaLog).map(
 
 // ---------------------------------------------------------------- 最終模型（全部資料）＋ 00631L 換算
 const final = fitAll(days);
+console.log('最終模型自己選用的資料：', JSON.stringify(final.used));
 final.m.resid = residBy.map((row, hi) => row.map((e, tb) => r5(e.length > 30 ? std(e) : final.m.resid[hi][tb])!));
 
 const prevL = (date: string) => lClose.get(taiex[dIdx.get(date)! - 1][0]) ?? null;
@@ -642,6 +671,8 @@ writeFileSync(
     // 分期間：hold＝調整模型時從沒看過的期間（公正）、dev＝開發期間（看過，可能偏樂觀）
     periods: { hold: periodInfo('hold'), dev: periodInfo('dev') },
     devStart: DEV_START,
+    // 最終模型自己選擇要用的資料（每個預測長度、開盤跳空）
+    used: final.used,
     // 回放用的模型（回放那幾天開始之前的模型，不會看到答案）
     replay: replaySnap,
     // 事前存檔的實盤成績
@@ -656,6 +687,6 @@ writeFileSync(
 );
 // 相似日資料庫（網頁即時找相似日用）：[日期, 跳空, 走勢（×1e4 取整）, 開盤前資料]
 const i4 = (v: number) => (Number.isFinite(v) ? Math.round(v * 1e4) : null);
-writeFileSync(join(dir, 'predict-analogs.json'), JSON.stringify(lib.map((a) => [a.date, i4(a.gap), a.r.map((v) => i4(v)), [a.ctx.prevDay, a.ctx.prev5, a.ctx.prevIntra, a.ctx.futChg, a.ctx.prevRange, a.ctx.usSox ?? NaN, a.ctx.usTsm ?? NaN, a.ctx.usSpx ?? NaN].map(i4)])));
+writeFileSync(join(dir, 'predict-analogs.json'), JSON.stringify(lib.map((a) => [a.date, i4(a.gap), a.r.map((v) => i4(v)), [a.ctx.prevDay, a.ctx.prev5, a.ctx.prevIntra, a.ctx.futChg, a.ctx.prevRange, a.ctx.usSox ?? NaN, a.ctx.usTsm ?? NaN, a.ctx.usSpx ?? NaN, a.ctx.night ?? NaN].map(i4)])));
 for (const o of ORIGINS) console.log(`  ${ORIGIN_LABEL[o]}（n=${bestChoice(o).n}、w=${bestChoice(o).w}）：` + LINES.map((l) => { const t = lineAcc[o][l]; return `${l} ${(Math.sqrt(t.se / (t.n || 1)) * 100).toFixed(2)}%/${((t.hit / (t.days || 1)) * 100).toFixed(0)}%/${((t.best / (t.days || 1)) * 100).toFixed(0)}%`; }).join('  '));
 console.log(`β ${beta.toFixed(3)}；predict-intraday.json 完成（${((Date.now() - t0) / 1000).toFixed(1)}s）`);

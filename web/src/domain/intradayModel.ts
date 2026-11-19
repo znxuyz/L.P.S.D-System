@@ -31,6 +31,8 @@ export interface DailyCtx {
   usSox?: number;
   usTsm?: number;
   usSpx?: number;
+  /** 臺指期夜盤（開盤前結束）：夜盤收盤 ÷ 上一個交易日一般時段收盤（對數）；沒有資料是 NaN。 */
+  night?: number;
 }
 const us = (v: number | undefined) => (v == null ? NaN : v);
 
@@ -51,7 +53,11 @@ export const FEATURE_NAMES = [
   '前一晚費城半導體',
   '前一晚台積電 ADR',
   '前一晚 S&P 500',
+  '臺指期夜盤',
 ] as const;
+/** 可以整組拿掉的資料（模型每次訓練自己決定要不要用）：在 features() 裡的位置。 */
+export const PATH_GROUPS = { us: [13, 14, 15], night: [16] } as const;
+export const GAP_GROUPS = { us: [5, 6, 7], night: [8] } as const;
 
 const lr = (a: number, b: number) => (a > 0 && b > 0 ? Math.log(a / b) : 0);
 
@@ -84,6 +90,7 @@ export function features(c: ArrayLike<number>, k: number, P0: number, d: DailyCt
     us(d.usSox),
     us(d.usTsm),
     us(d.usSpx),
+    us(d.night),
   ];
 }
 
@@ -235,7 +242,7 @@ export function excursionFeatures(ix: Bar[], c: ArrayLike<number>, k: number, P0
   return [todayVol(ix, k, base), d.prevRange, Math.abs(lr(c[0], P0)), Math.log((BARS - k) / BARS), lr(c[k], c[0]), hi > lo ? (c[k] - lo) / (hi - lo) : 0.5];
 }
 
-export const gapFeatures = (d: DailyCtx) => [d.prevDay, d.prev5, d.prevIntra, d.futChg, d.prevRange, us(d.usSox), us(d.usTsm), us(d.usSpx)];
+export const gapFeatures = (d: DailyCtx) => [d.prevDay, d.prev5, d.prevIntra, d.futChg, d.prevRange, us(d.usSox), us(d.usTsm), us(d.usSpx), us(d.night)];
 
 export interface DayForecast {
   /** 從哪一根開始是預測的（0～53）。 */
@@ -314,7 +321,7 @@ export function analogDistance(t: TodayState, a: AnalogDay): number {
   const sq = (x: number, y: number) => (Number.isFinite(x) && Number.isFinite(y) ? (x - y) ** 2 : 0);
   let dist = 0.5 * sq(t.ctx.prevDay / st, a.ctx.prevDay / sa) + 0.5 * sq(t.ctx.prevIntra / st, a.ctx.prevIntra / sa) + 0.25 * sq(t.ctx.prev5 / st, a.ctx.prev5 / sa) + Math.log(st / sa) ** 2;
   // 前一晚美股走勢像不像（開盤前最重要的資訊）
-  dist += 1 * sq(us(t.ctx.usSox) / st, us(a.ctx.usSox) / sa) + 1 * sq(us(t.ctx.usTsm) / st, us(a.ctx.usTsm) / sa) + 0.5 * sq(us(t.ctx.usSpx) / st, us(a.ctx.usSpx) / sa);
+  dist += 1 * sq(us(t.ctx.usSox) / st, us(a.ctx.usSox) / sa) + 1 * sq(us(t.ctx.usTsm) / st, us(a.ctx.usTsm) / sa) + 0.5 * sq(us(t.ctx.usSpx) / st, us(a.ctx.usSpx) / sa) + 2 * sq(us(t.ctx.night) / st, us(a.ctx.night) / sa);
   if (t.k >= 0) dist += 2 * sq(t.gap / st, a.gap / sa);
   if (t.k >= 1) {
     let p = 0;
@@ -379,7 +386,7 @@ const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / (a.length || 1);
 /** predict-analogs.json：[日期, 跳空, 走勢, 開盤前資料]，數值 ×1e4 取整。 */
 export function decodeAnalogs(raw: Array<[string, number | null, Array<number | null>, Array<number | null>]>): AnalogDay[] {
   const f = (v: number | null) => (v == null ? NaN : v / 1e4);
-  return raw.map(([date, gap, r, c]) => ({ date, gap: f(gap), r: r.map(f), ctx: { prevDay: f(c[0]), prev5: f(c[1]), prevIntra: f(c[2]), futChg: f(c[3]), prevRange: f(c[4]), usSox: f(c[5] ?? null), usTsm: f(c[6] ?? null), usSpx: f(c[7] ?? null) } }));
+  return raw.map(([date, gap, r, c]) => ({ date, gap: f(gap), r: r.map(f), ctx: { prevDay: f(c[0]), prev5: f(c[1]), prevIntra: f(c[2]), futChg: f(c[3]), prevRange: f(c[4]), usSox: f(c[5] ?? null), usTsm: f(c[6] ?? null), usSpx: f(c[7] ?? null), night: f(c[8] ?? null) } }));
 }
 
 // ================================================================ 00631L 當天進出場點（區間來回）

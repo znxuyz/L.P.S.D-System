@@ -44,7 +44,7 @@ export function parseTxDaily(csv: string): Record<string, TxDay> {
     const session = (c[iS] ?? '').includes('盤後') ? 'n' : 'd';
     const key = `${date}|${session}`;
     const cur = best.get(key);
-    if (!cur || mon < cur.mon) best.set(key, { mon, v: v.map((x, i) => (Number.isFinite(x) ? x : v[3])) as Ohlcv });
+    if (!cur || mon < cur.mon) best.set(key, { mon, v: v.map((x) => (Number.isFinite(x) ? x : v[3])) as Ohlcv });
   }
   const out: Record<string, TxDay> = {};
   for (const [key, { v }] of best) {
