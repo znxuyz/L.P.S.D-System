@@ -78,7 +78,7 @@ const fut = new Map<string, number>();
 for (const r of read<{ rows: Array<[string, unknown, unknown, unknown, unknown, number | null]> }>(join(dir, 'market-risk.json'), { rows: [] }).rows) if (r[5] != null) fut.set(r[0], r[5]);
 
 // 只存檔（ARCHIVE_ONLY）而且不在存檔時間內：不用算（整套要跑幾分鐘）
-if (process.env.ARCHIVE_ONLY && !canArchive(taiex[taiex.length - 1][0])) {
+if (process.env.ARCHIVE_ONLY && !canArchive(taiex[taiex.length - 1][0], Date.now(), !!process.env.ARCHIVE_KIND_SUFFIX)) {
   console.log(`事前存檔：現在不是 ${taiex[taiex.length - 1][0]} 收盤後到下一個交易日開盤前，不算`);
   process.exit(0);
 }
@@ -719,7 +719,7 @@ function nextDayForecast() {
 }
 const ARCHIVE_DIR = process.env.ARCHIVE_DIR;
 if (ARCHIVE_DIR) {
-  if (canArchive(lastDate)) console.log(writeArchive(ARCHIVE_DIR, 'intraday' + (process.env.ARCHIVE_KIND_SUFFIX ?? ''), lastDate, nextDayForecast()) ? `事前存檔：${lastDate} 收盤後 → 下一個交易日` : `事前存檔：${lastDate} 已經存過`);
+  if (canArchive(lastDate, Date.now(), !!process.env.ARCHIVE_KIND_SUFFIX)) console.log(writeArchive(ARCHIVE_DIR, 'intraday' + (process.env.ARCHIVE_KIND_SUFFIX ?? ''), lastDate, nextDayForecast()) ? `事前存檔：${lastDate} 收盤後 → 下一個交易日` : `事前存檔：${lastDate} 已經存過`);
   else console.log(`事前存檔：現在不是 ${lastDate} 收盤後到下一個交易日開盤前，不存`);
 }
 // 實盤成績：存檔裡的預測 vs 之後實際的走勢（只用存檔的數字）
