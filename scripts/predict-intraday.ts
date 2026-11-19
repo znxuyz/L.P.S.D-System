@@ -579,6 +579,12 @@ for (let n = FIRST; n < days.length; n++) {
       rangeSq[pi] += v * v;
     });
     rangeDays++;
+    // 歷史模擬存檔（給模擬帳戶回測）：前一個交易日收盤後「會存下來」的區間進出場設定
+    const asOf = taiex[dIdx.get(d.date)! - 1][0];
+    if (process.env.BACKFILL_DIR && asOf >= (process.env.BACKFILL_FROM ?? '0000') && asOf <= (process.env.BACKFILL_TO ?? '9999')) {
+      const pl = RANGE_PLANS[pick];
+      writeArchive(process.env.BACKFILL_DIR, 'intraday', asOf, { P0: d.P0, ctx: d.ctx, range: { plan: { ...pl, m: Number.isFinite(pl.m ?? 0) ? pl.m : 1e9 }, dm, beta: bL } });
+    }
   }
   // 這一天收盤走勢的樣本外殘差（給之後的日子畫區間）
   for (let k = 0; k < BARS; k++) {

@@ -39,6 +39,18 @@ const t0 = Date.now();
 const H = 20; // 預測天數
 const STEP = 5; // 截面間隔
 const REFIT = 20; // 重新訓練間隔
+/**
+ * 歷史模擬存檔（給模擬帳戶回測用）：BACKFILL_DIR 有設時，把逐段往前滾回測裡「每一天開盤前會做出的預測」
+ * 照存檔的格式寫出來（只寫 BACKFILL_FROM～BACKFILL_TO 之間）。每一天的預測只用那天以前的資料，跟事前存檔一樣不會看答案。
+ */
+const BF_DIR = process.env.BACKFILL_DIR;
+const BF_FROM = process.env.BACKFILL_FROM ?? '0000';
+const BF_TO = process.env.BACKFILL_TO ?? '9999';
+const bfDaily = new Map<string, { stocks?: { top: string[] }; dayTrade?: unknown }>();
+const bfPut = (asOf: string, part: object) => {
+  if (!BF_DIR || asOf < BF_FROM || asOf > BF_TO) return;
+  bfDaily.set(asOf, { ...(bfDaily.get(asOf) ?? {}), ...part });
+};
 
 // ---------------------------------------------------------------- 日曆與大盤
 // 加權指數下午就更新，個股日 K 晚上才更新：以「大型股都已經有資料」的最後一天為準，避免用到抓一半的資料
@@ -324,6 +336,7 @@ for (let si = 0; si < sections.length; si++) {
   const sc = new Float64Array(sec.codes.length);
   for (let n = 0; n < sec.codes.length; n++) sc[n] = dot(beta, rowOf(sec, n));
   scoreBy.push(sc);
+  bfPut(cal[sec.i], { stocks: { top: [...sec.codes.keys()].sort((a, b) => sc[b] - sc[a]).slice(0, 30).map((n) => stocks[sec.codes[n]].code) } });
 }
 
 // 回測：每個截面的 IC；每 20 天換一次的「前 10%」組合
@@ -779,7 +792,9 @@ if (dt) {
     const x = feat(i);
     const v = y(i);
     if (!x || !Number.isFinite(v) || !Number.isFinite(x[0])) continue;
-    const p = dot(fit.b, fit.st.apply(x));
+    const z = fit.st.apply(x);
+    const p = dot(fit.b, z);
+    bfPut(cal[i - 1], { dayTrade: { code: DT_CODE, lastClose: dt.close[i - 1], cost: DCOST, rule: { a: fit.b[0] + z.slice(1).reduce((s, v, j) => s + fit!.b[j + 2] * v, 0), b: fit.b[1], gapMean: fit.st.mean[0], gapSd: fit.st.sd[0] } } });
     const act = p > DCOST ? 1 : p < -DCOST ? -1 : 0;
     const pnl = act ? act * v - DCOST : 0;
     eq *= 1 + pnl;
@@ -897,5 +912,9 @@ const forward = {
 console.log(`實盤成績（事前存檔）：個股 ${forward.stocks.n} 期、大盤 ${forward.market.n} 期、當沖 ${forward.dayTrade.n} 天`);
 if (process.env.ARCHIVE_ONLY) process.exit(0);
 
+if (BF_DIR) {
+  for (const [asOf, v] of bfDaily) writeArchive(BF_DIR, 'daily', asOf, v);
+  console.log(`歷史模擬存檔：${bfDaily.size} 天（${BF_FROM} ～ ${BF_TO}）→ ${BF_DIR}`);
+}
 writeFileSync(join(dir, 'predict.json'), JSON.stringify({ generatedAt: new Date().toISOString(), horizon: H, market: marketOut, stocks: stockOut, dayTrade: dayTradeOut, forward }));
 console.log(`predict.json 完成（${((Date.now() - t0) / 1000).toFixed(1)}s）`);
