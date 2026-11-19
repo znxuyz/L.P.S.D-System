@@ -27,6 +27,8 @@ import {
   rangeFeatures,
   volScale,
   windowVol,
+  analogLines,
+  type AnalogDay,
   TIME_BUCKETS,
   timeBucket,
   type Bar,
@@ -89,6 +91,8 @@ for (const f of existsSync(idir) ? readdirSync(idir).filter((f) => /^\d{4}-\d{2}
   if (!j.ix || j.ix.length !== BARS) continue;
   days.push({ date, P0: taiex[i - 1][4], ix: j.ix, c: [j.ix[0][0], ...j.ix.map((b) => b[3])], ctx: dailyCtx(i)! });
 }
+const analogOf = (d: Day): AnalogDay => ({ date: d.date, gap: Math.log(d.c[0] / d.P0), r: d.c.map((v) => Math.log(v / d.c[0])), ctx: d.ctx });
+const lib: AnalogDay[] = days.map(analogOf);
 console.log(`5 分 K：${days.length} 天（${days[0]?.date ?? '—'} ～ ${days.at(-1)?.date ?? '—'}）`);
 if (days.length < 60) {
   writeFileSync(join(dir, 'predict-intraday.json'), JSON.stringify({ generatedAt: new Date().toISOString(), ready: false, days: days.length }));
@@ -211,6 +215,13 @@ let fitted: ReturnType<typeof fitAll> | null = null;
 // 「平均高低點」的猜法：訓練資料裡各時間點剩下時間的平均最高、最低
 let avgEx: { up: number[]; down: number[] } | null = null;
 const lambdaLog: Record<string, number[]> = {};
+// 各種預測線的成績：[時間點][線] → 平方誤差、筆數、收盤方向猜對、最接近實際的次數
+const LINES = ['model', 'avg', 'a1', 'a2', 'a3'] as const;
+const lineAcc: Record<number, Record<string, { se: number; n: number; hit: number; days: number; best: number }>> = Object.fromEntries(
+  ORIGINS.map((o) => [o, Object.fromEntries(LINES.map((l) => [l, { se: 0, n: 0, hit: 0, days: 0, best: 0 }]))]),
+);
+// 預測紀錄：開盤前與 10:00 的預測收盤 vs 實際
+const record: Array<{ date: string; origin: number; ref: number; model: number; avg: number; actual: number }> = [];
 const dbg: number[][] = [];
 for (let n = FIRST; n < days.length; n++) {
   if (!fitted || (n - FIRST) % REFIT === 0) {
@@ -233,6 +244,30 @@ for (let n = FIRST; n < days.length; n++) {
     const f = forecastDay(m, dm, d.ix, o, o < 0 ? null : d.c[0], d.P0, d.ctx);
     const a = acc[o];
     const ref = o < 0 ? d.P0 : d.c[k]; // 「不會動」的猜法：開盤前用昨收，盤中用現價
+    // 相似日：只能從之前的日子找
+    {
+      const today = { k: o, gap: o < 0 ? NaN : Math.log(d.c[0] / d.P0), r: d.c.slice(0, k + 1).map((v) => Math.log(v / d.c[0])), ctx: d.ctx };
+      const an = analogLines(lib.slice(0, n), today, o < 0 ? d.P0 : d.c[k]);
+      const modelCloses = o < 0 ? [f.open, ...f.bars.map((b) => b.c)] : f.bars.map((b) => b.c);
+      const lines: Record<string, number[]> = { model: modelCloses, avg: an.avg, a1: an.lines[0]?.closes ?? [], a2: an.lines[1]?.closes ?? [], a3: an.lines[2]?.closes ?? [] };
+      const actual = d.c.slice(an.from);
+      let bestL = '';
+      let bestE = Infinity;
+      for (const l of LINES) {
+        const xs = lines[l];
+        if (xs.length !== actual.length) continue;
+        let se = 0;
+        xs.forEach((v, i) => (se += Math.log(v / actual[i]) ** 2));
+        const t = lineAcc[o][l];
+        t.se += se;
+        t.n += xs.length;
+        t.days++;
+        if (Math.sign(xs[xs.length - 1] - ref) === Math.sign(actual[actual.length - 1] - ref)) t.hit++;
+        if (se < bestE) (bestE = se), (bestL = l);
+      }
+      if (bestL) lineAcc[o][bestL].best++;
+      if (o === -1 || o === 12) record.push({ date: d.date, origin: o, ref, model: modelCloses[modelCloses.length - 1], avg: an.avg[an.avg.length - 1] ?? NaN, actual: d.c[BARS] });
+    }
     for (const b of f.bars) {
       const act = d.ix[b.bar];
       a.pe.push(Math.log(b.c / act[3]));
@@ -341,6 +376,21 @@ writeFileSync(
     backtest: { from: days[FIRST]?.date, to: days.at(-1)!.date, days: days.length - FIRST, byOrigin },
     next: { after: lastDate, P0: taiex[taiex.length - 1][4], L0: lClose.get(lastDate) ?? null, ctx: ctxOut(dailyCtx(taiex.length)!) },
     recent: days.slice(-10).map((d) => ({ date: d.date, P0: d.P0, L0: prevL(d.date), ix: d.ix, ctx: ctxOut(d.ctx) })),
+    // 各種預測線的樣本外成績（每根收盤誤差 RMSE、收盤方向命中率、最接近實際的比例）
+    lines: ORIGINS.map((o) => ({
+      origin: o,
+      label: ORIGIN_LABEL[o],
+      ...Object.fromEntries(LINES.map((l) => {
+        const t = lineAcc[o][l];
+        return [l, { rmse: r5(Math.sqrt(t.se / (t.n || 1))), hit: r5(t.hit / (t.days || 1)), best: r5(t.best / (t.days || 1)) }];
+      })),
+    })),
+    // 最近 20 天的預測紀錄
+    record: record.slice(-40).map((r) => ({ ...r, ref: r5(r.ref), model: r5(r.model), avg: r5(r.avg), actual: r5(r.actual) })),
   }),
 );
+// 相似日資料庫（網頁即時找相似日用）：[日期, 跳空, 走勢（×1e4 取整）, 開盤前資料]
+const i4 = (v: number) => (Number.isFinite(v) ? Math.round(v * 1e4) : null);
+writeFileSync(join(dir, 'predict-analogs.json'), JSON.stringify(lib.map((a) => [a.date, i4(a.gap), a.r.map((v) => i4(v)), [a.ctx.prevDay, a.ctx.prev5, a.ctx.prevIntra, a.ctx.futChg, a.ctx.prevRange].map(i4)])));
+for (const o of ORIGINS) console.log(`  ${ORIGIN_LABEL[o]}：` + LINES.map((l) => { const t = lineAcc[o][l]; return `${l} ${(Math.sqrt(t.se / (t.n || 1)) * 100).toFixed(2)}%/${((t.hit / (t.days || 1)) * 100).toFixed(0)}%/${((t.best / (t.days || 1)) * 100).toFixed(0)}%`; }).join('  '));
 console.log(`β ${beta.toFixed(3)}；predict-intraday.json 完成（${((Date.now() - t0) / 1000).toFixed(1)}s）`);

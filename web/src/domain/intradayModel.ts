@@ -268,3 +268,85 @@ export function forecastDay(m: IntradayModel, dm: DayModel, ix: Bar[], k: number
   for (let b = 0; b < kk; b++) (hi = Math.max(hi, ix[b][1])), (lo = Math.min(lo, ix[b][2]));
   return { from: kk, open: c0, bars, dayHigh: Math.max(hi, c[kk] * Math.exp(up)), dayLow: Math.min(lo, c[kk] * Math.exp(-down)) };
 }
+
+// ================================================================ 相似日走勢線
+
+/**
+ * 歷史上的一天（相似日比對用）：開盤跳空、整天的收盤序列（相對開盤的對數報酬）、開盤前的資料。
+ * r[0]＝0（開盤），r[b]＝ln(第 b 根收盤 ÷ 開盤)，共 55 個。
+ */
+export interface AnalogDay {
+  date: string;
+  gap: number;
+  r: number[];
+  ctx: DailyCtx;
+}
+
+/** 今天到目前為止的狀態。k＝-1 開盤前（還不知道開盤）；k＝0 剛開盤；k≥1 第 k 根收盤後。 */
+export interface TodayState {
+  k: number;
+  /** 開盤跳空（開盤前是 NaN）。 */
+  gap: number;
+  /** r[0..k]：相對開盤的對數報酬。 */
+  r: number[];
+  ctx: DailyCtx;
+}
+
+/** 波動的尺度：用前一天的振幅（不同年代、不同指數水準的走勢才比得起來）。 */
+const sigmaOf = (d: DailyCtx) => Math.max(0.004, Number.isFinite(d.prevRange) ? d.prevRange : 0.012);
+
+/** 兩天有多不像（越小越像）：開盤前的資料、跳空、到目前為止的走勢形狀（最近 6 根加重），都先除以各自的波動尺度。 */
+export function analogDistance(t: TodayState, a: AnalogDay): number {
+  const st = sigmaOf(t.ctx);
+  const sa = sigmaOf(a.ctx);
+  const sq = (x: number, y: number) => (Number.isFinite(x) && Number.isFinite(y) ? (x - y) ** 2 : 0);
+  let dist = 0.5 * sq(t.ctx.prevDay / st, a.ctx.prevDay / sa) + 0.5 * sq(t.ctx.prevIntra / st, a.ctx.prevIntra / sa) + 0.25 * sq(t.ctx.prev5 / st, a.ctx.prev5 / sa) + Math.log(st / sa) ** 2;
+  if (t.k >= 0) dist += 2 * sq(t.gap / st, a.gap / sa);
+  if (t.k >= 1) {
+    let p = 0;
+    let w = 0;
+    for (let b = 1; b <= t.k; b++) {
+      const wb = b > t.k - 6 ? 3 : 1;
+      p += wb * sq(t.r[b] / st, a.r[b] / sa);
+      w += wb;
+    }
+    // 走勢形狀佔的比重隨時間變大
+    dist += (p / w) * (4 + t.k / 6);
+  }
+  return dist;
+}
+
+export interface AnalogLine {
+  date: string;
+  /** 從預測起點之後的收盤價：第 from＋1～54 根（開盤前從開盤 0 開始）。 */
+  closes: number[];
+}
+
+/**
+ * 找最像的 n 天，把它們「接下來的走勢」依波動比例縮放，接在現在的價格後面。
+ * now：現在的價格（開盤前用昨收 P0）；回傳的 closes 對應 c[from..54]（開盤前 from＝0，含開盤價）。
+ */
+export function analogLines(lib: AnalogDay[], t: TodayState, now: number, n = 5): { from: number; lines: AnalogLine[]; avg: number[] } {
+  const ranked = lib
+    .map((a) => ({ a, d: analogDistance(t, a) }))
+    .sort((x, y) => x.d - y.d)
+    .slice(0, n);
+  const st = sigmaOf(t.ctx);
+  const pre = t.k < 0;
+  const from = pre ? 0 : t.k + 1;
+  const lines = ranked.map(({ a }) => {
+    const s = st / sigmaOf(a.ctx);
+    const closes: number[] = [];
+    for (let j = from; j <= BARS; j++) closes.push(pre ? now * Math.exp((a.gap + a.r[j]) * s) : now * Math.exp((a.r[j] - a.r[t.k]) * s));
+    return { date: a.date, closes };
+  });
+  const avg = lines.length ? lines[0].closes.map((_, i) => Math.exp(mean(lines.map((l) => Math.log(l.closes[i]))))) : [];
+  return { from, lines, avg };
+}
+const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / (a.length || 1);
+
+/** predict-analogs.json：[日期, 跳空, 走勢, 開盤前資料]，數值 ×1e4 取整。 */
+export function decodeAnalogs(raw: Array<[string, number | null, Array<number | null>, Array<number | null>]>): AnalogDay[] {
+  const f = (v: number | null) => (v == null ? NaN : v / 1e4);
+  return raw.map(([date, gap, r, c]) => ({ date, gap: f(gap), r: r.map(f), ctx: { prevDay: f(c[0]), prev5: f(c[1]), prevIntra: f(c[2]), futChg: f(c[3]), prevRange: f(c[4]) } }));
+}
