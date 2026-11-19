@@ -1,18 +1,40 @@
 /**
- * 00631L 5 分 K 走勢預測（部署時執行，不連網）：
+ * 00631L 整天 5 分 K 預測（部署時執行，不連網）：
  *
  *   node scripts/predict-intraday.ts <資料資料夾>
  *
  * - 資料：加權指數 5 分 K（intraday/，證交所每 5 秒指數統計）＋日 K＋外資期貨。
- * - 模型：每個時間點（開盤後、每根 5 分 K 收盤後）預測接下來 1、2、3、6、12 根與到收盤的報酬，
- *   每個長度一組嶺迴歸（特徵見 web/src/domain/intradayModel.ts）。逐段往前滾：每 20 個交易日只用之前的日子重新訓練。
- * - 00631L：沒有公開的歷史盤中資料，用「00631L 日報酬 ≈ β × 加權指數日報酬」換算（β 用近一年日 K 估）。
+ * - 模型（特徵與預測在 web/src/domain/intradayModel.ts，網頁共用）：
+ *   收盤走勢（1／2／3／6／12 根與到收盤）、每根 K 棒的振幅、剩下時間的最高最低點、開盤跳空，各一組嶺迴歸。
+ *   每次訓練時把訓練資料最後 20% 留做驗證，從幾個正則化強度裡挑誤差最小的，再用全部訓練資料重新訓練。
+ * - 回測：逐段往前滾（每 20 個交易日重新訓練、只用之前的日子），在開盤前、開盤、10:00、11:00、12:00、13:00
+ *   各做一次整天預測，跟最簡單的猜法（不會動、時段平均振幅、平均高低點）比誤差。
+ * - 00631L 沒有公開的歷史盤中資料，用「β × 加權指數報酬」換算（β 用近一年日 K 估）。
  *
- * 輸出 predict-intraday.json：模型（網頁即時預測用）、樣本外回測、最近幾天的 5 分 K（回放用）。
+ * 輸出 predict-intraday.json：模型、回測、最近 10 天（回放用）。
  */
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BARS, HORIZONS, features, horizonScale, predictAt, timeBucket, type DailyCtx, type IntradayModel } from '../web/src/domain/intradayModel.ts';
+import {
+  BARS,
+  HORIZONS,
+  barRange,
+  excursionFeatures,
+  features,
+  forecastDay,
+  gapFeatures,
+  horizonScale,
+  rangeFeatures,
+  volScale,
+  windowVol,
+  TIME_BUCKETS,
+  timeBucket,
+  type Bar,
+  type DailyCtx,
+  type DayModel,
+  type IntradayModel,
+  type LinModel,
+} from '../web/src/domain/intradayModel.ts';
 import { adjustForSplits, detectSplits } from '../web/src/domain/splits.ts';
 import { mean, ridge, standardizer, std } from './lib/ml.ts';
 
@@ -26,6 +48,7 @@ const read = <T>(p: string, fb: T): T => {
 };
 const r5 = (v: number) => (Number.isFinite(v) ? Math.round(v * 1e5) / 1e5 : null);
 const t0 = Date.now();
+const LAMBDAS = [0.001, 0.01, 0.1, 1];
 
 // ---------------------------------------------------------------- 日 K、外資期貨
 const taiex = read<Array<[string, number, number, number, number]>>(join(dir, 'index', 'TAIEX.json'), []);
@@ -44,6 +67,7 @@ function dailyCtx(i: number): DailyCtx | null {
     prev5: Math.log(c(i - 1) / c(i - 6)),
     prevIntra: Math.log(c(i - 1) / taiex[i - 1][1]),
     futChg: f1 != null && f2 != null ? (f1 - f2) / 1e4 : NaN,
+    prevRange: Math.log(taiex[i - 1][2] / taiex[i - 1][3]),
   };
 }
 
@@ -52,7 +76,7 @@ interface Day {
   date: string;
   P0: number;
   c: number[]; // c[0]＝開盤、c[k]＝第 k 根收盤
-  ix: Array<[number, number, number, number]>;
+  ix: Bar[];
   ctx: DailyCtx;
 }
 const idir = join(dir, 'intraday');
@@ -61,11 +85,9 @@ for (const f of existsSync(idir) ? readdirSync(idir).filter((f) => /^\d{4}-\d{2}
   const date = f.slice(0, 10);
   const i = dIdx.get(date);
   if (i == null || i < 6) continue;
-  const j = read<{ ix?: Array<[number, number, number, number]> }>(join(idir, f), {});
+  const j = read<{ ix?: Bar[] }>(join(idir, f), {});
   if (!j.ix || j.ix.length !== BARS) continue;
-  const ctx = dailyCtx(i)!;
-  const P0 = taiex[i - 1][4];
-  days.push({ date, P0, ix: j.ix, c: [j.ix[0][0], ...j.ix.map((b) => b[3])], ctx });
+  days.push({ date, P0: taiex[i - 1][4], ix: j.ix, c: [j.ix[0][0], ...j.ix.map((b) => b[3])], ctx: dailyCtx(i)! });
 }
 console.log(`5 分 K：${days.length} 天（${days[0]?.date ?? '—'} ～ ${days.at(-1)?.date ?? '—'}）`);
 if (days.length < 60) {
@@ -74,103 +96,207 @@ if (days.length < 60) {
   process.exit(0);
 }
 
-// 樣本：每天每個時間點 k、每個 horizon 的目標
+// ---------------------------------------------------------------- 訓練工具
+/** 樣本：特徵、目標（每一天一組，方便切驗證集）。 */
+type Samples = Array<{ X: number[][]; y: number[] }>;
+/** 用最後 20% 的日子挑 λ（驗證誤差最小），再用全部重新訓練。 */
+function fitLin(byDay: Samples): LinModel & { lambda: number } {
+  const flat = (s: Samples) => ({ X: s.flatMap((d) => d.X), y: s.flatMap((d) => d.y) });
+  const cut = Math.floor(byDay.length * 0.8);
+  const tr = flat(byDay.slice(0, cut));
+  const va = flat(byDay.slice(cut));
+  let best = { lambda: LAMBDAS[1], err: Infinity };
+  if (tr.X.length > 50 && va.X.length > 10) {
+    const st = standardizer(tr.X);
+    const Zt = tr.X.map(st.apply);
+    const Zv = va.X.map(st.apply);
+    for (const lambda of LAMBDAS) {
+      const b = ridge(Zt, tr.y, lambda);
+      let err = 0;
+      Zv.forEach((z, i) => (err += (va.y[i] - (b[0] + z.reduce((s, v, j) => s + b[j + 1] * v, 0))) ** 2));
+      if (err < best.err) best = { lambda, err };
+    }
+  }
+  const all = flat(byDay);
+  const st = standardizer(all.X);
+  return { mean: st.mean, sd: st.sd, coef: ridge(all.X.map(st.apply), all.y, best.lambda), lambda: best.lambda };
+}
 const target = (d: Day, k: number, h: number) => Math.log(d.c[h === 54 ? BARS : Math.min(BARS, k + h)] / d.c[k]);
 const validK = (k: number, h: number) => (h === 54 ? k < BARS : k + h <= BARS);
 
-function fit(train: Day[]): IntradayModel {
-  const X: number[][] = [];
-  const meta: Array<[Day, number]> = [];
-  for (const d of train) for (let k = 0; k < BARS; k++) X.push(features(d.c, k, d.P0, d.ctx)), meta.push([d, k]);
-  const st = standardizer(X);
-  const Z = X.map(st.apply);
-  const coef = HORIZONS.map((h) => {
-    const rows: number[][] = [];
-    const ys: number[] = [];
-    meta.forEach(([d, k], n) => {
-      if (validK(k, h)) rows.push(Z[n]), ys.push(target(d, k, h) / horizonScale(h, k));
-    });
-    return ridge(rows, ys, 0.01);
+function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: DayModel; lambdas: Record<string, number> } {
+  const lambdas: Record<string, number> = {};
+  // 收盤走勢：每個長度一組
+  const path = HORIZONS.map((h) => {
+    const fit = fitLin(train.map((d) => {
+      const X: number[][] = [];
+      const y: number[] = [];
+      for (let k = 0; k < BARS; k++) if (validK(k, h)) X.push(features(d.c, k, d.P0, d.ctx)), y.push(target(d, k, h) / horizonScale(h, k));
+      return { X, y };
+    }));
+    lambdas[`path${h}`] = fit.lambda;
+    return fit;
   });
-  // 殘差標準差（訓練資料內，給還沒有樣本外資料時用；回測後會換成樣本外的）
-  const resid = HORIZONS.map((h, hi) => {
-    const by: number[][] = Array.from({ length: 6 }, () => []);
-    meta.forEach(([d, k], n) => {
-      if (!validK(k, h)) return;
-      const p = (coef[hi][0] + Z[n].reduce((s, v, j) => s + coef[hi][j + 1] * v, 0)) * horizonScale(h, k);
-      by[timeBucket(k)].push(target(d, k, h) - p);
-    });
-    return by.map((a) => (a.length > 5 ? std(a) : 0));
+  // 各長度共用同一組標準化（網頁的 predictAt 這樣算）：用第一組的 mean／sd，係數換算到同一組尺度
+  const st0 = path[0];
+  const coef = path.map((p) => {
+    // z_p = (x - mean_p)/sd_p = (z0*sd0 + mean0 - mean_p)/sd_p
+    const out = [p.coef[0]];
+    for (let j = 0; j < p.mean.length; j++) {
+      const a = st0.sd[j] / (p.sd[j] || 1);
+      const b = (st0.mean[j] - p.mean[j]) / (p.sd[j] || 1);
+      out.push(p.coef[j + 1] * a);
+      out[0] += p.coef[j + 1] * b;
+    }
+    return out;
   });
-  return { mean: st.mean, sd: st.sd, coef, resid };
+  const m: IntradayModel = { mean: st0.mean, sd: st0.sd, coef, resid: HORIZONS.map(() => new Array(TIME_BUCKETS).fill(0)) };
+  const inSampleResid = () => m.resid; // 振幅模型訓練好後再算（要用波動倍率）
+  // 振幅：每個時段的平均，再預測比平均大多少
+  const base = Array.from({ length: BARS }, (_, b) => mean(train.map((d) => Math.log(barRange(d.ix[b])))));
+  const rng = fitLin(train.map((d) => {
+    const X: number[][] = [];
+    const y: number[] = [];
+    for (let k = 0; k < BARS; k += 3) for (let j = k; j < BARS; j++) X.push(rangeFeatures(d.ix, k, j, d.c[0], d.P0, d.ctx, base)), y.push(Math.log(barRange(d.ix[j])) - base[j]);
+    return { X, y };
+  }));
+  // 剩下時間的最高、最低
+  const ex = (dirn: 1 | -1) =>
+    fitLin(train.map((d) => {
+      const X: number[][] = [];
+      const y: number[] = [];
+      for (let k = 0; k < BARS; k++) {
+        let e = 0;
+        for (let b = k; b < BARS; b++) e = Math.max(e, dirn > 0 ? Math.log(d.ix[b][1] / d.c[k]) : Math.log(d.c[k] / d.ix[b][2]));
+        X.push(excursionFeatures(d.ix, d.c, k, d.P0, d.ctx, base));
+        y.push(e);
+      }
+      return { X, y };
+    }));
+  const up = ex(1);
+  const down = ex(-1);
+  const gap = fitLin(train.map((d) => ({ X: [gapFeatures(d.ctx)], y: [Math.log(d.c[0] / d.P0)] })));
+  // 跳空的誤差（訓練資料內；開盤前的區間要加上它）
+  const gapSd = std(train.map((d) => Math.log(d.c[0] / d.P0) - (gap.coef[0] + gapFeatures(d.ctx).reduce((s, v, j) => s + gap.coef[j + 1] * (Number.isFinite(v) ? Math.max(-4, Math.min(4, (v - gap.mean[j]) / (gap.sd[j] || 1))) : 0), 0))));
+  Object.assign(lambdas, { rng: rng.lambda, up: up.lambda, down: down.lambda, gap: gap.lambda });
+  const strip = ({ mean, sd, coef }: LinModel) => ({ mean, sd, coef });
+  // 訓練資料內的殘差（除以波動倍率）：樣本外殘差還不夠時當備案
+  const dmTmp = { base, rng: strip(rng), up: strip(up), down: strip(down), gap: strip(gap), gapSd };
+  const rb = HORIZONS.map(() => Array.from({ length: TIME_BUCKETS }, () => [] as number[]));
+  for (const d of train.filter((_, i) => i % 3 === 0))
+    for (let k = 0; k < BARS; k++) {
+      const z = features(d.c, k, d.P0, d.ctx).map((v, j) => (Number.isFinite(v) ? Math.max(-4, Math.min(4, (v - m.mean[j]) / (m.sd[j] || 1))) : 0));
+      const sc = volScale(dmTmp, d.ix, k, d.c[0], d.P0, d.ctx);
+      HORIZONS.forEach((h, hi) => {
+        if (!validK(k, h)) return;
+        const p = (m.coef[hi][0] + z.reduce((s, v, j) => s + m.coef[hi][j + 1] * v, 0)) * horizonScale(h, k);
+        rb[hi][timeBucket(k)].push((target(d, k, h) - p) / sc / windowVol(base, k, h === 54 ? BARS - k : h));
+      });
+    }
+  m.resid = rb.map((row) => row.map((e) => (e.length > 10 ? std(e) : 0.5)));
+  void inSampleResid;
+  return { m, dm: { base, rng: strip(rng), up: strip(up), down: strip(down), gap: strip(gap), gapSd }, lambdas };
 }
-// 跟網頁用同一個函式預測
-const predict = (m: IntradayModel, d: Day, k: number) => predictAt(m, d.c, k, d.P0, d.ctx);
 
 // ---------------------------------------------------------------- 逐段往前滾回測
 const FIRST = Math.min(250, Math.floor(days.length / 2));
 const REFIT = 20;
-let model: IntradayModel | null = null;
-// 每個 horizon：預測、實際、時段
-const oos = HORIZONS.map(() => ({ p: [] as number[], y: [] as number[], tb: [] as number[] }));
+const ORIGINS = [-1, 0, 12, 24, 36, 48]; // 開盤前、開盤、10:00、11:00、12:00、13:00
+const ORIGIN_LABEL: Record<number, string> = { [-1]: '開盤前', 0: '09:00 開盤', 12: '10:00', 24: '11:00', 36: '12:00', 48: '13:00' };
+type Acc = { pe: number[]; pn: number[]; cov: number; covN: number; re: number[]; rn: number[]; rl: number[]; rlb: number[]; he: number[]; hn: number[] };
+const acc: Record<number, Acc> = Object.fromEntries(ORIGINS.map((o) => [o, { pe: [], pn: [], cov: 0, covN: 0, re: [], rn: [], rl: [], rlb: [], he: [], hn: [] }]));
+// 樣本外殘差（收盤走勢），給網頁畫區間
+const residBy = HORIZONS.map(() => Array.from({ length: TIME_BUCKETS }, () => [] as number[]));
+let fitted: ReturnType<typeof fitAll> | null = null;
+// 「平均高低點」的猜法：訓練資料裡各時間點剩下時間的平均最高、最低
+let avgEx: { up: number[]; down: number[] } | null = null;
+const lambdaLog: Record<string, number[]> = {};
+const dbg: number[][] = [];
 for (let n = FIRST; n < days.length; n++) {
-  if (!model || (n - FIRST) % REFIT === 0) model = fit(days.slice(0, n));
+  if (!fitted || (n - FIRST) % REFIT === 0) {
+    const train = days.slice(0, n);
+    fitted = fitAll(train);
+    for (const [k, v] of Object.entries(fitted.lambdas)) (lambdaLog[k] ??= []).push(v);
+    avgEx = { up: [], down: [] };
+    for (let k = 0; k < BARS; k++) {
+      avgEx.up.push(mean(train.map((d) => Math.max(...d.ix.slice(k).map((b) => Math.log(b[1] / d.c[k]))))));
+      avgEx.down.push(mean(train.map((d) => Math.max(...d.ix.slice(k).map((b) => Math.log(d.c[k] / b[2]))))));
+    }
+  }
+  const { m, dm } = fitted;
   const d = days[n];
+  // 區間用「之前的日子」累積的樣本外殘差（今天的還沒加進去）
+  const inRes = fitted.m.inRes ?? (fitted.m.inRes = m.resid.map((r) => r.slice()));
+  m.resid = residBy.map((row, hi) => row.map((e, tb) => (e.length > 30 ? std(e) : inRes[hi][tb])));
+  for (const o of ORIGINS) {
+    const k = Math.max(0, o);
+    const f = forecastDay(m, dm, d.ix, o, o < 0 ? null : d.c[0], d.P0, d.ctx);
+    const a = acc[o];
+    const ref = o < 0 ? d.P0 : d.c[k]; // 「不會動」的猜法：開盤前用昨收，盤中用現價
+    for (const b of f.bars) {
+      const act = d.ix[b.bar];
+      a.pe.push(Math.log(b.c / act[3]));
+      a.pn.push(Math.log(ref / act[3]));
+      a.covN++;
+      if (act[3] >= b.lo && act[3] <= b.hi) a.cov++;
+      if (process.env.DEBUG && o === 0) { const z = Math.log(act[3] / b.c) / (Math.log(b.hi / b.c) / 1.28 || 1e-9); (dbg[b.bar] ??= []).push(z); }
+      const R = Math.log(b.h / b.l);
+      a.re.push(Math.abs(R - barRange(act)));
+      a.rn.push(Math.abs(Math.exp(dm.base[b.bar]) - barRange(act)));
+      a.rl.push(Math.log(R) - Math.log(barRange(act)));
+      a.rlb.push(dm.base[b.bar] - Math.log(barRange(act)));
+    }
+    // 最高、最低點
+    const hiAct = Math.max(...d.ix.map((b) => b[1]));
+    const loAct = Math.min(...d.ix.map((b) => b[2]));
+    const known = d.ix.slice(0, k);
+    const kh = Math.max(o < 0 ? f.open : d.c[0], ...known.map((b) => b[1]));
+    const kl = Math.min(o < 0 ? f.open : d.c[0], ...known.map((b) => b[2]));
+    const now = o < 0 ? f.open : d.c[k];
+    a.he.push(Math.abs(Math.log(f.dayHigh / hiAct)), Math.abs(Math.log(f.dayLow / loAct)));
+    a.hn.push(Math.abs(Math.log(Math.max(kh, now * Math.exp(avgEx!.up[k])) / hiAct)), Math.abs(Math.log(Math.min(kl, now * Math.exp(-avgEx!.down[k])) / loAct)));
+  }
+  // 這一天收盤走勢的樣本外殘差（給之後的日子畫區間）
   for (let k = 0; k < BARS; k++) {
-    const p = predict(model, d, k);
+    const z = features(d.c, k, d.P0, d.ctx).map((v, j) => (Number.isFinite(v) ? Math.max(-4, Math.min(4, (v - m.mean[j]) / (m.sd[j] || 1))) : 0));
     HORIZONS.forEach((h, hi) => {
       if (!validK(k, h)) return;
-      oos[hi].p.push(p[hi]);
-      oos[hi].y.push(target(d, k, h));
-      oos[hi].tb.push(timeBucket(k));
+      const p = (m.coef[hi][0] + z.reduce((s, v, j) => s + m.coef[hi][j + 1] * v, 0)) * horizonScale(h, k);
+      residBy[hi][timeBucket(k)].push((target(d, k, h) - p) / volScale(dm, d.ix, k, d.c[0], d.P0, d.ctx) / windowVol(dm.base, k, h === 54 ? BARS - k : h));
     });
   }
 }
-const stats = (p: number[], y: number[]) => {
-  let sse = 0;
-  let sse0 = 0;
-  let hit = 0;
-  let cnt = 0;
-  for (let i = 0; i < p.length; i++) {
-    sse += (y[i] - p[i]) ** 2;
-    sse0 += y[i] ** 2;
-    if (y[i] !== 0 && p[i] !== 0) (cnt++, Math.sign(y[i]) === Math.sign(p[i]) && hit++);
-  }
-  const mp = mean(p);
-  const my = mean(y);
-  let cov = 0;
-  let vp = 0;
-  let vy = 0;
-  for (let i = 0; i < p.length; i++) (cov += (p[i] - mp) * (y[i] - my)), (vp += (p[i] - mp) ** 2), (vy += (y[i] - my) ** 2);
-  return { n: p.length, r2: 1 - sse / (sse0 || 1), acc: hit / (cnt || 1), corr: vp && vy ? cov / Math.sqrt(vp * vy) : 0 };
-};
-const TIME_LABEL = ['09:00–09:45', '09:45–10:30', '10:30–11:15', '11:15–12:00', '12:00–12:45', '12:45–13:30'];
-const byH = HORIZONS.map((h, hi) => {
-  const s = stats(oos[hi].p, oos[hi].y);
-  return { h, n: s.n, r2: r5(s.r2), acc: r5(s.acc), corr: r5(s.corr) };
+const rmse = (a: number[]) => Math.sqrt(mean(a.map((v) => v * v)));
+const mae = (a: number[]) => mean(a.map(Math.abs));
+const byOrigin = ORIGINS.map((o) => {
+  const a = acc[o];
+  return {
+    origin: o,
+    label: ORIGIN_LABEL[o],
+    // 收盤走勢：每根 K 棒收盤價的誤差（RMSE），模型 vs 不會動
+    pathRmse: r5(rmse(a.pe)),
+    pathNaive: r5(rmse(a.pn)),
+    // 約 80% 區間實際涵蓋的比例
+    coverage: r5(a.cov / (a.covN || 1)),
+    // 每根 K 棒振幅的平均誤差，模型 vs 時段平均
+    rangeMae: r5(mean(a.re)),
+    rangeNaive: r5(mean(a.rn)),
+    // 振幅（ln）的 R²：比時段平均好多少
+    rangeR2: r5(1 - mean(a.rl.map((v) => v * v)) / (mean(a.rlb.map((v) => v * v)) || 1)),
+    // 今天最高、最低點的平均誤差，模型 vs 平均高低點
+    hlMae: r5(mae(a.he)),
+    hlNaive: r5(mae(a.hn)),
+  };
 });
-const closeByTime = TIME_LABEL.map((label, tb) => {
-  const hi = HORIZONS.length - 1;
-  const idx = oos[hi].tb.map((v, i) => (v === tb ? i : -1)).filter((i) => i >= 0);
-  const s = stats(idx.map((i) => oos[hi].p[i]), idx.map((i) => oos[hi].y[i]));
-  return { label, n: s.n, r2: r5(s.r2), acc: r5(s.acc) };
-});
-// 樣本外殘差標準差：給網頁畫預測區間
-const residOOS = HORIZONS.map((_, hi) =>
-  [0, 1, 2, 3, 4, 5].map((tb) => {
-    const e = oos[hi].tb.map((v, i) => (v === tb ? oos[hi].y[i] - oos[hi].p[i] : NaN)).filter(Number.isFinite);
-    return e.length > 20 ? r5(std(e))! : 0;
-  }),
-);
-// 有沒有預測能力：至少一個長度的樣本外 R² > 0.5% 而且方向準確率 > 52%（幾千筆樣本下，51% 跟擲硬幣分不出來）
-const useful = byH.filter((b) => (b.r2 ?? 0) > 0.005 && (b.acc ?? 0) > 0.52);
 console.log('回測（樣本外）：');
-for (const b of byH) console.log(`  ${b.h === 54 ? '到收盤' : `${b.h} 根`}：R² ${b.r2}、方向 ${b.acc}、相關 ${b.corr}（${b.n} 筆）`);
-for (const b of closeByTime) console.log(`  到收盤 ${b.label}：R² ${b.r2}、方向 ${b.acc}`);
+for (const b of byOrigin)
+  console.log(`  ${b.label}：走勢 ${(b.pathRmse! * 100).toFixed(3)}% vs 不動 ${(b.pathNaive! * 100).toFixed(3)}%、區間涵蓋 ${(b.coverage! * 100).toFixed(0)}%、振幅誤差 ${(b.rangeMae! * 100).toFixed(3)}% vs ${(b.rangeNaive! * 100).toFixed(3)}%（R² ${b.rangeR2}）、高低點 ${(b.hlMae! * 100).toFixed(3)}% vs ${(b.hlNaive! * 100).toFixed(3)}%`);
+if (process.env.DEBUG) console.log('開盤預測：每根 K 棒 實際誤差 ÷ 預測標準差 的標準差（應該約 1）', dbg.map((z, b) => `${b}:${std(z).toFixed(2)}`).filter((_, b) => b % 6 === 0).join(' '));
+console.log('挑到的 λ：', Object.fromEntries(Object.entries(lambdaLog).map(([k, v]) => [k, v.at(-1)])));
 
 // ---------------------------------------------------------------- 最終模型（全部資料）＋ 00631L 換算
-const final = fit(days);
-final.resid = residOOS.map((row, hi) => row.map((v, tb) => v || final.resid[hi][tb]));
+const final = fitAll(days);
+final.m.resid = residBy.map((row, hi) => row.map((e, tb) => r5(e.length > 30 ? std(e) : final.m.resid[hi][tb])!));
 
 const exDays = new Set<string>();
 for (const f of existsSync(join(dir, 'exrights')) ? readdirSync(join(dir, 'exrights')).filter((f) => /^\d{4}\.json$/.test(f)) : [])
@@ -179,7 +305,6 @@ const lRaw = read<Array<[string, number, number, number, number, number]>>(join(
 const lBars = lRaw.map(([date, open, high, low, close, volume]) => ({ date, open, high, low, close, volume }));
 const lAdj = adjustForSplits(lBars, detectSplits(lBars, exDays), '9999-12-31');
 const lClose = new Map(lAdj.map((b) => [b.date, b.close]));
-// β：近 250 天 00631L 日報酬對加權指數日報酬（不含截距）
 let sxy = 0;
 let sxx = 0;
 for (let i = Math.max(1, taiex.length - 250); i < taiex.length; i++) {
@@ -191,14 +316,11 @@ for (let i = Math.max(1, taiex.length - 250); i < taiex.length; i++) {
   sxx += x * x;
 }
 const beta = sxx ? sxy / sxx : 2;
-// 原始價格（沒有還原）：網頁顯示用；分割後的價格比例不變，用還原後的最近收盤即可
-const lastL = (date: string) => {
-  const i = dIdx.get(date)!;
-  return lClose.get(taiex[i - 1][0]) ?? null;
-};
-// 下一個交易日開盤前的資料（網頁即時預測用）
-const nextCtx = dailyCtx(taiex.length)!;
+const prevL = (date: string) => lClose.get(taiex[dIdx.get(date)! - 1][0]) ?? null;
 const lastDate = taiex[taiex.length - 1][0];
+const ctxOut = (c: DailyCtx) => Object.fromEntries(Object.entries(c).map(([k, v]) => [k, r5(v)]));
+const lin = (x: LinModel) => ({ mean: x.mean.map(r5), sd: x.sd.map(r5), coef: x.coef.map(r5) });
+const verdictOf = (b: (typeof byOrigin)[number]) => (b.pathRmse ?? 1) < (b.pathNaive ?? 0) * 0.995;
 
 writeFileSync(
   join(dir, 'predict-intraday.json'),
@@ -206,17 +328,19 @@ writeFileSync(
     generatedAt: new Date().toISOString(),
     ready: true,
     beta: r5(beta),
-    model: {
-      mean: final.mean.map(r5),
-      sd: final.sd.map(r5),
-      coef: final.coef.map((b) => b.map(r5)),
-      resid: final.resid.map((row) => row.map(r5)),
-    },
-    verdict: useful.length ? 'signal' : 'none',
-    backtest: { from: days[FIRST]?.date, to: days.at(-1)!.date, days: days.length - FIRST, byH, closeByTime },
-    next: { after: lastDate, P0: taiex[taiex.length - 1][4], L0: lClose.get(lastDate) ?? null, ctx: Object.fromEntries(Object.entries(nextCtx).map(([k, v]) => [k, r5(v)])) },
-    // 最近 10 天（回放用）：當天 5 分 K、昨收、00631L 昨收、開盤前資料
-    recent: days.slice(-10).map((d) => ({ date: d.date, P0: d.P0, L0: lastL(d.date), ix: d.ix, ctx: Object.fromEntries(Object.entries(d.ctx).map(([k, v]) => [k, r5(v)])) })),
+    model: { mean: final.m.mean.map(r5), sd: final.m.sd.map(r5), coef: final.m.coef.map((b) => b.map(r5)), resid: final.m.resid },
+    day: { base: final.dm.base.map(r5), rng: lin(final.dm.rng), up: lin(final.dm.up), down: lin(final.dm.down), gap: lin(final.dm.gap), gapSd: r5(final.dm.gapSd) },
+    // 走勢：至少一半的預測時間點比「不會動」誤差小 0.5% 以上才算有預測能力
+    verdict: byOrigin.filter(verdictOf).length >= ORIGINS.length / 2 ? 'signal' : 'none',
+    // 振幅與高低點：半數以上的預測時間點比簡單猜法誤差小 3% 以上，而且沒有任何時間點差超過 3%
+    rangeVerdict:
+      byOrigin.filter((b) => b.rangeMae! < b.rangeNaive! * 0.97 && b.hlMae! < b.hlNaive! * 0.97).length >= ORIGINS.length / 2 &&
+      byOrigin.every((b) => b.rangeMae! < b.rangeNaive! * 1.03 && b.hlMae! < b.hlNaive! * 1.03)
+        ? 'signal'
+        : 'none',
+    backtest: { from: days[FIRST]?.date, to: days.at(-1)!.date, days: days.length - FIRST, byOrigin },
+    next: { after: lastDate, P0: taiex[taiex.length - 1][4], L0: lClose.get(lastDate) ?? null, ctx: ctxOut(dailyCtx(taiex.length)!) },
+    recent: days.slice(-10).map((d) => ({ date: d.date, P0: d.P0, L0: prevL(d.date), ix: d.ix, ctx: ctxOut(d.ctx) })),
   }),
 );
 console.log(`β ${beta.toFixed(3)}；predict-intraday.json 完成（${((Date.now() - t0) / 1000).toFixed(1)}s）`);

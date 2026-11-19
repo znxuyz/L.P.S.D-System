@@ -5,10 +5,10 @@
  * - 點個股可以跳到個股分析頁。
  */
 import { dayTradeBands, dayTradeCall, loadPredict, loadPredictIntraday, type PredictData, type StockPick, type Verdict } from '../data/predict';
-import { taipeiDate } from '../data/liveProvider';
+import { sessionAt, taipeiDate } from '../data/liveProvider';
 import { sessionOpenMs } from '../data/twse';
 import type { IndexPoint } from '../data/types';
-import { intradayHtml, liveCloses, type IntradayData, type IntradayState } from './predictIntraday';
+import { intradayHtml, liveBars, type IntradayData, type IntradayState } from './predictIntraday';
 import { escapeHtml as esc, num } from './format';
 
 const pctTxt = (v: number | null | undefined, digits = 1, sign = true) => {
@@ -188,7 +188,7 @@ function dayTradeHtml(d: NonNullable<PredictData['dayTrade']>): string {
 let data: PredictData | null | undefined;
 let intra: IntradayData | null | undefined;
 let loading = false;
-const intraState: IntradayState = { mode: '', k: 12 };
+const intraState: IntradayState = { mode: '', k: -1, showActual: true };
 /** 即時的加權指數（只有富果／證交所即時行情才有；收盤回放是模擬走勢，不能用）。 */
 export type LiveIndex = () => IndexPoint[] | null;
 let liveIndex: LiveIndex = () => null;
@@ -212,12 +212,15 @@ export function renderPredictPage(root: HTMLElement, onStock: (code: string) => 
   }, 30_000);
 }
 
-function liveState(): { closes: number[]; ok: boolean; why: string } {
+function liveState(): { open: number | null; bars: ReturnType<typeof liveBars>['bars']; ok: boolean; why: string } {
+  const none = { open: null, bars: [] };
   const series = liveIndex();
-  if (!series) return { closes: [], ok: false, why: '需要富果或證交所即時行情' };
-  if (!intra?.ready || taipeiDate(Date.now()) <= intra.next.after) return { closes: [], ok: false, why: '今天的模型資料還沒準備好' };
-  const closes = liveCloses(series, sessionOpenMs(new Date()));
-  return closes.length ? { closes, ok: true, why: '' } : { closes, ok: false, why: '今天還沒開盤' };
+  if (!series) return { ...none, ok: false, why: '需要富果或證交所即時行情' };
+  if (!intra?.ready || taipeiDate(Date.now()) <= intra.next.after) return { ...none, ok: false, why: '今天的模型資料還沒準備好' };
+  // 開盤前也能看（開盤前的預測）；週末、收盤後沒有今天的資料時就是休市
+  const r = liveBars(series, sessionOpenMs(new Date()));
+  if (!r.open && sessionAt(Date.now()) === 'closed') return { ...none, ok: false, why: '今天休市' };
+  return { ...r, ok: true, why: '' };
 }
 
 /** 只重畫 5 分 K 預測那一塊。 */
@@ -235,6 +238,10 @@ function bindIntra(root: HTMLElement): void {
     intraState.mode = (e.target as HTMLSelectElement).value;
     drawIntra(root);
   });
+  root.querySelector<HTMLInputElement>('#pd-intra-actual')?.addEventListener('change', (e) => {
+    intraState.showActual = (e.target as HTMLInputElement).checked;
+    drawIntra(root);
+  });
   const k = root.querySelector<HTMLInputElement>('#pd-intra-k');
   k?.addEventListener('input', () => {
     intraState.k = Number(k.value);
@@ -244,7 +251,7 @@ function bindIntra(root: HTMLElement): void {
     const tmp = document.createElement('div');
     tmp.innerHTML = intradayHtml(intra, intraState, liveState());
     const next = tmp.firstElementChild as HTMLElement;
-    for (const sel of ['.pd-stats', '.pd-intra-chart', '.pd-intra-chart + .pd-legend', '#pd-intra-clock']) {
+    for (const sel of ['.pd-intra-stats', '.pd-intra-scroll', '.pd-intra-scroll + .pd-legend', '#pd-intra-clock', '.pd-day-err']) {
       const a = el.querySelector(sel);
       const b = next.querySelector(sel);
       if (a && b) a.replaceWith(b);
@@ -269,7 +276,7 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
     <a href="#pd-stocks" class="pd-sum glass"><span>個股排名</span>${badge(d.stocks.verdict)}</a>
     <a href="#pd-market" class="pd-sum glass"><span>大盤展望</span>${badge(d.market.verdict)}</a>
     ${d.dayTrade ? `<a href="#pd-day" class="pd-sum glass"><span>${esc(d.dayTrade.code)} 當沖（開盤→收盤）</span>${badge(d.dayTrade.verdict)}</a>` : ''}
-    ${intra?.ready ? `<a href="#pd-intra" class="pd-sum glass"><span>00631L 5 分 K 走勢</span>${badge(intra.verdict)}</a>` : ''}
+    ${intra?.ready ? `<a href="#pd-intra" class="pd-sum glass"><span>00631L 整天 5 分 K</span>${badge(intra.rangeVerdict ?? intra.verdict)}</a>` : ''}
   </div>`;
   root.innerHTML = `<div class="pd-main">${head}${summary}
     ${stocksHtml(d.stocks, d.horizon)}

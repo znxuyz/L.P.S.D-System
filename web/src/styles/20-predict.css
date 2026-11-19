@@ -77,17 +77,42 @@
   .pd-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pd-table { font-size: 13px; }
   .pd-table th, .pd-table td { padding: 6px 7px; }
+  /* 5 分 K 圖在手機上維持寬度、可以左右滑 */
+  .pd-intra-scroll .pd-intra-chart { min-width: 640px; }
+  .pd-intra-ctrl label:first-child { flex: 1 1 100%; }
+  .pd-intra-ctrl select { flex: 1; }
+  .pd-badges { justify-content: flex-start; }
 }
 
 /* 5 分 K 走勢預測 */
 .pd-intra-ctrl { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; margin: 4px 0 10px; }
-.pd-intra-ctrl label { display: flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 600; }
+.pd-intra-ctrl label { display: flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 600; white-space: nowrap; min-width: 0; }
+.pd-intra-ctrl select { max-width: 100%; min-width: 0; }
+.pd-intra-scroll { overflow-x: auto; }
 .pd-intra-ctrl select { padding: 7px 10px; border-radius: 10px; border: 1px solid var(--glass-line); background: var(--row); color: var(--ink); font: inherit; }
 .pd-intra-k { flex: 1 1 320px; }
 .pd-intra-k input { flex: 1; accent-color: var(--accent); }
 .pd-intra-chart .k-up line, .pd-intra-chart .k-up rect { stroke: var(--up); fill: var(--up); }
 .pd-intra-chart .k-down line, .pd-intra-chart .k-down rect { stroke: var(--down); fill: var(--down); }
-.pd-intra-chart .is-future { opacity: 0.22; }
+/* 已走完：實心；預測：空心；實際（回放對照）：淡色 */
+.pd-intra-chart .is-pred line { stroke-width: 1.4; }
+.pd-intra-chart .k-up.is-pred rect { fill: color-mix(in srgb, var(--up) 12%, transparent); stroke: var(--up); stroke-width: 1.4; }
+.pd-intra-chart .k-down.is-pred rect { fill: color-mix(in srgb, var(--down) 12%, transparent); stroke: var(--down); stroke-width: 1.4; }
+.pd-intra-chart .is-actual { opacity: 0.28; }
+.pd-hl { stroke-width: 1.2; stroke-dasharray: 6 4; }
+.pd-hl.is-hi { stroke: var(--up); }
+.pd-hl.is-lo { stroke: var(--down); }
+.pd-tick.is-hi { fill: var(--up); }
+.pd-tick.is-lo { fill: var(--down); }
+.pd-legend .pd-key-real i { background: var(--ink-2); }
+.pd-legend .pd-key-pred i { background: transparent; border: 1.5px solid var(--accent); height: 8px; }
+.pd-legend .pd-key-actual i { background: var(--ink-2); opacity: 0.35; height: 8px; }
+.pd-legend .pd-key-hl i { background: none; border-top: 2px dashed var(--muted); height: 0; }
+.pd-badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.pd-check { font-weight: 500 !important; }
+.pd-day-err { margin: 6px 0 0; font-size: 14px; }
+.pd-day-err b { color: var(--ink); }
+.pd-table th small { font-weight: 400; }
 .pd-band { fill: color-mix(in srgb, var(--accent) 16%, transparent); stroke: none; }
 .pd-fc { stroke-width: 2.4; }
 .pd-now { stroke: var(--ink-2); stroke-dasharray: 3 3; stroke-width: 1; }
