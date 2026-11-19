@@ -34,7 +34,21 @@ export interface EeStat {
   stop: number;
 }
 
+/** 營收選股（第一手資料，正式選股模型）。 */
+export interface RevStocks {
+  asOf: string;
+  tradeDate: string;
+  rebalanceTomorrow: boolean;
+  nextRebalance: string;
+  trendOk: boolean;
+  universe: number;
+  n: number;
+  revMonth: string | null;
+  top: Array<{ code: string; name: string; close: number | null; score: number; vals: Record<string, number | null> }>;
+  backtest: { from: string | null; to: string; periods: number; total: number | null; market: number | null; win: number | null; years: Array<{ year: string; ret: number | null; market: number | null }>; curve: Array<[string, number, number]> };
+}
 export interface PredictData {
+  revStocks?: RevStocks;
   generatedAt: string;
   horizon: number;
   market: {

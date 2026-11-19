@@ -18,6 +18,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { adjustForSplits, detectSplits } from '../web/src/domain/splits.ts';
 import { canArchive, readPreOpen, writeArchive } from './lib/archive.ts';
+import { COMBO, addMonths, isRebalanceDate, latestKnownMonth, makeSignals, rebalanceDays } from './lib/revSignals.ts';
 import { loadUs, usMove } from './lib/us.ts';
 import { loadTx, nightMove } from './lib/txNight.ts';
 import { loadFinQuarters } from './lib/finQuarters.ts';
@@ -46,7 +47,7 @@ const REFIT = 20; // 重新訓練間隔
 const BF_DIR = process.env.BACKFILL_DIR;
 const BF_FROM = process.env.BACKFILL_FROM ?? '0000';
 const BF_TO = process.env.BACKFILL_TO ?? '9999';
-const bfDaily = new Map<string, { stocks?: { top: string[]; all?: Record<string, number>; turn?: Record<string, number> }; dayTrade?: unknown }>();
+const bfDaily = new Map<string, { stocks?: { top: string[]; all?: Record<string, number>; turn?: Record<string, number> }; revStocks?: unknown; dayTrade?: unknown }>();
 const bfPut = (asOf: string, part: object) => {
   if (!BF_DIR || asOf < BF_FROM || asOf > BF_TO) return;
   bfDaily.set(asOf, { ...(bfDaily.get(asOf) ?? {}), ...part });
@@ -868,6 +869,89 @@ if (dt) {
   console.log(`00631L 當沖（自己選用：${(fit as { use?: string[] }).use?.join('、') || '基本資料'}）：${b.trades} 筆、勝率 ${b.winRate}、累計 ${b.total}（一直做多 ${b.alwaysLong}）`);
 }
 
+// ================================================================ 4. 營收選股（第一手資料，正式選股模型）
+// 每月 12 日後第一個交易日換股，買「綜合分數」最高的 REV_N 檔等權持有一個月；換股前一天加權指數在 200 日均線之下就持有現金。
+// 綜合分數＝營收成長加速、營收創新高程度、毛利率改善、法人買超在全部股票裡的排名平均（scripts/lib/revSignals.ts，研究用的 factor-lab.ts 同一套）。
+const REV_N = 20;
+const sigs = makeSignals(dir, cal);
+const aboveMa200 = (i: number) => {
+  if (i < 199) return true;
+  let sm = 0;
+  for (let j = i - 199; j <= i; j++) sm += ixClose[j];
+  return ixClose[i] > sm / 200;
+};
+const nextWeekday = (d: string) => {
+  const x = new Date(`${d}T00:00:00Z`);
+  do x.setUTCDate(x.getUTCDate() + 1);
+  while (x.getUTCDay() === 0 || x.getUTCDay() === 6);
+  return x.toISOString().slice(0, 10);
+};
+/** 第 i 天（交易日，可以是 T＝下一個交易日）開盤要買的 REV_N 檔與各訊號。 */
+function revPicks(i: number, date: string) {
+  const { uni, vals, combo } = sigs.scoreAll(stocks, i, date);
+  const ord = uni.map((s, k) => [s, k] as const).filter(([, k]) => Number.isFinite(combo[k])).sort((a, b) => combo[b[1]] - combo[a[1]]);
+  return { uni: uni.length, picks: ord.slice(0, REV_N).map(([st, k]) => ({ code: st.code, k, score: combo[k], vals: Object.fromEntries(COMBO.concat(['revYoy3']).map((id) => [id, vals[id][k]])) })) };
+}
+const revOut = (() => {
+  const t0r = Date.now();
+  // 回測：跟 factor-lab.ts 一樣（換股日開盤買、下一個換股日開盤賣、扣成本），每期記錄報酬與加權指數
+  const COSTR = 0.001425 * 0.6 * 2 + 0.003;
+  const rbs = rebalanceDays(cal).filter((i) => cal[i] >= '2021-01-01');
+  const periods: Array<[string, number, number, number]> = []; // [換股日, 選股報酬, 加權指數, 是否持有現金]
+  let prev = new Set<string>();
+  for (let p = 0; p + 1 < rbs.length; p++) {
+    const i = rbs[p];
+    const j = rbs[p + 1];
+    const mk = ixClose[j - 1] / ixClose[i - 1] - 1;
+    if (!aboveMa200(i - 1)) {
+      periods.push([cal[i], prev.size ? -COSTR / 2 : 0, mk, 1]);
+      prev = new Set();
+      continue;
+    }
+    const pk = revPicks(i, cal[i]).picks.filter((x) => stocks[sIdx.get(x.code)!].open[i] > 0);
+    const rs = pk.map((x) => {
+      const st = stocks[sIdx.get(x.code)!];
+      return (st.open[j] > 0 ? st.open[j] : st.close[j - 1]) / st.open[i] - 1;
+    });
+    const turnover = pk.filter((x) => !prev.has(x.code)).length / (pk.length || 1);
+    prev = new Set(pk.map((x) => x.code));
+    periods.push([cal[i], mean(rs) - turnover * COSTR, mk, 0]);
+  }
+  const comp = (xs: number[]) => xs.reduce((t, x) => t * (1 + x), 1) - 1;
+  const years = [...new Set(periods.map((p) => p[0].slice(0, 4)))].map((y) => {
+    const ps = periods.filter((p) => p[0].startsWith(y));
+    return { year: y, ret: r4(comp(ps.map((p) => p[1]))), market: r4(comp(ps.map((p) => p[2]))) };
+  });
+  let eq = 1;
+  let eqM = 1;
+  const curve: Array<[string, number, number]> = periods.map((p) => [p[0], r4((eq *= 1 + p[1]))!, r4((eqM *= 1 + p[2]))!]);
+  // 下一個交易日
+  const nd = nextWeekday(cal[T - 1]);
+  const now = revPicks(T, nd);
+  // 下一次換股日（估計，不含國定假日）：明天就是 → 明天；這個月還沒到 12 日 → 這個月 12 日後第一個平日；否則下個月
+  const firstWeekdayFrom = (ym: string) => {
+    const x = new Date(`${ym}-12T00:00:00Z`);
+    while (x.getUTCDay() === 0 || x.getUTCDay() === 6) x.setUTCDate(x.getUTCDate() + 1);
+    return x.toISOString().slice(0, 10);
+  };
+  const nextReb = isRebalanceDate(nd, cal[T - 1]) ? nd : nd.slice(8) < '12' ? firstWeekdayFrom(nd.slice(0, 7)) : firstWeekdayFrom(addMonths(nd.slice(0, 7), 1));
+  console.log(`營收選股：${now.uni} 檔可選，回測 ${periods.length} 期 總報酬 ${r4(comp(periods.map((p) => p[1])))} vs 大盤 ${r4(comp(periods.map((p) => p[2])))}（${((Date.now() - t0r) / 1000).toFixed(1)}s）`);
+  // 歷史模擬存檔：換股日前一天
+  if (BF_DIR) for (const i of rebalanceDays(cal)) if (cal[i - 1] >= BF_FROM && cal[i - 1] <= BF_TO) bfPut(cal[i - 1], { revStocks: { top: revPicks(i, cal[i]).picks.map((x) => x.code), trendOk: aboveMa200(i - 1) } });
+  return {
+    asOf: cal[T - 1],
+    tradeDate: nd,
+    rebalanceTomorrow: isRebalanceDate(nd, cal[T - 1]),
+    nextRebalance: nextReb,
+    trendOk: aboveMa200(T - 1),
+    universe: now.uni,
+    n: REV_N,
+    revMonth: latestKnownMonth(nd),
+    top: now.picks.map((x) => ({ code: x.code, name: names[x.code] ?? '', close: r4(stocks[sIdx.get(x.code)!].close[T - 1]), score: Math.round(x.score * 100), vals: Object.fromEntries(Object.entries(x.vals).map(([k, v]) => [k, r4(v)])) })),
+    backtest: { from: periods[0]?.[0] ?? null, to: cal[rbs.at(-1) ?? T - 1], periods: periods.length, total: r4(comp(periods.map((p) => p[1]))), market: r4(comp(periods.map((p) => p[2]))), win: r4(periods.filter((p) => p[1] > p[2]).length / (periods.length || 1)), years, curve },
+  };
+})();
+
 // ================================================================ 事前存檔與實盤成績
 // 收盤後把「今天收盤算出來的預測」存進 forecasts 分支（只新增不覆蓋），之後只用存檔的數字打分數
 type DayTradeRule = { lastClose: number; cost: number; rule: { a: number; b: number; gapMean: number; gapSd: number } };
@@ -877,6 +961,8 @@ if (process.env.ARCHIVE_DIR) {
   const data = {
     market: { probUp: marketOut.probUp, expReturn: marketOut.expReturn },
     stocks: { all: stockOut.all, top: stockOut.top.map((x) => x.code), bottom: stockOut.bottom.map((x) => x.code) },
+    // 營收選股：下一個交易日如果是換股日就照這份買（模擬帳戶用）
+    revStocks: { top: revOut.top.map((x) => x.code), trendOk: revOut.trendOk, tradeDate: revOut.tradeDate, rebalance: revOut.rebalanceTomorrow },
     dayTrade: dtr ? { code: dtr.code, lastClose: dtr.lastClose, cost: dtr.cost, rule: dtr.rule } : null,
   };
   if (canArchive(asOf, Date.now(), !!process.env.ARCHIVE_KIND_SUFFIX)) console.log(writeArchive(process.env.ARCHIVE_DIR, 'daily' + (process.env.ARCHIVE_KIND_SUFFIX ?? ''), asOf, data) ? `事前存檔：${asOf} 收盤後的預測` : `事前存檔：${asOf} 已經存過`);
@@ -926,5 +1012,5 @@ if (BF_DIR) {
   for (const [asOf, v] of bfDaily) writeArchive(BF_DIR, 'daily', asOf, v);
   console.log(`歷史模擬存檔：${bfDaily.size} 天（${BF_FROM} ～ ${BF_TO}）→ ${BF_DIR}`);
 }
-writeFileSync(join(dir, 'predict.json'), JSON.stringify({ generatedAt: new Date().toISOString(), horizon: H, market: marketOut, stocks: stockOut, dayTrade: dayTradeOut, forward }));
+writeFileSync(join(dir, 'predict.json'), JSON.stringify({ generatedAt: new Date().toISOString(), horizon: H, market: marketOut, stocks: stockOut, revStocks: revOut, dayTrade: dayTradeOut, forward }));
 console.log(`predict.json 完成（${((Date.now() - t0) / 1000).toFixed(1)}s）`);
