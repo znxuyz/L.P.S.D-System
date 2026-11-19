@@ -10,7 +10,8 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadFinQuarters } from './finQuarters.ts';
-import { revenueKnownFrom } from './revenueParse.ts';
+import { addMonths, latestKnownMonth } from './revDates.ts';
+export { addMonths, isRebalanceDate, latestKnownMonth, rebalanceDays } from './revDates.ts';
 
 export interface SigStock {
   code: string;
@@ -34,20 +35,6 @@ export const COMBO: SignalId[] = ['revAccel', 'revHigh', 'gmChg', 'inst20'];
 /** 流動性門檻：近 20 日平均成交額（億）。 */
 export const MIN_TURN = 0.5;
 
-export const addMonths = (ym: string, n: number) => {
-  const [y, m] = ym.split('-').map(Number);
-  const t = y * 12 + (m - 1) + n;
-  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`;
-};
-/** 交易日 date 開盤前已經公布的最新營收月份。 */
-export function latestKnownMonth(date: string): string | null {
-  let ym = date.slice(0, 7);
-  for (let k = 0; k < 3; k++) {
-    ym = addMonths(ym, -1);
-    if (revenueKnownFrom(ym) <= date) return ym;
-  }
-  return null;
-}
 const growth = (a: number, b: number) => (b > 0 && Number.isFinite(a) ? Math.max(-1, Math.min(5, a / b - 1)) : NaN);
 
 export function makeSignals(dir: string, cal: string[]) {
@@ -160,15 +147,4 @@ export function makeSignals(dir: string, cal: string[]) {
     return { uni, vals, ranks, combo };
   }
   return { f, eligible, scoreAll, revMonths: months, rev };
-}
-
-/** 換股日：每個月 12 日（含）以後第一個交易日（前一個月的營收 10 日前公告完）。 */
-export function rebalanceDays(cal: string[]): number[] {
-  const out: number[] = [];
-  for (let i = 1; i < cal.length; i++) if (cal[i].slice(8) >= '12' && (out.length === 0 || cal[out.at(-1)!].slice(0, 7) !== cal[i].slice(0, 7))) out.push(i);
-  return out;
-}
-/** 下一個交易日是不是換股日：今天在 12 日以前（或這個月還沒換過）而下一個平日在 12 日以後。 */
-export function isRebalanceDate(date: string, prevDate: string): boolean {
-  return date.slice(8) >= '12' && (prevDate.slice(0, 7) !== date.slice(0, 7) || prevDate.slice(8) < '12');
 }

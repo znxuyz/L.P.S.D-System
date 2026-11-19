@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addMonths, isRebalanceDate, latestKnownMonth, rebalanceDays } from '../../../scripts/lib/revSignals';
+import { addMonths, isRebalanceDate, latestKnownMonth, rebalanceDays } from '../../../scripts/lib/revDates';
 
 describe('營收選股的日期規則', () => {
   it('月份加減', () => {

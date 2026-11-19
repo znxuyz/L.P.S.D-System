@@ -20,7 +20,7 @@
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isRebalanceDate } from './lib/revSignals.ts';
+import { isRebalanceDate } from './lib/revDates.ts';
 import { adjustForSplits, detectSplits } from '../web/src/domain/splits.ts';
 import { readPreOpen } from './lib/archive.ts';
 

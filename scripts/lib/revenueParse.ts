@@ -36,11 +36,3 @@ export function decodeHtml(buf: ArrayBuffer, contentType = ''): string {
     return new TextDecoder('utf-8').decode(buf);
   }
 }
-
-/** 月營收最晚在次月 10 日前公告：保守起見，M 月的營收從次月 11 日起才算「知道」。 */
-export function revenueKnownFrom(ym: string): string {
-  const [y, m] = ym.split('-').map(Number);
-  const ny = m === 12 ? y + 1 : y;
-  const nm = m === 12 ? 1 : m + 1;
-  return `${ny}-${String(nm).padStart(2, '0')}-11`;
-}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { decodeHtml, parseRevenueHtml, revenueKnownFrom } from '../../../scripts/lib/revenueParse';
+import { decodeHtml, parseRevenueHtml } from '../../../scripts/lib/revenueParse';
+import { revenueKnownFrom } from '../../../scripts/lib/revDates';
 
 describe('月營收解析', () => {
   it('抓出代號、當月營收、去年當月營收', () => {
