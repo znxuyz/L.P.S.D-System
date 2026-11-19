@@ -16,9 +16,10 @@ permissions:
   contents: write
   actions: write
 
-# 跟每日資料更新共用：data 分支一次只讓一個工作寫入
+# 自己一組：跟每小時的資料更新共用的話，排隊中的工作會被後來的取代（開盤前預測就跑不到）。
+# 寫回 data 分支時重新取出最新版、只放進 us/，盡量不蓋掉資料更新剛寫入的東西。
 concurrency:
-  group: data-branch
+  group: morning-forecast
   cancel-in-progress: false
 
 jobs:
@@ -45,15 +46,24 @@ jobs:
       - name: 抓美股
         run: node scripts/us-market.ts .data
 
-      - name: 存回 data 分支
-        working-directory: .data
+      - name: 存回 data 分支（只更新美股）
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -q --orphan snapshot
-          git add -A
-          git commit -q -m "Market data $(date -u +'%F %H:%M')（美股）"
-          git push -q -f origin snapshot:data
+          for t in 1 2 3; do
+            rm -rf .data-latest
+            git clone -q --depth 1 --branch data "$DATA_REMOTE" .data-latest
+            rm -rf .data-latest/us && cp -r .data/us .data-latest/us
+            cd .data-latest
+            base=$(git rev-parse HEAD)
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git checkout -q --orphan snapshot
+            git add -A
+            git commit -q -m "Market data $(date -u +'%F %H:%M')（美股）"
+            # 只在 data 分支還是剛剛取出的版本時才推（被別人更新了就重來一次）
+            if git push -q --force-with-lease=data:$base origin snapshot:data; then cd ..; break; fi
+            cd ..
+            sleep 20
+          done
 
       - name: 開盤前預測存檔
         run: |
