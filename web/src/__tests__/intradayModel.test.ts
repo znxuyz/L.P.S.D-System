@@ -40,3 +40,35 @@ describe('forecastDay', () => {
     expect(windowVol(base, 0, 3)).toBeGreaterThan(windowVol(base, 20, 3));
   });
 });
+
+import { simulateRange, type RangeLevels } from '../domain/intradayModel';
+
+describe('simulateRange（進出場模擬）', () => {
+  const flat = (p: number): Bar => [p, p, p, p];
+  const mk = (bars: Array<[number, Bar]>) => {
+    const ix: Bar[] = Array.from({ length: BARS }, () => flat(100));
+    for (const [i, b] of bars) ix[i] = b;
+    return ix;
+  };
+  const lv: RangeLevels = { k: 6, now: 100, buy: 99, buyTarget: 100, buyStop: 98, short: 101, shortTarget: 100, shortStop: 102 };
+  it('跌到買進點成交，之後回到停利出場', () => {
+    const r = simulateRange(mk([[10, [100, 100, 98.9, 99]], [12, [99, 100.2, 99, 100]]]), lv);
+    expect(r.side).toBe(1);
+    expect(r.how).toBe('target');
+    expect(r.exit).toBe(100);
+  });
+  it('成交那一根就跌破停損：保守算停損', () => {
+    const r = simulateRange(mk([[10, [100, 100, 97.5, 98]]]), lv);
+    expect(r.how).toBe('stop');
+    expect(r.exit).toBe(98);
+  });
+  it('漲到放空點成交、收盤還沒碰到停利停損就收盤出場', () => {
+    const r = simulateRange(mk([[10, [100, 101.2, 100, 101]], ...Array.from({ length: 43 }, (_, i) => [11 + i, flat(100.5)] as [number, Bar])]), lv);
+    expect(r.side).toBe(-1);
+    expect(r.how).toBe('close');
+    expect(r.ret).toBeCloseTo(-Math.log(100.5 / 101));
+  });
+  it('設定時間之前的 K 棒不算；兩邊都沒碰到就不交易', () => {
+    expect(simulateRange(mk([[3, [100, 100, 90, 95]]]), lv).side).toBe(0);
+  });
+});

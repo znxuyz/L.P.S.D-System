@@ -16,6 +16,22 @@ export interface StockPick {
   close: number | null;
   /** [白話原因, 貢獻] */
   reasons: Array<[string, number]>;
+  /** 進出場價位（最看好的股票才有）：entry／target／stop 為 null 代表「隔天開盤買」／不設停利／不設停損；refStop 是參考停損。 */
+  levels?: { atr: number; entry: number | null; target: number | null; stop: number | null; refStop: number } | null;
+}
+
+/** 進出場方式的回測統計。 */
+export interface EeStat {
+  signals: number;
+  fill: number;
+  perSignal: number;
+  perTrade: number;
+  win: number;
+  days: number;
+  worst: number;
+  p10: number;
+  target: number;
+  stop: number;
 }
 
 export interface PredictData {
@@ -48,6 +64,11 @@ export interface PredictData {
     bottom: StockPick[];
     all: Record<string, number>;
     weights: Array<{ id: string; name: string; w: number }>;
+    /** 進場、出場：目前的方式與回測（逐段往前滾挑方式）。 */
+    entryExit?: {
+      plan: { a: number; b: number | null; c: number | null; name: string };
+      backtest: { periods: number; strategy: EeStat; baseline: EeStat; reference: Array<EeStat & { name: string }>; picked: Array<[string, string]> };
+    };
     backtest: {
       from: string;
       to: string;

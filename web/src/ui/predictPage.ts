@@ -62,8 +62,10 @@ function lineChart(rows: Array<[string, ...number[]]>, series: Array<{ name: str
 }
 
 function pickTable(rows: StockPick[], kind: 'top' | 'bottom'): string {
+  const lv = kind === 'top';
+  const px = (v: number | null | undefined) => (v == null ? '—' : num(v, v < 100 ? 2 : 1));
   return `<div class="pd-table-wrap"><table class="pd-table">
-    <thead><tr><th>#</th><th>股票</th><th class="num">收盤</th><th class="num">分數</th><th>主要原因</th></tr></thead>
+    <thead><tr><th>#</th><th>股票</th><th class="num">收盤</th><th class="num">分數</th>${lv ? '<th class="num">進場</th><th class="num">出場</th><th class="num">參考停損</th>' : ''}<th>主要原因</th></tr></thead>
     <tbody>${rows
       .map(
         (r, i) => `<tr data-code="${esc(r.code)}" tabindex="0" title="看 ${esc(r.code)} 個股分析">
@@ -71,6 +73,7 @@ function pickTable(rows: StockPick[], kind: 'top' | 'bottom'): string {
         <td><b>${esc(r.code)}</b> ${esc(r.name)}</td>
         <td class="num">${r.close == null ? '—' : num(r.close, r.close < 100 ? 2 : 1)}</td>
         <td class="num"><span class="pd-score ${kind === 'top' ? 'up' : 'down'}">${r.score}</span></td>
+        ${lv ? `<td class="num">${r.levels?.entry != null ? `限價 ${px(r.levels.entry)}` : '明天開盤'}</td><td class="num">${r.levels?.target != null ? `停利 ${px(r.levels.target)}<br>` : ''}20 交易日後${r.levels?.stop != null ? `<br><small>停損 ${px(r.levels.stop)}</small>` : ''}</td><td class="num muted">${px(r.levels?.refStop)}</td>` : ''}
         <td class="pd-reasons">${r.reasons.map(([t]) => `<span>${esc(t)}</span>`).join('')}</td>
       </tr>`,
       )
@@ -105,6 +108,20 @@ function fwDayTrade(f: PredictData['forward']): string {
   const act = (a: number) => (a > 0 ? '<span class="up">做多</span>' : a < 0 ? '<span class="down">做空</span>' : '<span class="muted">觀望</span>');
   const rows = x.rows.map((r) => `<tr><td class="num">${esc(r.date)}</td><td class="num ${cls(r.gap)}">${pctTxt(r.gap, 2)}</td><td>${act(r.action)}</td><td class="num ${cls(r.actual)}">${pctTxt(r.actual, 2)}</td><td class="num ${cls(r.pnl)}">${r.action ? pctTxt(r.pnl, 2) : '—'}</td></tr>`).join('');
   return fwBlock(`${x.n} 天、出手 ${x.trades} 次，累計（扣成本）<b class="${cls(x.total)}">${pctTxt(x.total, 2)}</b>`, x.n, `<div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>交易日</th><th class="num">跳空</th><th>動作</th><th class="num">開→收</th><th class="num">損益</th></tr></thead><tbody>${rows}</tbody></table></div>`, '從今天開始存檔；下一個交易日收盤後出現第一筆。');
+}
+
+function entryExitHtml(e: PredictData['stocks']['entryExit']): string {
+  if (!e) return '';
+  const b = e.backtest;
+  const row = (name: string, x: { perSignal: number; fill: number; win: number; days: number; worst: number; p10: number }, hl = false) =>
+    `<tr${hl ? ' class="pd-sum-row"' : ''}><td>${esc(name)}</td><td class="num ${cls(x.perSignal)}">${pctTxt(x.perSignal, 2)}</td><td class="num">${num(x.fill * 100, 0)}%</td><td class="num">${num(x.win * 100, 0)}%</td><td class="num">${num(x.days, 1)}</td><td class="num down">${pctTxt(x.worst)}</td><td class="num down">${pctTxt(x.p10)}</td></tr>`;
+  return `<h3 class="pd-sub">進場與出場</h3>
+    <p class="pd-advice"><b>目前的方式：${esc(e.plan.name)}，最晚 20 個交易日後出場。</b>
+      進出場方式（等拉回再買、停利、停損，依各股近 14 天平均振幅 ATR 設定，共 64 種）每一期只用「已經結束的期間」挑最賺的；回測顯示單純持有最好，所以模型選了它。
+      想控制風險可以用表格裡的<b>參考停損</b>（收盤 − 2.5×ATR）：代價是平均報酬變低，好處是最慘的虧損變小（見下表）。</p>
+    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>方式（樣本外 ${num(b.periods)} 期、每期最看好 30 檔）</th><th class="num">每個訊號平均</th><th class="num">買得到</th><th class="num">勝率</th><th class="num">平均持有天數</th><th class="num">最慘一筆</th><th class="num">最差 10%</th></tr></thead>
+    <tbody>${row('逐段往前滾自動挑的方式', b.strategy, true)}${row('隔天開盤買、20 天後賣', b.baseline)}${b.reference.map((r) => row(r.name, r)).join('')}</tbody></table></div>
+    <p class="muted pd-small">全部扣成本（手續費 6 折來回＋證交稅）。「每個訊號平均」把沒買到的算 0（錢沒在賺）。模擬保守：跳空直接用開盤價成交；同一天碰到停利與停損當作先停損。</p>`;
 }
 
 function marketHtml(m: PredictData['market'], h: number, f?: PredictData['forward']): string {
@@ -169,6 +186,7 @@ function stocksHtml(s: PredictData['stocks'], h: number, f?: PredictData['forwar
         .join('')}</ul>
       <p class="muted">只列線性部分；模型另外有每個因子的平方項，抓「太極端反而不好」的關係（例如漲太多、波動太大）。</p>
     </details>
+    ${entryExitHtml(s.entryExit)}
     ${fwStocks(f)}
   </section>`;
 }
@@ -222,7 +240,7 @@ function dayTradeHtml(d: NonNullable<PredictData['dayTrade']>, f?: PredictData['
 let data: PredictData | null | undefined;
 let intra: IntradayData | null | undefined;
 let loading = false;
-const intraState: IntradayState = { mode: '', k: -1, showActual: true, showAnalogs: true, showCandles: false, showBand: false };
+const intraState: IntradayState = { mode: '', k: -1, showActual: true, showAnalogs: true, showCandles: false, showBand: false, showLevels: true };
 let analogLib: AnalogDay[] | null = null;
 /** 即時的加權指數（只有富果／證交所即時行情才有；收盤回放是模擬走勢，不能用）。 */
 export type LiveIndex = () => IndexPoint[] | null;
@@ -293,7 +311,7 @@ function bindIntra(root: HTMLElement): void {
     const tmp = document.createElement('div');
     tmp.innerHTML = intradayHtml(intra, intraState, liveState(), analogLib);
     const next = tmp.firstElementChild as HTMLElement;
-    for (const sel of ['.pd-intra-stats', '.pd-intra-scroll', '.pd-intra-legend', '#pd-intra-clock', '.pd-day-err', '.pd-line-err']) {
+    for (const sel of ['.pd-intra-stats', '.pd-intra-scroll', '.pd-intra-legend', '#pd-intra-clock', '.pd-day-err', '.pd-line-err', '.pd-range']) {
       const a = el.querySelector(sel);
       const b = next.querySelector(sel);
       if (a && b) a.replaceWith(b);

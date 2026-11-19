@@ -367,3 +367,103 @@ export function decodeAnalogs(raw: Array<[string, number | null, Array<number | 
   const f = (v: number | null) => (v == null ? NaN : v / 1e4);
   return raw.map(([date, gap, r, c]) => ({ date, gap: f(gap), r: r.map(f), ctx: { prevDay: f(c[0]), prev5: f(c[1]), prevIntra: f(c[2]), futChg: f(c[3]), prevRange: f(c[4]) } }));
 }
+
+// ================================================================ 00631L 當天進出場點（區間來回）
+
+/**
+ * 在第 k 根收盤後（例如 09:30）依「剩下時間預估會往上、往下走多遠」掛兩張單，先成交的那邊算數：
+ * - 往下的買進點：現價 × exp(−e × 預估下跌幅度)；往上的放空點：現價 × exp(＋e × 預估上漲幅度)。
+ * - 成交後：停利往回走 tp × 進場距離（tp＝1 回到掛單時的價格）；停損再往外 sl × 預估幅度；最晚收盤出場。
+ */
+/** 00631L 當沖成本（手續費 6 折來回＋ETF 證交稅 0.1%）。 */
+export const DAYTRADE_COST = 0.001425 * 2 * 0.6 + 0.001;
+
+export interface RangePlan {
+  k: number;
+  e: number;
+  tp: number;
+  sl: number;
+  /** 停利幅度（換算成 00631L）至少要是交易成本的幾倍才掛單；Infinity＝今天不交易。 */
+  m?: number;
+}
+
+export interface RangeLevels {
+  k: number;
+  now: number;
+  buy: number;
+  buyTarget: number;
+  buyStop: number;
+  short: number;
+  shortTarget: number;
+  shortStop: number;
+}
+
+/** 剩下時間預估會往上、往下走多遠（對數）。 */
+export function excursionAt(dm: DayModel, ix: Bar[], k: number, P0: number, d: DailyCtx): { up: number; down: number; now: number } {
+  const c = [ix[0][0], ...ix.slice(0, k).map((b) => b[3])];
+  const xf = excursionFeatures(ix, c, k, P0, d, dm.base);
+  return { up: Math.max(0.0005, linPredict(dm.up, xf)), down: Math.max(0.0005, linPredict(dm.down, xf)), now: c[k] };
+}
+
+/** beta：00631L 對指數的槓桿倍數（換算停利幅度是否值得交易成本）。 */
+export function rangeLevels(dm: DayModel, ix: Bar[], plan: RangePlan, P0: number, d: DailyCtx, beta = 2): RangeLevels {
+  const { up, down, now } = excursionAt(dm, ix, plan.k, P0, d);
+  // 停利幅度不夠（不到成本的 m 倍）的那一邊不掛單
+  const minMove = ((plan.m ?? 0) * DAYTRADE_COST) / beta;
+  const buy = plan.tp * plan.e * down >= minMove ? now * Math.exp(-plan.e * down) : 0;
+  const short = plan.tp * plan.e * up >= minMove ? now * Math.exp(plan.e * up) : Infinity;
+  return {
+    k: plan.k,
+    now,
+    buy,
+    buyTarget: buy * Math.exp(plan.tp * plan.e * down),
+    buyStop: buy * Math.exp(-plan.sl * down),
+    short,
+    shortTarget: short * Math.exp(-plan.tp * plan.e * up),
+    shortStop: short * Math.exp(plan.sl * up),
+  };
+}
+
+export interface RangeResult {
+  side: 1 | -1 | 0;
+  entryBar: number;
+  exitBar: number;
+  entry: number;
+  exit: number;
+  /** 指數的對數報酬（做空已經轉成正負）。 */
+  ret: number;
+  how: 'target' | 'stop' | 'close' | 'none';
+}
+
+/** 用之後的 5 分 K 模擬（保守：成交那一根只檢查停損；同一根同時碰到停利與停損當作先停損）。 */
+export function simulateRange(ix: Bar[], lv: RangeLevels): RangeResult {
+  let side: 1 | -1 | 0 = 0;
+  let entry = 0;
+  let entryBar = -1;
+  for (let b = lv.k; b < BARS; b++) {
+    const [o, h, l, c] = ix[b];
+    if (!side) {
+      const hitBuy = l <= lv.buy;
+      const hitShort = h >= lv.short;
+      if (!hitBuy && !hitShort) continue;
+      // 兩邊都碰到時順序不明：當作買進那邊（之後一樣保守檢查停損）
+      side = hitBuy ? 1 : -1;
+      entry = side > 0 ? Math.min(o, lv.buy) : Math.max(o, lv.short);
+      entryBar = b;
+      const stp = side > 0 ? lv.buyStop : lv.shortStop;
+      if (side > 0 ? l <= stp : h >= stp) return { side, entryBar, exitBar: b, entry, exit: stp, ret: side * Math.log(stp / entry), how: 'stop' };
+      continue;
+    }
+    const stp = side > 0 ? lv.buyStop : lv.shortStop;
+    const tgt = side > 0 ? lv.buyTarget : lv.shortTarget;
+    if (side > 0 ? o <= stp : o >= stp) return { side, entryBar, exitBar: b, entry, exit: o, ret: side * Math.log(o / entry), how: 'stop' };
+    if (side > 0 ? o >= tgt : o <= tgt) return { side, entryBar, exitBar: b, entry, exit: o, ret: side * Math.log(o / entry), how: 'target' };
+    if (side > 0 ? l <= stp : h >= stp) return { side, entryBar, exitBar: b, entry, exit: stp, ret: side * Math.log(stp / entry), how: 'stop' };
+    if (side > 0 ? h >= tgt : l <= tgt) return { side, entryBar, exitBar: b, entry, exit: tgt, ret: side * Math.log(tgt / entry), how: 'target' };
+    void c;
+  }
+  if (!side) return { side: 0, entryBar: -1, exitBar: -1, entry: 0, exit: 0, ret: 0, how: 'none' };
+  const exit = ix[BARS - 1][3];
+  return { side, entryBar, exitBar: BARS - 1, entry, exit, ret: side * Math.log(exit / entry), how: 'close' };
+}
+
