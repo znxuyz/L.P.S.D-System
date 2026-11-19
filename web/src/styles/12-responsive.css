@@ -1,5 +1,9 @@
 /* 主要頁面的響應式版面 */
 /* ---------------- 響應式 ---------------- */
+/* 頂端分頁多了「預測」：中等寬度把分頁縮窄一點，頂端列才放得下一行 */
+@media (max-width: 1600px) {
+  .pages button { padding: 6px 11px; }
+}
 @media (max-width: 1240px) {
   .analysis { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'head head' 'chart chart' 'pattern pattern' 'summary score' 'tech score' 'fund fund' 'news news'; }
   .app.page-intel { grid-template-columns: 200px minmax(0, 1fr) 300px; }

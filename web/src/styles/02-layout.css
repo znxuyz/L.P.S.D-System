@@ -84,6 +84,19 @@ html:has(.page-learn), body:has(.page-learn) { height: auto; }
 .app.page-learn .dock,
 .app.page-learn .screener,
 .app:not(.page-learn) > .learn { display: none; }
+.app.page-predict {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  grid-template-areas: 'top' 'screen';
+  height: auto;
+}
+html:has(.page-predict), body:has(.page-predict) { height: auto; }
+.app.page-predict .field,
+.app.page-predict .sectors,
+.app.page-predict .side,
+.app.page-predict .dock,
+.app.page-predict .screener,
+.app:not(.page-predict) > .predict { display: none; }
 /* 模擬盤只留模擬：頂端列只剩圖示、名稱與離開 */
 .app.page-sim .pages,
 .app.page-sim .ticker,
