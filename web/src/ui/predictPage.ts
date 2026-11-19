@@ -4,7 +4,11 @@
  * - 每個模型都附上樣本外回測成績，並自動判斷「有沒有比隨便猜更好」；沒有的就直接說沒有。
  * - 點個股可以跳到個股分析頁。
  */
-import { dayTradeBands, dayTradeCall, loadPredict, type PredictData, type StockPick, type Verdict } from '../data/predict';
+import { dayTradeBands, dayTradeCall, loadPredict, loadPredictIntraday, type PredictData, type StockPick, type Verdict } from '../data/predict';
+import { taipeiDate } from '../data/liveProvider';
+import { sessionOpenMs } from '../data/twse';
+import type { IndexPoint } from '../data/types';
+import { intradayHtml, liveCloses, type IntradayData, type IntradayState } from './predictIntraday';
 import { escapeHtml as esc, num } from './format';
 
 const pctTxt = (v: number | null | undefined, digits = 1, sign = true) => {
@@ -182,18 +186,70 @@ function dayTradeHtml(d: NonNullable<PredictData['dayTrade']>): string {
 }
 
 let data: PredictData | null | undefined;
+let intra: IntradayData | null | undefined;
 let loading = false;
+const intraState: IntradayState = { mode: '', k: 12 };
+/** 即時的加權指數（只有富果／證交所即時行情才有；收盤回放是模擬走勢，不能用）。 */
+export type LiveIndex = () => IndexPoint[] | null;
+let liveIndex: LiveIndex = () => null;
+let liveTimer: ReturnType<typeof setInterval> | undefined;
 
-export function renderPredictPage(root: HTMLElement, onStock: (code: string) => void): void {
+export function renderPredictPage(root: HTMLElement, onStock: (code: string) => void, getLive?: LiveIndex): void {
+  if (getLive) liveIndex = getLive;
   if (!loading) {
     loading = true;
-    void loadPredict().then((d) => {
+    void Promise.all([loadPredict(), loadPredictIntraday()]).then(([d, i]) => {
       data = d;
+      intra = i;
       loading = false;
       draw(root, onStock);
     });
   }
   draw(root, onStock);
+  // 看「今天（即時）」時每 30 秒更新一次
+  liveTimer ??= setInterval(() => {
+    if (intraState.mode === 'live' && root.offsetParent && document.visibilityState === 'visible') drawIntra(root);
+  }, 30_000);
+}
+
+function liveState(): { closes: number[]; ok: boolean; why: string } {
+  const series = liveIndex();
+  if (!series) return { closes: [], ok: false, why: '需要富果或證交所即時行情' };
+  if (!intra?.ready || taipeiDate(Date.now()) <= intra.next.after) return { closes: [], ok: false, why: '今天的模型資料還沒準備好' };
+  const closes = liveCloses(series, sessionOpenMs(new Date()));
+  return closes.length ? { closes, ok: true, why: '' } : { closes, ok: false, why: '今天還沒開盤' };
+}
+
+/** 只重畫 5 分 K 預測那一塊。 */
+function drawIntra(root: HTMLElement): void {
+  const el = root.querySelector<HTMLElement>('#pd-intra');
+  if (!el) return;
+  const live = liveState();
+  if (!intraState.mode) intraState.mode = live.ok ? 'live' : '';
+  el.outerHTML = intradayHtml(intra, intraState, live);
+  bindIntra(root);
+}
+
+function bindIntra(root: HTMLElement): void {
+  root.querySelector<HTMLSelectElement>('#pd-intra-day')?.addEventListener('change', (e) => {
+    intraState.mode = (e.target as HTMLSelectElement).value;
+    drawIntra(root);
+  });
+  const k = root.querySelector<HTMLInputElement>('#pd-intra-k');
+  k?.addEventListener('input', () => {
+    intraState.k = Number(k.value);
+    // 拖曳時只換數字與圖，保留滑桿（不然拖到一半會斷）
+    const el = root.querySelector<HTMLElement>('#pd-intra');
+    if (!el) return;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = intradayHtml(intra, intraState, liveState());
+    const next = tmp.firstElementChild as HTMLElement;
+    for (const sel of ['.pd-stats', '.pd-intra-chart', '.pd-intra-chart + .pd-legend', '#pd-intra-clock']) {
+      const a = el.querySelector(sel);
+      const b = next.querySelector(sel);
+      if (a && b) a.replaceWith(b);
+    }
+  });
 }
 
 function draw(root: HTMLElement, onStock: (code: string) => void): void {
@@ -212,12 +268,14 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
   const summary = `<div class="pd-summary">
     <a href="#pd-stocks" class="pd-sum glass"><span>個股排名</span>${badge(d.stocks.verdict)}</a>
     <a href="#pd-market" class="pd-sum glass"><span>大盤展望</span>${badge(d.market.verdict)}</a>
-    ${d.dayTrade ? `<a href="#pd-day" class="pd-sum glass"><span>${esc(d.dayTrade.code)} 當沖</span>${badge(d.dayTrade.verdict)}</a>` : ''}
+    ${d.dayTrade ? `<a href="#pd-day" class="pd-sum glass"><span>${esc(d.dayTrade.code)} 當沖（開盤→收盤）</span>${badge(d.dayTrade.verdict)}</a>` : ''}
+    ${intra?.ready ? `<a href="#pd-intra" class="pd-sum glass"><span>00631L 5 分 K 走勢</span>${badge(intra.verdict)}</a>` : ''}
   </div>`;
   root.innerHTML = `<div class="pd-main">${head}${summary}
     ${stocksHtml(d.stocks, d.horizon)}
     ${marketHtml(d.market, d.horizon)}
     ${d.dayTrade ? dayTradeHtml(d.dayTrade) : ''}
+    <section id="pd-intra"></section>
     <p class="muted pd-foot">預測是依歷史資料統計的結果，<b>不構成投資建議</b>；過去的回測成績不代表未來。更新時間 ${esc(new Date(d.generatedAt).toLocaleString('zh-TW', { hour12: false }))}。</p>
   </div>`;
 
@@ -234,6 +292,7 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
       root.querySelector(a.getAttribute('href')!)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }),
   );
+  drawIntra(root);
   // 當沖：輸入開盤價即時算
   const dt = d.dayTrade;
   const input = root.querySelector<HTMLInputElement>('#pd-open');

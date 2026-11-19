@@ -51,13 +51,15 @@ jobs:
           if [ -d .data/ratios ] && [ -d .data/candles ]; then node scripts/sim-screen.ts .data; fi
           # 「預測」頁：個股 20 日排名、大盤 20 日方向、00631L 當沖（逐段往前滾訓練，含樣本外回測）
           if [ -d .data/candles ] && [ -f .data/index/TAIEX.json ]; then node scripts/predict.ts .data; fi
+          # 00631L 5 分 K 走勢預測（加權指數 5 分 K，資料不夠時輸出 ready: false）
+          if [ -f .data/index/TAIEX.json ]; then node scripts/predict-intraday.ts .data; fi
           # 沒有即時行情金鑰時首頁用的最近一個交易日收盤資料
           node scripts/close-snapshot.ts .data
 
       - name: 放進網站
         run: |
           mkdir -p web/public/data
-          for f in active-etf.json stocks.json chips.json fundamentals.json pe5y.json pattern-stats.json close.json etf-info.json market-risk.json predict.json; do
+          for f in active-etf.json stocks.json chips.json fundamentals.json pe5y.json pattern-stats.json close.json etf-info.json market-risk.json predict.json predict-intraday.json; do
             if [ -f ".data/$f" ]; then cp ".data/$f" web/public/data/; fi
           done
           if [ -d .data/candles ]; then cp -r .data/candles web/public/data/; fi
