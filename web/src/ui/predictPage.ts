@@ -4,7 +4,7 @@
  * - 每個模型都附上樣本外回測成績，並自動判斷「有沒有比隨便猜更好」；沒有的就直接說沒有。
  * - 點個股可以跳到個股分析頁。
  */
-import { dayTradeBands, dayTradeCall, loadAnalogs, loadPredict, loadPredictIntraday, type PredictData, type StockPick, type Verdict } from '../data/predict';
+import { dayTradeBands, dayTradeCall, loadAnalogs, loadPaper, loadPredict, loadPredictIntraday, type PaperData, type PredictData, type StockPick, type Verdict } from '../data/predict';
 import { sessionAt, taipeiDate } from '../data/liveProvider';
 import { sessionOpenMs } from '../data/twse';
 import type { IndexPoint } from '../data/types';
@@ -122,6 +122,34 @@ function entryExitHtml(e: PredictData['stocks']['entryExit']): string {
     <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>方式（樣本外 ${num(b.periods)} 期、每期最看好 30 檔）</th><th class="num">每個訊號平均</th><th class="num">買得到</th><th class="num">勝率</th><th class="num">平均持有天數</th><th class="num">最慘一筆</th><th class="num">最差 10%</th></tr></thead>
     <tbody>${row('逐段往前滾自動挑的方式', b.strategy, true)}${row('隔天開盤買、20 天後賣', b.baseline)}${b.reference.map((r) => row(r.name, r)).join('')}</tbody></table></div>
     <p class="muted pd-small">全部扣成本（手續費 6 折來回＋證交稅）。「每個訊號平均」把沒買到的算 0（錢沒在賺）。模擬保守：跳空直接用開盤價成交；同一天碰到停利與停損當作先停損。</p>`;
+}
+
+/** 模型模擬帳戶：完全照事前存檔的預測自動下單（紙上交易）。 */
+function paperHtml(p: PaperData | null): string {
+  const head = `<header class="pd-head"><div><p class="eyebrow">Paper trading · 100 萬</p><h2>模型模擬帳戶</h2></div></header>
+    <p class="pd-lead">模型完全照「開盤前就存檔」的預測自動交易，用之後實際的開盤價、5 分 K、收盤價成交，扣手續費 6 折與證交稅。<b>這是判斷模型能不能賺錢的依據</b>，每週檢查時也依它來修正模型。</p>
+    <ul class="pd-rules"><li><b>個股 60%</b>：最看好前 10 檔，隔天開盤平均買進，持有 20 個交易日後收盤賣出，再換下一批。</li>
+      <li><b>00631L 開盤當沖 20%</b>：開盤看跳空決定做多／做空／觀望，收盤出場。</li>
+      <li><b>00631L 區間進出場 20%</b>：照進出場設定掛單（模型說不交易就不動）。</li></ul>`;
+  if (!p || !p.days)
+    return `<section class="pd-card glass" id="pd-paper">${head}<p class="pd-advice">第一份事前存檔今晚產生，<b>下一個交易日開盤開始自動交易</b>；之後每天收盤後更新帳戶。</p></section>`;
+  const pct = (v: number | null) => pctTxt(v ?? 0);
+  const rows = p.curve.map((c) => [c[0], c[1] / p.capital, c[5] / p.capital] as [string, number, number]);
+  const book: Record<string, string> = { stocks: '個股', dayTrade: '開盤當沖', range: '區間進出場' };
+  return `<section class="pd-card glass" id="pd-paper">${head}
+    <dl class="pd-stats">
+      <div><dt>帳戶總值</dt><dd class="num ${cls(p.ret)}">${num(p.equity, 0)}</dd></div>
+      <div><dt>總報酬（${esc(p.start ?? '')} 起，${num(p.days)} 天）</dt><dd class="num ${cls(p.ret)}">${pct(p.ret)}</dd></div>
+      <div><dt>同期間買大盤</dt><dd class="num ${cls(p.benchmark)}">${pct(p.benchmark)}</dd></div>
+      <div><dt>個股／開盤當沖／區間</dt><dd class="num"><span class="${cls(p.books.stocks)}">${pct(p.books.stocks)}</span>／<span class="${cls(p.books.dayTrade)}">${pct(p.books.dayTrade)}</span>／<span class="${cls(p.books.range)}">${pct(p.books.range)}</span></dd></div>
+    </dl>
+    ${rows.length >= 2 ? lineChart(rows, [{ name: '模型模擬帳戶', cls: 's1' }, { name: '同額買大盤', cls: 's3' }]) : ''}
+    ${p.positions.length ? `<h3 class="pd-sub">目前持股（${esc(p.heldSince ?? '')} 買進，持有 20 個交易日）</h3><div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>股票</th><th class="num">股數</th><th class="num">成本</th><th class="num">現價</th><th class="num">報酬</th></tr></thead><tbody>${p.positions.map((x) => `<tr><td><b>${esc(x.code)}</b> ${esc(x.name)}</td><td class="num">${num(x.shares)}</td><td class="num">${num(x.cost, 2)}</td><td class="num">${x.price == null ? '—' : num(x.price, 2)}</td><td class="num ${cls(x.ret)}">${pct(x.ret)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    <details class="pd-more"><summary>最近的交易（共 ${num(p.tradeCount)} 筆）</summary>
+      <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>日期</th><th>部位</th><th>標的</th><th>動作</th><th class="num">價格</th><th class="num">損益</th><th>說明</th></tr></thead>
+      <tbody>${p.trades.map((t) => `<tr><td class="num">${esc(t.date)}</td><td>${book[t.book]}</td><td><b>${esc(t.code)}</b> ${esc(t.name)}</td><td>${t.side === 'buy' ? '買進' : t.side === 'sell' ? '賣出' : t.side === 'long' ? '做多' : '做空'}</td><td class="num">${t.price == null ? '—' : num(t.price, 2)}</td><td class="num ${cls(t.pnl)}">${t.pnl == null ? '—' : num(t.pnl, 0)}</td><td class="muted">${esc(t.note)}</td></tr>`).join('')}</tbody></table></div>
+    </details>
+  </section>`;
 }
 
 function marketHtml(m: PredictData['market'], h: number, f?: PredictData['forward']): string {
@@ -242,6 +270,7 @@ let intra: IntradayData | null | undefined;
 let loading = false;
 const intraState: IntradayState = { mode: '', k: -1, showActual: true, showAnalogs: true, showCandles: false, showBand: false, showLevels: true };
 let analogLib: AnalogDay[] | null = null;
+let paper: PaperData | null = null;
 /** 即時的加權指數（只有富果／證交所即時行情才有；收盤回放是模擬走勢，不能用）。 */
 export type LiveIndex = () => IndexPoint[] | null;
 let liveIndex: LiveIndex = () => null;
@@ -251,10 +280,11 @@ export function renderPredictPage(root: HTMLElement, onStock: (code: string) => 
   if (getLive) liveIndex = getLive;
   if (!loading) {
     loading = true;
-    void Promise.all([loadPredict(), loadPredictIntraday(), loadAnalogs()]).then(([d, i, a]) => {
+    void Promise.all([loadPredict(), loadPredictIntraday(), loadAnalogs(), loadPaper()]).then(([d, i, a, pp]) => {
       data = d;
       intra = i;
       analogLib = a;
+      paper = pp;
       loading = false;
       draw(root, onStock);
     });
@@ -340,6 +370,7 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
     ${intra?.ready ? `<a href="#pd-intra" class="pd-sum glass"><span>00631L 整天 5 分 K</span>${badge(intra.rangeVerdict ?? intra.verdict)}</a>` : ''}
   </div>`;
   root.innerHTML = `<div class="pd-main">${head}${summary}
+    ${paperHtml(paper)}
     ${stocksHtml(d.stocks, d.horizon, d.forward)}
     ${marketHtml(d.market, d.horizon, d.forward)}
     ${d.dayTrade ? dayTradeHtml(d.dayTrade, d.forward) : ''}
