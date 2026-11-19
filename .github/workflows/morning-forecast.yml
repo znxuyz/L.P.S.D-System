@@ -70,8 +70,8 @@ jobs:
 
       - name: 開盤前預測存檔
         run: |
-          ARCHIVE_DIR=.forecasts ARCHIVE_KIND_SUFFIX=-am ARCHIVE_ONLY=1 node scripts/predict.ts .data || true
-          ARCHIVE_DIR=.forecasts ARCHIVE_KIND_SUFFIX=-am ARCHIVE_ONLY=1 node scripts/predict-intraday.ts .data || true
+          ARCHIVE_DIR=.forecasts ARCHIVE_KIND_SUFFIX=-pre ARCHIVE_ONLY=1 node scripts/predict.ts .data || true
+          ARCHIVE_DIR=.forecasts ARCHIVE_KIND_SUFFIX=-pre ARCHIVE_ONLY=1 node scripts/predict-intraday.ts .data || true
           cd .forecasts
           git add -A
           if ! git diff --cached --quiet; then

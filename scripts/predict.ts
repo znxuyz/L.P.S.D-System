@@ -65,7 +65,7 @@ const ixOpen = taiex.map((r) => r[1]);
 const ixClose = taiex.map((r) => r[4]);
 console.log(`日曆 ${T} 天：${cal[0]} ～ ${cal[T - 1]}`);
 // 只存檔（ARCHIVE_ONLY）而且不在存檔時間內：不用算
-if (process.env.ARCHIVE_ONLY && !canArchive(cal[T - 1])) {
+if (process.env.ARCHIVE_ONLY && !canArchive(cal[T - 1], Date.now(), !!process.env.ARCHIVE_KIND_SUFFIX)) {
   console.log(`事前存檔：現在不是 ${cal[T - 1]} 收盤後到下一個交易日開盤前，不算`);
   process.exit(0);
 }
@@ -879,7 +879,7 @@ if (process.env.ARCHIVE_DIR) {
     stocks: { all: stockOut.all, top: stockOut.top.map((x) => x.code), bottom: stockOut.bottom.map((x) => x.code) },
     dayTrade: dtr ? { code: dtr.code, lastClose: dtr.lastClose, cost: dtr.cost, rule: dtr.rule } : null,
   };
-  if (canArchive(asOf)) console.log(writeArchive(process.env.ARCHIVE_DIR, 'daily' + (process.env.ARCHIVE_KIND_SUFFIX ?? ''), asOf, data) ? `事前存檔：${asOf} 收盤後的預測` : `事前存檔：${asOf} 已經存過`);
+  if (canArchive(asOf, Date.now(), !!process.env.ARCHIVE_KIND_SUFFIX)) console.log(writeArchive(process.env.ARCHIVE_DIR, 'daily' + (process.env.ARCHIVE_KIND_SUFFIX ?? ''), asOf, data) ? `事前存檔：${asOf} 收盤後的預測` : `事前存檔：${asOf} 已經存過`);
   else console.log(`事前存檔：現在不是 ${asOf} 收盤後到下一個交易日開盤前，不存`);
 }
 type DailyArch = { market: { probUp: number; expReturn: number }; stocks: { all: Record<string, number>; top: string[]; bottom: string[] }; dayTrade: DayTradeRule | null };

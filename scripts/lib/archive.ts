@@ -7,7 +7,8 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-export { canArchive } from './archiveTime.ts';
+export { canArchive, MORNING_SUFFIX } from './archiveTime.ts';
+import { MORNING_SUFFIX } from './archiveTime.ts';
 
 /** 寫入存檔；已經存在就不動（回傳 false）。 */
 export function writeArchive(root: string, kind: string, asOf: string, data: unknown): boolean {
@@ -38,12 +39,14 @@ export function readArchives<T>(root: string | undefined, kind: string): Array<T
 }
 
 /**
- * 開盤前的存檔：同一天如果有早上（加了前一晚美股，kind＋'-am'）那份就用早上的，否則用前一晚收盤後那份。
+ * 開盤前的存檔：同一天如果有早上（加了前一晚美股，kind＋'-pre'；舊的叫 '-am'）那份就用早上的，否則用前一晚收盤後那份。
  * 兩份都是開盤前存的；早上那份資訊比較完整。
  */
 export function readPreOpen<T>(root: string | undefined, kind: string): Array<T & { madeAt: string; asOf: string; am?: boolean }> {
   const byDay = new Map<string, T & { madeAt: string; asOf: string; am?: boolean }>();
   for (const a of readArchives<T>(root, kind)) byDay.set(a.asOf, a);
   for (const a of readArchives<T>(root, `${kind}-am`)) byDay.set(a.asOf, { ...a, am: true });
+  // 新的早上那份（-pre，只能在 05:00～08:45 存）優先
+  for (const a of readArchives<T>(root, `${kind}${MORNING_SUFFIX}`)) byDay.set(a.asOf, { ...a, am: true });
   return [...byDay.values()].sort((a, b) => (a.asOf < b.asOf ? -1 : 1));
 }
