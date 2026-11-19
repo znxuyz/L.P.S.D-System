@@ -60,6 +60,7 @@ jobs:
           FIN_MAX: '100'
           TDCC_MAX: '1000000'
           MARGIN_MAX: '400'
+          INTRADAY_MAX: '300'
         run: |
           set +e
           START_S=$(date +%s)
@@ -75,6 +76,8 @@ jobs:
             HISTORY_PARTS=pe,index,div,ratios node scripts/history.ts .data
             # ETF 淨值、規模、受益人數、配息與填息（用到上面的除權息與日 K）
             if [ "$HOURLY" != true ] || [ ! -f .data/etf-info.json ]; then node scripts/etf-info.ts .data; fi
+            # 加權指數 5 分 K（每 5 秒指數統計）：每天一次請求，回補 2020 年以後（預測頁的 00631L 走勢預測）
+            node scripts/intraday.ts .data
           ) > twse.log 2>&1 &
           (
             # 財報先跑：歷史事件回補很久，放前面會把時間用完，財報季報就一直補不到
