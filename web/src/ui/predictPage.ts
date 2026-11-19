@@ -260,7 +260,7 @@ function bindIntra(root: HTMLElement): void {
     const tmp = document.createElement('div');
     tmp.innerHTML = intradayHtml(intra, intraState, liveState(), analogLib);
     const next = tmp.firstElementChild as HTMLElement;
-    for (const sel of ['.pd-intra-stats', '.pd-intra-scroll', '.pd-intra-scroll + .pd-legend', '#pd-intra-clock', '.pd-day-err', '.pd-line-err']) {
+    for (const sel of ['.pd-intra-stats', '.pd-intra-scroll', '.pd-intra-legend', '#pd-intra-clock', '.pd-day-err', '.pd-line-err']) {
       const a = el.querySelector(sel);
       const b = next.querySelector(sel);
       if (a && b) a.replaceWith(b);

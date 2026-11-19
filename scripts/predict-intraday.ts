@@ -28,6 +28,10 @@ import {
   volScale,
   windowVol,
   analogLines,
+  avgOf,
+  blendLine,
+  ANALOG_NS,
+  BLEND_WS,
   type AnalogDay,
   TIME_BUCKETS,
   timeBucket,
@@ -216,12 +220,23 @@ let fitted: ReturnType<typeof fitAll> | null = null;
 let avgEx: { up: number[]; down: number[] } | null = null;
 const lambdaLog: Record<string, number[]> = {};
 // 各種預測線的成績：[時間點][線] → 平方誤差、筆數、收盤方向猜對、最接近實際的次數
-const LINES = ['model', 'avg', 'a1', 'a2', 'a3'] as const;
+const LINES = ['blend', 'model', 'avg', 'a1', 'a2', 'a3'] as const;
+// 自動挑設定：每個時間點、每組（相似日天數 n、模型權重 w）到前一天為止的累計平方誤差
+const choiceSE: Record<number, Map<string, number>> = Object.fromEntries(ORIGINS.map((o) => [o, new Map<string, number>()]));
+const choiceDays: Record<number, number> = Object.fromEntries(ORIGINS.map((o) => [o, 0]));
+/** 到目前為止誤差最小的設定（累計不到 20 天時用預設：5 天、全部給模型）。 */
+function bestChoice(o: number): { n: number; w: number } {
+  if (choiceDays[o] < 20) return { n: 5, w: 1 };
+  let best = { n: 5, w: 1, se: Infinity };
+  for (const [key, se] of choiceSE[o]) if (se < best.se) best = { n: Number(key.split('|')[0]), w: Number(key.split('|')[1]), se };
+  return best;
+}
+const choiceLog: Record<number, Array<{ n: number; w: number }>> = Object.fromEntries(ORIGINS.map((o) => [o, []]));
 const lineAcc: Record<number, Record<string, { se: number; n: number; hit: number; days: number; best: number }>> = Object.fromEntries(
   ORIGINS.map((o) => [o, Object.fromEntries(LINES.map((l) => [l, { se: 0, n: 0, hit: 0, days: 0, best: 0 }]))]),
 );
 // 預測紀錄：開盤前與 10:00 的預測收盤 vs 實際
-const record: Array<{ date: string; origin: number; ref: number; model: number; avg: number; actual: number }> = [];
+const record: Array<{ date: string; origin: number; ref: number; blend: number; model: number; avg: number; actual: number }> = [];
 const dbg: number[][] = [];
 for (let n = FIRST; n < days.length; n++) {
   if (!fitted || (n - FIRST) % REFIT === 0) {
@@ -247,10 +262,35 @@ for (let n = FIRST; n < days.length; n++) {
     // 相似日：只能從之前的日子找
     {
       const today = { k: o, gap: o < 0 ? NaN : Math.log(d.c[0] / d.P0), r: d.c.slice(0, k + 1).map((v) => Math.log(v / d.c[0])), ctx: d.ctx };
-      const an = analogLines(lib.slice(0, n), today, o < 0 ? d.P0 : d.c[k]);
+      const an = analogLines(lib.slice(0, n), today, o < 0 ? d.P0 : d.c[k], 20, 20);
       const modelCloses = o < 0 ? [f.open, ...f.bars.map((b) => b.c)] : f.bars.map((b) => b.c);
-      const lines: Record<string, number[]> = { model: modelCloses, avg: an.avg, a1: an.lines[0]?.closes ?? [], a2: an.lines[1]?.closes ?? [], a3: an.lines[2]?.closes ?? [] };
       const actual = d.c.slice(an.from);
+      // 用「到昨天為止」最準的設定畫相似日平均與綜合預測
+      const ch = bestChoice(o);
+      choiceLog[o].push(ch);
+      const avgN = avgOf(an.lines, ch.n);
+      const lines: Record<string, number[]> = {
+        blend: avgN.length ? blendLine(modelCloses, avgN, ch.w) : modelCloses,
+        model: modelCloses,
+        avg: avgN,
+        a1: an.lines[0]?.closes ?? [],
+        a2: an.lines[1]?.closes ?? [],
+        a3: an.lines[2]?.closes ?? [],
+      };
+      // 今天結束後，更新每一組設定的累計誤差（明天才用得到）
+      if (an.lines.length >= 20 && modelCloses.length === actual.length) {
+        for (const nn of ANALOG_NS) {
+          const av = avgOf(an.lines, nn);
+          for (const w of BLEND_WS) {
+            const bl = blendLine(modelCloses, av, w);
+            let se = 0;
+            bl.forEach((v, i) => (se += Math.log(v / actual[i]) ** 2));
+            const key = `${nn}|${w}`;
+            choiceSE[o].set(key, (choiceSE[o].get(key) ?? 0) + se);
+          }
+        }
+        choiceDays[o]++;
+      }
       let bestL = '';
       let bestE = Infinity;
       for (const l of LINES) {
@@ -266,7 +306,7 @@ for (let n = FIRST; n < days.length; n++) {
         if (se < bestE) (bestE = se), (bestL = l);
       }
       if (bestL) lineAcc[o][bestL].best++;
-      if (o === -1 || o === 12) record.push({ date: d.date, origin: o, ref, model: modelCloses[modelCloses.length - 1], avg: an.avg[an.avg.length - 1] ?? NaN, actual: d.c[BARS] });
+      if (o === -1 || o === 12) record.push({ date: d.date, origin: o, ref, blend: lines.blend[lines.blend.length - 1], model: modelCloses[modelCloses.length - 1], avg: avgN[avgN.length - 1] ?? NaN, actual: d.c[BARS] });
     }
     for (const b of f.bars) {
       const act = d.ix[b.bar];
@@ -386,11 +426,13 @@ writeFileSync(
       })),
     })),
     // 最近 20 天的預測紀錄
-    record: record.slice(-40).map((r) => ({ ...r, ref: r5(r.ref), model: r5(r.model), avg: r5(r.avg), actual: r5(r.actual) })),
+    record: record.slice(-40).map((r) => ({ ...r, ref: r5(r.ref), blend: r5(r.blend), model: r5(r.model), avg: r5(r.avg), actual: r5(r.actual) })),
+    // 自動挑的設定（到最後一天為止誤差最小；網頁畫相似日平均與綜合預測用）
+    choice: ORIGINS.map((o) => ({ origin: o, ...bestChoice(o) })),
   }),
 );
 // 相似日資料庫（網頁即時找相似日用）：[日期, 跳空, 走勢（×1e4 取整）, 開盤前資料]
 const i4 = (v: number) => (Number.isFinite(v) ? Math.round(v * 1e4) : null);
 writeFileSync(join(dir, 'predict-analogs.json'), JSON.stringify(lib.map((a) => [a.date, i4(a.gap), a.r.map((v) => i4(v)), [a.ctx.prevDay, a.ctx.prev5, a.ctx.prevIntra, a.ctx.futChg, a.ctx.prevRange].map(i4)])));
-for (const o of ORIGINS) console.log(`  ${ORIGIN_LABEL[o]}：` + LINES.map((l) => { const t = lineAcc[o][l]; return `${l} ${(Math.sqrt(t.se / (t.n || 1)) * 100).toFixed(2)}%/${((t.hit / (t.days || 1)) * 100).toFixed(0)}%/${((t.best / (t.days || 1)) * 100).toFixed(0)}%`; }).join('  '));
+for (const o of ORIGINS) console.log(`  ${ORIGIN_LABEL[o]}（n=${bestChoice(o).n}、w=${bestChoice(o).w}）：` + LINES.map((l) => { const t = lineAcc[o][l]; return `${l} ${(Math.sqrt(t.se / (t.n || 1)) * 100).toFixed(2)}%/${((t.hit / (t.days || 1)) * 100).toFixed(0)}%/${((t.best / (t.days || 1)) * 100).toFixed(0)}%`; }).join('  '));
 console.log(`β ${beta.toFixed(3)}；predict-intraday.json 完成（${((Date.now() - t0) / 1000).toFixed(1)}s）`);

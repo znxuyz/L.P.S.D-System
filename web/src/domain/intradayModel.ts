@@ -326,11 +326,11 @@ export interface AnalogLine {
  * 找最像的 n 天，把它們「接下來的走勢」依波動比例縮放，接在現在的價格後面。
  * now：現在的價格（開盤前用昨收 P0）；回傳的 closes 對應 c[from..54]（開盤前 from＝0，含開盤價）。
  */
-export function analogLines(lib: AnalogDay[], t: TodayState, now: number, n = 5): { from: number; lines: AnalogLine[]; avg: number[] } {
+export function analogLines(lib: AnalogDay[], t: TodayState, now: number, n = 5, maxLines = n): { from: number; lines: AnalogLine[]; avg: number[] } {
   const ranked = lib
     .map((a) => ({ a, d: analogDistance(t, a) }))
     .sort((x, y) => x.d - y.d)
-    .slice(0, n);
+    .slice(0, Math.max(n, maxLines));
   const st = sigmaOf(t.ctx);
   const pre = t.k < 0;
   const from = pre ? 0 : t.k + 1;
@@ -340,9 +340,26 @@ export function analogLines(lib: AnalogDay[], t: TodayState, now: number, n = 5)
     for (let j = from; j <= BARS; j++) closes.push(pre ? now * Math.exp((a.gap + a.r[j]) * s) : now * Math.exp((a.r[j] - a.r[t.k]) * s));
     return { date: a.date, closes };
   });
-  const avg = lines.length ? lines[0].closes.map((_, i) => Math.exp(mean(lines.map((l) => Math.log(l.closes[i]))))) : [];
-  return { from, lines, avg };
+  return { from, lines, avg: avgOf(lines, n) };
 }
+
+/** 前 n 條相似日走勢的平均（對數平均）。 */
+export function avgOf(lines: AnalogLine[], n: number): number[] {
+  const use = lines.slice(0, n);
+  return use.length ? use[0].closes.map((_, i) => Math.exp(mean(use.map((l) => Math.log(l.closes[i]))))) : [];
+}
+
+/** 綜合預測：模型主線與相似日平均依權重 w（給模型）混合（對數空間）。 */
+export const blendLine = (model: number[], avg: number[], w: number) => model.map((v, i) => (avg[i] > 0 ? Math.exp(w * Math.log(v) + (1 - w) * Math.log(avg[i])) : v));
+
+/** 每個預測時間點自動挑的設定：相似日平均要用幾天、綜合預測給模型多少權重。 */
+export interface BlendChoice {
+  origin: number;
+  n: number;
+  w: number;
+}
+export const ANALOG_NS = [5, 10, 20] as const;
+export const BLEND_WS = [0, 0.25, 0.5, 0.75, 1] as const;
 const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / (a.length || 1);
 
 /** predict-analogs.json：[日期, 跳空, 走勢, 開盤前資料]，數值 ×1e4 取整。 */

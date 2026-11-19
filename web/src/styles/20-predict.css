@@ -148,3 +148,10 @@
 .pd-small { font-size: 12px; margin: 6px 0 0; }
 .pd-sum-row td { font-weight: 700; color: var(--ink); }
 .pd-intra-opts { margin-top: -4px; }
+
+.pd-ln.ln-blend { stroke: #ffffff; stroke-width: 3; }
+.pd-ln.ln-model { stroke-width: 2 !important; }
+.pd-end.ln-blend { fill: #ffffff; }
+.lg-blend i { background: #ffffff; height: 4px !important; }
+.pd-logic-list { margin: 8px 0 0; padding-left: 1.3em; display: grid; gap: 6px; font-size: 14px; }
+.pd-logic-list b { color: var(--ink); }
