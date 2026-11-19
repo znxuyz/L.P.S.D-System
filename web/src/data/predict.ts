@@ -174,3 +174,31 @@ const getAnalogs = keyedRefresh<AnalogDay[] | null>(
 );
 /** 相似日資料庫（歷史上每天的 5 分 K 走勢）。 */
 export const loadAnalogs = (): Promise<AnalogDay[] | null> => getAnalogs('');
+
+/** 模型模擬帳戶（scripts/paper-trade.ts）：完全照事前存檔的預測自動下單。 */
+export interface PaperData {
+  capital: number;
+  weights: { stocks: number; dayTrade: number; range: number };
+  firstArchive: string | null;
+  start: string | null;
+  asOf: string | null;
+  days: number;
+  equity: number;
+  ret: number;
+  books: { stocks: number; dayTrade: number; range: number };
+  benchmark: number;
+  /** [日期, 總值, 個股, 開盤當沖, 區間進出場, 同額買大盤] */
+  curve: Array<[string, number, number, number, number, number]>;
+  positions: Array<{ code: string; name: string; shares: number; cost: number; price: number | null; ret: number | null }>;
+  heldSince: string | null;
+  trades: Array<{ date: string; book: 'stocks' | 'dayTrade' | 'range'; code: string; name: string; side: string; price: number | null; pnl: number | null; note: string }>;
+  tradeCount: number;
+}
+const getPaper = keyedRefresh<PaperData | null>(
+  () =>
+    fetch('data/paper.json', { cache: 'no-cache' })
+      .then((r) => (r.ok ? (r.json() as Promise<PaperData>) : null))
+      .catch(() => null),
+  (j) => j != null,
+);
+export const loadPaper = (): Promise<PaperData | null> => getPaper('');
