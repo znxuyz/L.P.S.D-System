@@ -162,8 +162,8 @@ const residOOS = HORIZONS.map((_, hi) =>
     return e.length > 20 ? r5(std(e))! : 0;
   }),
 );
-// 有沒有預測能力：至少一個 horizon 的樣本外 R² > 0 而且方向準確率 > 51%
-const useful = byH.filter((b) => (b.r2 ?? 0) > 0 && (b.acc ?? 0) > 0.51);
+// 有沒有預測能力：至少一個長度的樣本外 R² > 0.5% 而且方向準確率 > 52%（幾千筆樣本下，51% 跟擲硬幣分不出來）
+const useful = byH.filter((b) => (b.r2 ?? 0) > 0.005 && (b.acc ?? 0) > 0.52);
 console.log('回測（樣本外）：');
 for (const b of byH) console.log(`  ${b.h === 54 ? '到收盤' : `${b.h} 根`}：R² ${b.r2}、方向 ${b.acc}、相關 ${b.corr}（${b.n} 筆）`);
 for (const b of closeByTime) console.log(`  到收盤 ${b.label}：R² ${b.r2}、方向 ${b.acc}`);
