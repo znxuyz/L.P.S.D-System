@@ -28,6 +28,10 @@ import {
   volScale,
   windowVol,
   analogLines,
+  rangeLevels,
+  simulateRange,
+  DAYTRADE_COST,
+  type RangePlan,
   avgOf,
   blendLine,
   ANALOG_NS,
@@ -207,6 +211,30 @@ function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: 
   return { m, dm: { base, rng: strip(rng), up: strip(up), down: strip(down), gap: strip(gap), gapSd }, lambdas };
 }
 
+// ---------------------------------------------------------------- 00631L 日 K（槓桿倍數）
+const exDays = new Set<string>();
+for (const f of existsSync(join(dir, 'exrights')) ? readdirSync(join(dir, 'exrights')).filter((f) => /^\d{4}\.json$/.test(f)) : [])
+  for (const r of read<Array<[string, string]>>(join(dir, 'exrights', f), [])) if (r[1] === '00631L') exDays.add(r[0]);
+const lRaw = read<Array<[string, number, number, number, number, number]>>(join(dir, 'candles', '00631L.json'), []);
+const lBars = lRaw.map(([date, open, high, low, close, volume]) => ({ date, open, high, low, close, volume }));
+const lAdj = adjustForSplits(lBars, detectSplits(lBars, exDays), '9999-12-31');
+const lClose = new Map(lAdj.map((b) => [b.date, b.close]));
+/** 00631L 對加權指數的槓桿倍數：用第 end 天（不含）以前 250 個交易日的日報酬估（回測時不偷看之後的資料）。 */
+function betaBefore(end: number): number {
+  let sxy = 0;
+  let sxx = 0;
+  for (let i = Math.max(1, end - 250); i < end; i++) {
+    const a = lClose.get(taiex[i][0]);
+    const b = lClose.get(taiex[i - 1][0]);
+    if (!a || !b) continue;
+    const x = Math.log(taiex[i][4] / taiex[i - 1][4]);
+    sxy += x * Math.log(a / b);
+    sxx += x * x;
+  }
+  return sxx > 1e-6 ? sxy / sxx : 2;
+}
+const beta = betaBefore(taiex.length);
+
 // ---------------------------------------------------------------- 逐段往前滾回測
 const FIRST = Math.min(250, Math.floor(days.length / 2));
 const REFIT = 20;
@@ -269,6 +297,30 @@ const REPLAY = 10;
 let replaySnap: { m: IntradayModel; dm: DayModel; choice: Array<{ origin: number; n: number; w: number }> } | null = null;
 // 預測紀錄：開盤前與 10:00 的預測收盤 vs 實際
 const record: Array<{ date: string; origin: number; ref: number; blend: number; model: number; avg: number; actual: number }> = [];
+// 00631L 當天進出場（區間來回）：每一組設定每天的淨損益，挑「到昨天為止」賺最多的那組來用
+const RANGE_PLANS: RangePlan[] = [];
+for (const k of [6, 12]) for (const e of [0.4, 0.6, 0.8, 1]) for (const tp of [0.5, 1, 1.5]) for (const sl of [0.5, 1]) for (const m of [0, 1, 2]) RANGE_PLANS.push({ k, e, tp, sl, m });
+// 「今天不交易」也是選項：過去怎麼做都虧時，模型應該選擇不交易
+RANGE_PLANS.push({ k: 6, e: 1, tp: 1, sl: 1, m: Infinity });
+const RANGE_DEFAULT = RANGE_PLANS.findIndex((p) => p.k === 6 && p.e === 0.8 && p.tp === 1 && p.sl === 1 && p.m === 1);
+const rangeCum = new Array(RANGE_PLANS.length).fill(0);
+const rangeSq = new Array(RANGE_PLANS.length).fill(0);
+let rangeDays = 0;
+const NO_TRADE = RANGE_PLANS.length - 1;
+/**
+ * 挑設定：從 145 組裡挑過去賺最多的，常常只是運氣好。所以要求它過去每天的損益在統計上明顯大於 0
+ * （t 值 > 2）才出手，否則就「今天不交易」。
+ */
+const bestRange = () => {
+  if (rangeDays < 40) return NO_TRADE;
+  const bi = rangeCum.reduce((b, v, i, a) => (v > a[b] ? i : b), 0);
+  const m = rangeCum[bi] / rangeDays;
+  const sd = Math.sqrt(Math.max(1e-12, rangeSq[bi] / rangeDays - m * m));
+  return (m / sd) * Math.sqrt(rangeDays) > 2 ? bi : NO_TRADE;
+};
+const rangeRows: Array<{ date: string; plan: number; side: number; entryBar: number; exitBar: number; how: string; pnl: number; hold: number }> = [];
+let replayRange = RANGE_DEFAULT;
+let replayRef = RANGE_DEFAULT;
 const dbg: number[][] = [];
 for (let n = FIRST; n < days.length; n++) {
   if (!fitted || (n - FIRST) % REFIT === 0) {
@@ -365,6 +417,21 @@ for (let n = FIRST; n < days.length; n++) {
     a.he.push(Math.abs(Math.log(f.dayHigh / hiAct)), Math.abs(Math.log(f.dayLow / loAct)));
     a.hn.push(Math.abs(Math.log(Math.max(kh, now * Math.exp(avgEx!.up[k])) / hiAct)), Math.abs(Math.log(Math.min(kl, now * Math.exp(-avgEx!.down[k])) / loAct)));
   }
+  // 00631L 當天進出場：用到昨天為止最好的設定交易今天；今天結束後再更新每組設定的成績
+  {
+    const bL = betaBefore(dIdx.get(d.date)!);
+    const pick = bestRange();
+    if (n === days.length - REPLAY) (replayRange = pick), (replayRef = rangeCum.slice(0, NO_TRADE).reduce((b, v, i, a) => (v > a[b] ? i : b), 0));
+    const pnlOf = (r: ReturnType<typeof simulateRange>) => (r.side ? bL * r.ret - DAYTRADE_COST : 0);
+    RANGE_PLANS.forEach((pl, pi) => {
+      const r = simulateRange(d.ix, rangeLevels(dm, d.ix, pl, d.P0, d.ctx, bL));
+      const v = pnlOf(r);
+      if (pi === pick) rangeRows.push({ date: d.date, plan: pi, side: r.side, entryBar: r.entryBar, exitBar: r.exitBar, how: r.how, pnl: v, hold: bL * Math.log(d.c[BARS] / d.c[0]) - DAYTRADE_COST });
+      rangeCum[pi] += v;
+      rangeSq[pi] += v * v;
+    });
+    rangeDays++;
+  }
   // 這一天收盤走勢的樣本外殘差（給之後的日子畫區間）
   for (let k = 0; k < BARS; k++) {
     const z = features(d.c, k, d.P0, d.ctx).map((v, j) => (Number.isFinite(v) ? Math.max(-4, Math.min(4, (v - m.mean[j]) / (m.sd[j] || 1))) : 0));
@@ -427,29 +494,59 @@ console.log('挑到的 λ：', Object.fromEntries(Object.entries(lambdaLog).map(
 const final = fitAll(days);
 final.m.resid = residBy.map((row, hi) => row.map((e, tb) => r5(e.length > 30 ? std(e) : final.m.resid[hi][tb])!));
 
-const exDays = new Set<string>();
-for (const f of existsSync(join(dir, 'exrights')) ? readdirSync(join(dir, 'exrights')).filter((f) => /^\d{4}\.json$/.test(f)) : [])
-  for (const r of read<Array<[string, string]>>(join(dir, 'exrights', f), [])) if (r[1] === '00631L') exDays.add(r[0]);
-const lRaw = read<Array<[string, number, number, number, number, number]>>(join(dir, 'candles', '00631L.json'), []);
-const lBars = lRaw.map(([date, open, high, low, close, volume]) => ({ date, open, high, low, close, volume }));
-const lAdj = adjustForSplits(lBars, detectSplits(lBars, exDays), '9999-12-31');
-const lClose = new Map(lAdj.map((b) => [b.date, b.close]));
-let sxy = 0;
-let sxx = 0;
-for (let i = Math.max(1, taiex.length - 250); i < taiex.length; i++) {
-  const a = lClose.get(taiex[i][0]);
-  const b = lClose.get(taiex[i - 1][0]);
-  if (!a || !b) continue;
-  const x = Math.log(taiex[i][4] / taiex[i - 1][4]);
-  sxy += x * Math.log(a / b);
-  sxx += x * x;
-}
-const beta = sxx ? sxy / sxx : 2;
 const prevL = (date: string) => lClose.get(taiex[dIdx.get(date)! - 1][0]) ?? null;
 const lastDate = taiex[taiex.length - 1][0];
 const ctxOut = (c: DailyCtx) => Object.fromEntries(Object.entries(c).map(([k, v]) => [k, r5(v)]));
 const lin = (x: LinModel) => ({ mean: x.mean.map(r5), sd: x.sd.map(r5), coef: x.coef.map(r5) });
 const verdictOf = (b: (typeof byOrigin)[number]) => (b.pathRmse ?? 1) < (b.pathNaive ?? 0) * 0.995;
+
+// ---------------------------------------------------------------- 00631L 當天進出場的成績
+function rangeSummary() {
+  const stat = (rows: typeof rangeRows) => {
+    const taken = rows.filter((r) => r.side);
+    let eq = 1;
+    const curve: number[] = [];
+    for (const r of rows) curve.push((eq *= 1 + r.pnl));
+    let peak = 1;
+    let dd = 0;
+    for (const v of curve) (peak = Math.max(peak, v)), (dd = Math.min(dd, v / peak - 1));
+    return rows.length
+      ? {
+          from: rows[0].date,
+          to: rows[rows.length - 1].date,
+          days: rows.length,
+          trades: taken.length,
+          win: r5(taken.filter((r) => r.pnl > 0).length / (taken.length || 1)),
+          avg: r5(mean(taken.map((r) => r.pnl))),
+          total: r5(eq - 1),
+          maxDD: r5(dd),
+          target: r5(taken.filter((r) => r.how === 'target').length / (taken.length || 1)),
+          stop: r5(taken.filter((r) => r.how === 'stop').length / (taken.length || 1)),
+          // 對照：每天開盤買、收盤賣
+          hold: r5(rows.reduce((t, r) => t * (1 + r.hold), 1) - 1),
+        }
+      : null;
+  };
+  const out = (pl: RangePlan) => ({ ...pl, m: Number.isFinite(pl.m ?? 0) ? (pl.m ?? 0) : null, noTrade: !Number.isFinite(pl.m ?? 0) });
+  return {
+    plan: out(RANGE_PLANS[bestRange()]),
+    // 參考設定：不管顯不顯著，過去累計賺最多（或虧最少）的那組，畫參考價位用
+    refPlan: out(RANGE_PLANS[rangeCum.slice(0, NO_TRADE).reduce((b, v, i, a) => (v > a[b] ? i : b), 0)]),
+    replayPlan: out(RANGE_PLANS[replayRange]),
+    replayRef: out(RANGE_PLANS[replayRef]),
+    cost: r5(DAYTRADE_COST),
+    all: stat(rangeRows),
+    hold: stat(rangeRows.filter((r) => periodOf(r.date) === 'hold')),
+    dev: stat(rangeRows.filter((r) => periodOf(r.date) === 'dev')),
+    curve: (() => {
+      let eq = 1;
+      let eh = 1;
+      return rangeRows.map((r) => [r.date, r5((eq *= 1 + r.pnl))!, r5((eh *= 1 + r.hold))!]).filter((_, i, a) => i % 3 === 0 || i === a.length - 1);
+    })(),
+    recent: rangeRows.slice(-20).reverse().map((r) => ({ ...r, pnl: r5(r.pnl), hold: r5(r.hold) })),
+  };
+}
+console.log('00631L 進出場：', JSON.stringify({ plan: RANGE_PLANS[bestRange()], ...rangeSummary().all }));
 
 // ---------------------------------------------------------------- 事前存檔與實盤成績
 const finalChoice = ORIGINS.map((o) => ({ origin: o, ...bestChoice(o) }));
@@ -463,7 +560,7 @@ function nextDayForecast() {
   const ch = finalChoice.find((c) => c.origin === -1)!;
   const avg = avgOf(an.lines, ch.n);
   const r = (xs: number[]) => xs.map((v) => r5(v));
-  return { P0, model: r(model), avg: r(avg), blend: r(blendLine(model, avg, ch.w)), analogs: an.lines.slice(0, 3).map((l) => ({ date: l.date, closes: r(l.closes) })), dayHigh: r5(f.dayHigh), dayLow: r5(f.dayLow), choice: ch };
+  return { P0, model: r(model), avg: r(avg), blend: r(blendLine(model, avg, ch.w)), analogs: an.lines.slice(0, 3).map((l) => ({ date: l.date, closes: r(l.closes) })), dayHigh: r5(f.dayHigh), dayLow: r5(f.dayLow), choice: ch, ctx, range: { plan: { ...RANGE_PLANS[bestRange()], m: Number.isFinite(RANGE_PLANS[bestRange()].m ?? 0) ? RANGE_PLANS[bestRange()].m : 1e9 }, dm: final.dm, beta } };
 }
 const ARCHIVE_DIR = process.env.ARCHIVE_DIR;
 if (ARCHIVE_DIR) {
@@ -499,6 +596,19 @@ const forward = {
   rmse: Object.fromEntries(['blend', 'model', 'avg', 'flat'].map((k) => [k, r5(Math.sqrt(mean(fwRows.map((r) => r.rmse[k] ** 2))))])),
   rows: fwRows.slice(-30).reverse(),
 };
+// 進出場的實盤成績：用存檔的模型與規則，在實際走勢上算出當天的價位並模擬
+type RangeArch = { P0: number; ctx: DailyCtx; range?: { plan: RangePlan; dm: DayModel; beta: number } };
+const fwRange: Array<{ date: string; side: number; how: string; pnl: number }> = [];
+for (const a of readArchives<RangeArch>(process.env.FORECASTS_DIR, 'intraday')) {
+  if (!a.range || !a.ctx) continue;
+  const i = dIdx.get(a.asOf);
+  const next = i == null ? undefined : taiex[i + 1]?.[0];
+  const d = next ? days.find((x) => x.date === next) : undefined;
+  if (!d) continue;
+  const r = simulateRange(d.ix, rangeLevels(a.range.dm, d.ix, a.range.plan, a.P0, a.ctx, a.range.beta));
+  fwRange.push({ date: d.date, side: r.side, how: r.how, pnl: r5(r.side ? a.range.beta * r.ret - DAYTRADE_COST : 0)! });
+}
+Object.assign(forward, { range: { days: fwRange.length, trades: fwRange.filter((x) => x.side).length, total: r5(fwRange.reduce((t, x) => t + x.pnl, 0)), rows: fwRange.slice(-20).reverse() } });
 console.log(`實盤成績：${forward.days} 天（事前存檔）`);
 if (process.env.ARCHIVE_ONLY) process.exit(0);
 
@@ -530,6 +640,8 @@ writeFileSync(
     replay: replaySnap,
     // 事前存檔的實盤成績
     forward,
+    // 00631L 當天進出場（區間來回）：目前的設定、樣本外回測（逐段往前滾挑設定）
+    rangeTrade: rangeSummary(),
     // 最近 20 天的預測紀錄
     record: record.slice(-40).map((r) => ({ ...r, ref: r5(r.ref), blend: r5(r.blend), model: r5(r.model), avg: r5(r.avg), actual: r5(r.actual) })),
     // 自動挑的設定（到最後一天為止誤差最小；網頁畫相似日平均與綜合預測用）

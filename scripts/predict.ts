@@ -383,6 +383,158 @@ const stockBacktest = {
   ic: ics.filter((_, i) => i % 2 === 0).map(([d, v]) => [d, r4(v)]),
 };
 
+// ---------------------------------------------------------------- 進場、出場點（最看好的股票）
+/**
+ * 訊號在第 i0 天收盤後產生。依這檔近 14 天的平均振幅（ATR%）：
+ * - 進場：a＝0 隔天開盤買；a＞0 掛「收盤 ×（1 − a×ATR）」的限價，3 個交易日內沒買到就放棄（跳空開更低時用開盤價成交）。
+ * - 停利 收盤價 ×（1 ＋ b×ATR）、停損 ×（1 − c×ATR），以「進場價」為基準；Infinity＝不設。
+ * - 最晚在第 i0＋20 天收盤出場。
+ * 模擬保守：同一天同時碰到停利與停損當作先停損；買進當天只檢查停損。
+ */
+interface Plan { a: number; b: number; c: number }
+const PLANS: Plan[] = [];
+for (const a of [0, 0.5, 1, 1.5]) for (const b of [Infinity, 2, 3, 4]) for (const c of [Infinity, 1.5, 2.5, 4]) PLANS.push({ a, b, c });
+function atrPct(st: Stock, i: number): number {
+  let sum = 0;
+  let n = 0;
+  for (let j = Math.max(0, i - 13); j <= i; j++) if (st.has[j] && st.close[j] > 0) (sum += (st.high[j] - st.low[j]) / st.close[j]), n++;
+  return n >= 7 ? sum / n : NaN;
+}
+/** 回傳淨報酬（沒成交是 null）與持有天數。 */
+function simTrade(st: Stock, i0: number, pl: Plan): { r: number | null; days: number; exit: string } {
+  const atr = atrPct(st, i0);
+  const c0 = st.close[i0];
+  if (!(atr > 0) || !(c0 > 0)) return { r: null, days: 0, exit: 'none' };
+  const end = Math.min(T - 1, i0 + H);
+  let entry = NaN;
+  let fillDay = -1;
+  for (let d = i0 + 1; d <= Math.min(end, i0 + (pl.a > 0 ? 3 : 1)); d++) {
+    if (!st.has[d]) continue;
+    if (pl.a === 0) entry = st.open[d];
+    else {
+      const lim = c0 * (1 - pl.a * atr);
+      if (st.low[d] <= lim) entry = Math.min(st.open[d], lim);
+    }
+    if (entry > 0) {
+      fillDay = d;
+      break;
+    }
+  }
+  if (fillDay < 0) return { r: null, days: 0, exit: 'none' };
+  const tgt = entry * (1 + pl.b * atr);
+  const stp = entry * (1 - pl.c * atr);
+  for (let d = fillDay; d <= end; d++) {
+    if (!st.has[d]) continue;
+    if (d > fillDay) {
+      if (st.open[d] <= stp) return { r: st.open[d] / entry - 1 - COST, days: d - fillDay, exit: 'stop' };
+      if (st.open[d] >= tgt) return { r: st.open[d] / entry - 1 - COST, days: d - fillDay, exit: 'target' };
+    }
+    if (st.low[d] <= stp) return { r: stp / entry - 1 - COST, days: d - fillDay, exit: 'stop' };
+    if (d > fillDay && st.high[d] >= tgt) return { r: tgt / entry - 1 - COST, days: d - fillDay, exit: 'target' };
+  }
+  return { r: st.close[end] / entry - 1 - COST, days: end - fillDay, exit: 'time' };
+}
+// 每 20 天一期：這一期最看好的 30 檔，模擬每一種進出場方式
+interface EePeriod { i: number; picks: number[]; res: Array<Array<{ r: number | null; days: number; exit: string }>> }
+const eePeriods: EePeriod[] = [];
+{
+  let lastP = -Infinity;
+  for (let si = 0; si < sections.length; si++) {
+    const sec = sections[si];
+    const sc = scoreBy[si];
+    if (!sc || sec.i - lastP < H) continue;
+    lastP = sec.i;
+    const picks = [...sec.codes.keys()].sort((a, b) => sc[b] - sc[a]).slice(0, 30).map((n) => sec.codes[n]);
+    eePeriods.push({ i: sec.i, picks, res: PLANS.map((pl) => picks.map((k) => simTrade(stocks[k], sec.i, pl))) });
+  }
+}
+/** 一種進出場方式在一組期間的平均報酬（每個訊號平均，沒成交算 0：沒買到的錢沒在賺）。 */
+const planScore = (ps: EePeriod[], pi: number) => mean(ps.flatMap((p) => p.res[pi].filter((x) => p.i + H + 1 < T || x.r != null).map((x) => x.r ?? 0)));
+// 逐段往前滾：每一期只用「已經結束的期間」挑最好的方式（不看答案）
+const BASE_PLAN = PLANS.findIndex((p) => p.a === 0 && p.b === Infinity && p.c === Infinity);
+const chosen: Array<{ p: EePeriod; pi: number }> = [];
+for (let k = 0; k < eePeriods.length; k++) {
+  const done = eePeriods.slice(0, k).filter((p) => p.i + H + 1 <= eePeriods[k].i);
+  let best = BASE_PLAN;
+  if (done.length >= 6) {
+    let bs = -Infinity;
+    PLANS.forEach((_, pi) => {
+      const v = planScore(done, pi);
+      if (v > bs) (bs = v), (best = pi);
+    });
+  }
+  chosen.push({ p: eePeriods[k], pi: best });
+}
+const evalSet = chosen.filter(({ p }) => p.i + H < T);
+const statOf = (rows: Array<{ r: number | null; days: number; exit: string }>) => {
+  const filled = rows.filter((x) => x.r != null) as Array<{ r: number; days: number; exit: string }>;
+  return {
+    signals: rows.length,
+    fill: r4(filled.length / (rows.length || 1)),
+    perSignal: r4(mean(rows.map((x) => x.r ?? 0))),
+    perTrade: r4(mean(filled.map((x) => x.r))),
+    win: r4(filled.filter((x) => x.r > 0).length / (filled.length || 1)),
+    days: r4(mean(filled.map((x) => x.days))),
+    // 風險：最慘的一筆、最差 10% 的那一筆（第 10 百分位）
+    worst: r4(Math.min(...filled.map((x) => x.r))),
+    p10: r4([...filled.map((x) => x.r)].sort((a, b) => a - b)[Math.floor(filled.length * 0.1)] ?? NaN),
+    target: r4(filled.filter((x) => x.exit === 'target').length / (filled.length || 1)),
+    stop: r4(filled.filter((x) => x.exit === 'stop').length / (filled.length || 1)),
+  };
+};
+const planName = (pl: Plan) =>
+  `${pl.a === 0 ? '隔天開盤買' : `拉回 ${pl.a}×ATR 限價買`}、${pl.b === Infinity ? '不設停利' : `停利 +${pl.b}×ATR`}、${pl.c === Infinity ? '不設停損' : `停損 −${pl.c}×ATR`}`;
+const nowPlan = (() => {
+  const done = eePeriods.filter((p) => p.i + H + 1 <= T - 1);
+  let best = BASE_PLAN;
+  let bs = -Infinity;
+  if (done.length >= 6) PLANS.forEach((_, pi) => {
+    const v = planScore(done, pi);
+    if (v > bs) (bs = v), (best = pi);
+  });
+  return PLANS[best];
+})();
+const entryExit = {
+  plan: { ...nowPlan, b: Number.isFinite(nowPlan.b) ? nowPlan.b : null, c: Number.isFinite(nowPlan.c) ? nowPlan.c : null, name: planName(nowPlan) },
+  // 樣本外（逐段往前滾挑方式）vs 一律隔天開盤買、20 天後賣
+  backtest: {
+    periods: evalSet.length,
+    strategy: statOf(evalSet.flatMap(({ p, pi }) => p.res[pi])),
+    baseline: statOf(evalSet.flatMap(({ p }) => p.res[BASE_PLAN])),
+    // 幾種固定的參考方式（事先定好、不是看結果挑的）：看報酬與風險的取捨
+    reference: [
+      { a: 0, b: Infinity, c: 2.5 },
+      { a: 0, b: 3, c: 2.5 },
+      { a: 1, b: Infinity, c: Infinity },
+      { a: 1, b: 3, c: 2.5 },
+    ].map((pl) => {
+      const pi = PLANS.findIndex((x) => x.a === pl.a && x.b === pl.b && x.c === pl.c);
+      return { name: planName(pl), ...statOf(evalSet.flatMap(({ p }) => p.res[pi])) };
+    }),
+    // 每一期挑到哪一種
+    picked: evalSet.map(({ p, pi }) => [cal[p.i], planName(PLANS[pi])]).slice(-12),
+  },
+};
+console.log(`進出場：目前用「${planName(nowPlan)}」；樣本外每個訊號 ${entryExit.backtest.strategy.perSignal}（成交率 ${entryExit.backtest.strategy.fill}、勝率 ${entryExit.backtest.strategy.win}） vs 隔天買抱 20 天 ${entryExit.backtest.baseline.perSignal}`);
+/** 最看好的股票：用目前挑到的方式算出價位。 */
+function levelsOf(k: number) {
+  const st = stocks[k];
+  const i = T - 1;
+  const atr = atrPct(st, i);
+  const c0 = st.close[i];
+  if (!(atr > 0) || !(c0 > 0)) return null;
+  const entry = nowPlan.a === 0 ? null : c0 * (1 - nowPlan.a * atr);
+  const base = entry ?? c0;
+  return {
+    atr: r4(atr),
+    entry: entry == null ? null : r4(entry),
+    target: Number.isFinite(nowPlan.b) ? r4(base * (1 + nowPlan.b * atr)) : null,
+    stop: Number.isFinite(nowPlan.c) ? r4(base * (1 - nowPlan.c * atr)) : null,
+    // 參考停損（想控制風險時用）：收盤 ×（1 − 2.5×ATR）
+    refStop: r4(c0 * (1 - 2.5 * atr)),
+  };
+}
+
 // 最新一天的排名與原因
 const last = sections[sections.length - 1];
 const lastScore = scoreBy[scoreBy.length - 1]!;
@@ -401,7 +553,7 @@ function reasons(n: number, sign: 1 | -1): Array<[string, number]> {
 }
 const pickRow = (n: number, sign: 1 | -1) => {
   const code = stocks[last.codes[n]].code;
-  return { code, name: names[code] ?? '', score: Math.round(pctOf.get(n)! * 100), close: r4(stocks[last.codes[n]].close[last.i]), reasons: reasons(n, sign) };
+  return { code, name: names[code] ?? '', score: Math.round(pctOf.get(n)! * 100), close: r4(stocks[last.codes[n]].close[last.i]), reasons: reasons(n, sign), ...(sign > 0 ? { levels: levelsOf(last.codes[n]) } : {}) };
 };
 const stockOut = {
   asOf: cal[last.i],
@@ -412,6 +564,7 @@ const stockOut = {
   all: Object.fromEntries(order.map((n) => [stocks[last.codes[n]].code, Math.round(pctOf.get(n)! * 100)])),
   weights: FEATS.map((f, j) => ({ id: f.id, name: f.name, w: r4(beta![j + 1]) })),
   backtest: stockBacktest,
+  entryExit,
   // 有沒有預測能力：排名相關係數顯著為正（t > 2）
   verdict: (stockBacktest.icT ?? 0) > 2 ? 'signal' : 'none',
 };

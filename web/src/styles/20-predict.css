@@ -161,3 +161,22 @@
 .pd-fw-sum b { color: var(--ink); }
 .pd-honest { margin: 10px 0 0; padding: 10px 14px; border-radius: var(--radius-sm); font-size: 14px; line-height: 1.7; color: var(--ink-2); background: rgba(255, 196, 80, 0.07); border: 1px solid rgba(255, 196, 80, 0.3); }
 .pd-honest b { color: var(--ink); }
+
+/* 進出場點 */
+.pd-lv { stroke-width: 1.4; }
+.pd-lv.lv-buy { stroke: var(--up); }
+.pd-lv.lv-short { stroke: var(--down); }
+.pd-lv.lv-tp { stroke: #ffd36b; stroke-dasharray: 5 3; }
+.pd-lv.lv-sl { stroke: #9aa3bf; stroke-dasharray: 2 3; }
+.pd-lvt { font-size: 10px; }
+.pd-lvt.lv-buy { fill: var(--up); }
+.pd-lvt.lv-short { fill: var(--down); }
+.pd-lvt.lv-tp { fill: #ffd36b; }
+.pd-lvt.lv-sl { fill: #9aa3bf; }
+.pd-fill { fill: none; stroke: #ffffff; stroke-width: 2; }
+.pd-exit { stroke: #ffffff; stroke-width: 1.5; }
+.pd-exit.is-win { fill: #6fe3b0; }
+.pd-exit.is-loss { fill: #ff8a9d; }
+.pd-advice { margin: 6px 0 8px; padding: 10px 14px; border-radius: var(--radius-sm); font-size: 14px; background: rgba(79, 224, 168, 0.08); border: 1px solid rgba(79, 224, 168, 0.3); }
+.pd-advice.is-warn { background: rgba(255, 196, 80, 0.07); border-color: rgba(255, 196, 80, 0.3); }
+.pd-advice b { color: var(--ink); }

@@ -7,10 +7,12 @@
  * - 00631L 的價格由加權指數換算（β 倍），不是 00631L 真實的 5 分 K。
  */
 import type { IndexPoint } from '../data/types';
-import { BARS, analogLines, avgOf, barRange, blendLine, forecastDay, toLeveraged, type AnalogDay, type Bar, type DailyCtx, type DayForecast, type DayModel, type IntradayModel } from '../domain/intradayModel';
+import { BARS, DAYTRADE_COST, analogLines, avgOf, barRange, blendLine, rangeLevels, simulateRange, type RangeLevels, type RangePlan, forecastDay, toLeveraged, type AnalogDay, type Bar, type DailyCtx, type DayForecast, type DayModel, type IntradayModel } from '../domain/intradayModel';
 import { escapeHtml as esc, num } from './format';
 
 type Verdict = 'signal' | 'none';
+type RangePlanOut = RangePlan & { m: number | null; noTrade: boolean };
+type RangeStat = { from: string; to: string; days: number; trades: number; win: number; avg: number; total: number; maxDD: number; target: number; stop: number; hold: number };
 export type LineId = 'blend' | 'model' | 'avg' | 'a1' | 'a2' | 'a3';
 const LINE_NAME: Record<LineId, string> = { blend: '綜合預測', model: '模型主線', avg: '相似日平均', a1: '相似日 1', a2: '相似日 2', a3: '相似日 3' };
 const LINE_IDS: LineId[] = ['blend', 'model', 'avg', 'a1', 'a2', 'a3'];
@@ -41,6 +43,19 @@ export interface IntradayData {
   /** 分期間的成績：hold＝調整模型時從沒看過的期間；dev＝開發期間（看過，可能偏樂觀）。 */
   periods?: Record<'hold' | 'dev', { from: string; to: string; days: number; byOrigin: IntradayData['backtest']['byOrigin']; lines: NonNullable<IntradayData['lines']> } | null>;
   devStart?: string;
+  /** 00631L 當天進出場（區間來回）。 */
+  rangeTrade?: {
+    plan: RangePlanOut;
+    refPlan: RangePlanOut;
+    replayPlan: RangePlanOut;
+    replayRef: RangePlanOut;
+    cost: number;
+    all: RangeStat | null;
+    hold: RangeStat | null;
+    dev: RangeStat | null;
+    curve: Array<[string, number, number]>;
+    recent: Array<{ date: string; side: number; how: string; pnl: number; hold: number }>;
+  };
   /** 事前存檔的實盤成績。 */
   forward?: {
     days: number;
@@ -101,6 +116,9 @@ interface View {
   m: IntradayModel;
   dm: DayModel;
   choice: IntradayData['choice'];
+  /** 進出場：模型的設定（可能是「不交易」）與參考設定。 */
+  plan?: RangePlanOut;
+  ref?: RangePlanOut;
 }
 
 type Analogs = ReturnType<typeof analogLines> | null;
@@ -130,6 +148,16 @@ function lineSeries(v: View, f: DayForecast, an: Analogs, ch: { n: number; w: nu
   return out;
 }
 
+/** 這一天的進出場價位（走到設定的時間點之後才有）；模型選「不交易」時用參考設定。 */
+function levelsFor(d: IntradayData, v: View): { lv: RangeLevels; plan: RangePlanOut; isRef: boolean; sim: ReturnType<typeof simulateRange> | null } | null {
+  const use = v.plan && !v.plan.noTrade ? v.plan : v.ref;
+  if (!use || v.ix.length < use.k || v.k < use.k) return null;
+  const plan: RangePlan = { ...use, m: use.m ?? 0 };
+  const lv = rangeLevels(v.dm, v.ix, plan, v.P0, v.ctx, d.beta);
+  const sim = !v.live && v.ix.length === BARS ? simulateRange(v.ix, lv) : null;
+  return { lv, plan: use, isRef: use !== v.plan, sim };
+}
+
 function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: Analogs): string {
   const W = 760;
   const H = 320;
@@ -147,6 +175,10 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
     f.dayHigh,
     f.dayLow,
     v.P0,
+    ...(() => {
+      const l2 = st.showLevels ? levelsFor(d, v) : null;
+      return l2 ? [l2.lv.buy, l2.lv.short].filter((x) => x > 0 && Number.isFinite(x)) : [];
+    })(),
   ].map(L);
   const span = Math.max(...vals) - Math.min(...vals) || 1;
   const lo = Math.min(...vals) - span * 0.04;
@@ -178,6 +210,23 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
     const [i, p] = pts[pts.length - 1];
     return `<circle class="pd-end ln-${id}" cx="${xi(i).toFixed(1)}" cy="${sy(p).toFixed(1)}" r="3"/>`;
   };
+  // 進出場價位線（從設定的時間點畫到收盤）
+  const L2 = levelsFor(d, v);
+  let levelSvg = '';
+  if (L2 && st.showLevels) {
+    const x0 = pad.l + L2.lv.k * bw;
+    const seg = (y: number, cls2: string, label: string) =>
+      y > 0 && Number.isFinite(y) ? `<line class="pd-lv ${cls2}" x1="${x0.toFixed(1)}" x2="${W - pad.r}" y1="${sy(y).toFixed(1)}" y2="${sy(y).toFixed(1)}"/><text class="pd-tick pd-lvt ${cls2}" x="${(x0 + 4).toFixed(1)}" y="${(sy(y) - 3).toFixed(1)}">${label} ${num(L(y), 2)}</text>` : '';
+    const lv = L2.lv;
+    levelSvg = [
+      lv.buy > 0 ? seg(lv.buy, 'lv-buy', '買進') + seg(lv.buyTarget, 'lv-tp', '買進停利') + seg(lv.buyStop, 'lv-sl', '買進停損') : '',
+      Number.isFinite(lv.short) ? seg(lv.short, 'lv-short', '放空') + seg(lv.shortTarget, 'lv-tp', '放空停利') + seg(lv.shortStop, 'lv-sl', '放空停損') : '',
+    ].join('');
+    const sm = L2.sim;
+    if (sm && sm.side && st.showActual) {
+      levelSvg += `<circle class="pd-fill" cx="${cx(sm.entryBar).toFixed(1)}" cy="${sy(sm.entry).toFixed(1)}" r="5"/><circle class="pd-exit ${sm.ret > 0 ? 'is-win' : 'is-loss'}" cx="${cx(sm.exitBar).toFixed(1)}" cy="${sy(sm.exit).toFixed(1)}" r="5"/>`;
+    }
+  }
   const ticks = [lo, (lo + hi) / 2, hi];
   const dates = an?.lines.slice(0, 3).map((l) => l.date) ?? [];
   return `<div class="pd-intra-scroll"><svg class="pd-chart pd-intra-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="整天 5 分 K 預測線">
@@ -189,7 +238,7 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
     ${known.map((b, i) => candle(i, b, 'is-real')).join('')}
     ${future.map((b, i) => candle(f.from + i, b, 'is-actual')).join('')}
     ${st.showCandles ? f.bars.map((b) => candle(b.bar, [b.o, b.h, b.l, b.c], 'is-pred')).join('') : ''}
-    <g clip-path="url(#pd-clip)">${order.map(path).join('')}${order.map(endLabel).join('')}</g>
+    <g clip-path="url(#pd-clip)">${levelSvg}${order.map(path).join('')}${order.map(endLabel).join('')}</g>
     ${f.from > 0 ? `<line class="pd-now" x1="${startX.toFixed(1)}" x2="${startX.toFixed(1)}" y1="${pad.t}" y2="${H - pad.b}"/>` : ''}
     ${ticks.map((t) => `<text class="pd-tick" x="${pad.l - 6}" y="${(pad.t + (1 - (t - lo) / (hi - lo || 1)) * (H - pad.t - pad.b) + 4).toFixed(1)}" text-anchor="end">${num(t, 2)}</text>`).join('')}
     ${[0, 12, 24, 36, 48].map((b) => `<text class="pd-tick" x="${(pad.l + b * bw).toFixed(1)}" y="${H - 6}" text-anchor="${b === 0 ? 'start' : 'middle'}">${clock(b)}</text>`).join('')}
@@ -246,6 +295,36 @@ function dayErrors(d: IntradayData, v: View, f: DayForecast) {
     hiErr: Math.log(f.dayHigh / hiA) * lev,
     loErr: Math.log(f.dayLow / loA) * lev,
   };
+}
+
+/** 00631L 當天進出場：建議、價位、回測。 */
+function rangeHtml(d: IntradayData, v: View): string {
+  const rt = d.rangeTrade;
+  if (!rt) return '';
+  const L = (x: number) => (v.L0 ? toLeveraged(x, v.P0, v.L0, d.beta) : x);
+  const P = (x: number) => (x > 0 && Number.isFinite(x) ? num(L(x), 2) : '—');
+  const use = v.plan && !v.plan.noTrade ? v.plan : v.ref;
+  const l2 = levelsFor(d, v);
+  const when = use ? clock(use.k) : '09:30';
+  const advice = v.plan?.noTrade
+    ? `<p class="pd-advice is-warn">⚠️ <b>模型建議：${v.live ? '今天' : '這天'}不交易。</b>過去沒有任何一種進出場方式在統計上穩定賺過交易成本（${pctTxt(DAYTRADE_COST, 2).replace('+', '')}／次）。下面是「過去表現最好的設定」算出的<b>參考價位</b>，不是建議。</p>`
+    : `<p class="pd-advice">✅ <b>模型建議：${when} 掛單。</b>過去這組設定的獲利在統計上顯著大於 0。</p>`;
+  const lvTable = l2
+    ? `<div class="pd-table-wrap"><table class="pd-table"><thead><tr><th></th><th class="num">進場</th><th class="num">停利</th><th class="num">停損</th><th>最晚</th></tr></thead><tbody>
+        <tr><td><span class="up">往下買進</span></td><td class="num">${P(l2.lv.buy)}</td><td class="num">${P(l2.lv.buyTarget)}</td><td class="num">${P(l2.lv.buyStop)}</td><td>13:30 收盤出場</td></tr>
+        <tr><td><span class="down">往上放空</span></td><td class="num">${P(l2.lv.short)}</td><td class="num">${P(l2.lv.shortTarget)}</td><td class="num">${P(l2.lv.shortStop)}</td><td>13:30 收盤出場</td></tr>
+      </tbody></table></div>
+      <p class="muted pd-small">${when} 依「剩下時間預估會往上、往下走多遠」同時掛兩張單，先成交的那邊算數、另一張取消；「—」代表預估幅度不夠大（停利扣掉成本不划算），那邊不掛。${l2.sim ? (l2.sim.side ? `這一天：${l2.sim.side > 0 ? '買進' : '放空'}在 ${clock(l2.sim.entryBar)}～ 成交，${l2.sim.how === 'target' ? '停利' : l2.sim.how === 'stop' ? '停損' : '收盤'}出場，00631L 約 <b class="${cls(l2.sim.ret)}">${pctTxt(l2.sim.ret * d.beta - DAYTRADE_COST)}</b>（扣成本）。` : '這一天兩邊都沒成交。') : ''}</p>`
+    : `<p class="muted">${when} 之後（走完前 ${use?.k ?? 6} 根 5 分 K）才算得出價位；把「預測時間」拉到 ${when} 以後。</p>`;
+  const row = (name: string, x: RangeStat | null) =>
+    x
+      ? `<tr><td>${esc(name)}<br><small class="muted">${esc(x.from)}～${esc(x.to)}</small></td><td class="num">${num(x.days)}</td><td class="num">${num(x.trades)}</td><td class="num">${x.trades ? `${num(x.win * 100, 0)}%` : '—'}</td><td class="num ${cls(x.avg)}">${x.trades ? pctTxt(x.avg, 2) : '—'}</td><td class="num ${cls(x.total)}">${pctTxt(x.total)}</td><td class="num down">${pctTxt(x.maxDD)}</td><td class="num ${cls(x.hold)}">${pctTxt(x.hold)}</td></tr>`
+      : '';
+  return `<div class="pd-range"><h3 class="pd-sub">00631L 當天進出場點</h3>${advice}${lvTable}
+    <h3 class="pd-sub">進出場的回測（逐段往前滾：每天只用之前的日子挑設定；扣成本，00631L）</h3>
+    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>期間</th><th class="num">天數</th><th class="num">出手</th><th class="num">勝率</th><th class="num">每次平均</th><th class="num">累計</th><th class="num">最大回落</th><th class="num">每天開盤買<br>收盤賣</th></tr></thead>
+    <tbody>${row('從沒看過的期間', rt.hold)}${row('開發期間', rt.dev)}${row('全部', rt.all)}</tbody></table></div>
+    <p class="muted pd-small">設定（幾點掛單、離現價多遠、停利停損多遠、幅度要超過成本幾倍才掛）有 144 組，每天只用「之前的日子」挑；而且要求過去的獲利在統計上明顯大於 0（t 值 > 2）才出手，否則選「不交易」。</p></div>`;
 }
 
 /** 預測邏輯（白話）。 */
@@ -340,6 +419,8 @@ export interface IntradayState {
   showAnalogs: boolean;
   showCandles: boolean;
   showBand: boolean;
+  /** 進出場價位線。 */
+  showLevels: boolean;
 }
 
 export function intradayHtml(d: IntradayData | null | undefined, st: IntradayState, live: { open: number | null; bars: Bar[]; ok: boolean; why: string }, lib: AnalogDay[] | null): string {
@@ -352,12 +433,12 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
   let v: View;
   if (st.mode === 'live' && live.ok) {
     const k = Math.min(BARS - 1, live.bars.length);
-    v = { live: true, P0: d.next.P0, L0: d.next.L0, ctx: ctxOf(d.next.ctx), ix: live.bars, open: live.open, k: live.open == null ? -1 : k, m: d.model, dm: d.day, choice: d.choice };
+    v = { live: true, P0: d.next.P0, L0: d.next.L0, ctx: ctxOf(d.next.ctx), ix: live.bars, open: live.open, k: live.open == null ? -1 : k, m: d.model, dm: d.day, choice: d.choice, plan: d.rangeTrade?.plan, ref: d.rangeTrade?.refPlan };
   } else {
     const day = d.recent.find((r) => r.date === st.mode) ?? d.recent[d.recent.length - 1];
     st.mode = day.date;
     const rp = d.replay;
-    v = { live: false, P0: day.P0, L0: day.L0, ctx: ctxOf(day.ctx), ix: day.ix, open: day.ix[0][0], k: Math.max(-1, Math.min(BARS - 1, st.k)), m: rp?.m ?? d.model, dm: rp?.dm ?? d.day, choice: rp?.choice ?? d.choice };
+    v = { live: false, P0: day.P0, L0: day.L0, ctx: ctxOf(day.ctx), ix: day.ix, open: day.ix[0][0], k: Math.max(-1, Math.min(BARS - 1, st.k)), m: rp?.m ?? d.model, dm: rp?.dm ?? d.day, choice: rp?.choice ?? d.choice, plan: d.rangeTrade?.replayPlan, ref: d.rangeTrade?.replayRef };
   }
   const f = forecastDay(v.m, v.dm, v.ix, v.k, v.k < 0 ? null : v.open, v.P0, v.ctx);
   // 相似日：只從這一天以前的日子找（回放時不會用到之後的資料）
@@ -401,6 +482,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
       <label class="pd-check"><input type="checkbox" data-opt="showAnalogs" ${st.showAnalogs ? 'checked' : ''} />相似日走勢線</label>
       <label class="pd-check"><input type="checkbox" data-opt="showCandles" ${st.showCandles ? 'checked' : ''} />預測 K 棒</label>
       <label class="pd-check"><input type="checkbox" data-opt="showBand" ${st.showBand ? 'checked' : ''} />80% 區間</label>
+      <label class="pd-check"><input type="checkbox" data-opt="showLevels" ${st.showLevels ? 'checked' : ''} />進出場點</label>
     </div>
     <dl class="pd-stats pd-intra-stats">
       <div><dt>預測時間</dt><dd class="num">${kLabel(v.k)}</dd></div>
@@ -425,6 +507,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
             .join('')}</div>`
         : ''
     }
+    ${rangeHtml(d, v)}
     ${logicHtml(d)}
     ${forwardHtml(d, lev)}
     ${linesTable(d, lev)}
