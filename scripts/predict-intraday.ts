@@ -46,11 +46,17 @@ import {
   type DayModel,
   type IntradayModel,
   type LinModel,
+  DISC_SLOTS,
+  discCandidates,
+  discValue,
+  rawBlocks,
+  discName,
+  type DiscSpec,
 } from '../web/src/domain/intradayModel.ts';
 import { adjustForSplits, detectSplits } from '../web/src/domain/splits.ts';
 import { canArchive, readPreOpen, writeArchive } from './lib/archive.ts';
 import { loadUs, usMove } from './lib/us.ts';
-import { loadTx, nightMove } from './lib/txNight.ts';
+import { loadTx, nightBar, nightMove } from './lib/txNight.ts';
 import { mean, ridge, standardizer, std } from './lib/ml.ts';
 
 const dir = process.argv[2] ?? 'data';
@@ -95,7 +101,13 @@ function dailyCtx(i: number): DailyCtx | null {
     usTsm: usMove(usData.TSM, taiex[i - 1][0], taiex[i]?.[0] ?? '9999-12-31'),
     usSpx: usMove(usData.GSPC, taiex[i - 1][0], taiex[i]?.[0] ?? '9999-12-31'),
     night: nightMove(txData, taiex[i - 1][0], taiex[i]?.[0] ?? null),
+    usVix: usMove(usData.VIX ?? [], taiex[i - 1][0], taiex[i]?.[0] ?? '9999-12-31'),
+    ...nightShape(nightBar(txData, taiex[i - 1][0], taiex[i]?.[0] ?? null)),
   };
+}
+function nightShape(n: number[] | null): { nightRange: number; nightPos: number } {
+  if (!n || !(n[1] > 0) || !(n[2] > 0)) return { nightRange: NaN, nightPos: NaN };
+  return { nightRange: Math.log(n[1] / n[2]), nightPos: n[1] > n[2] ? (n[3] - n[2]) / (n[1] - n[2]) : 0.5 };
 }
 
 // ---------------------------------------------------------------- 5 分 K
@@ -168,17 +180,119 @@ function fitLin(byDay: Samples, groups: Record<string, readonly number[]> = {}):
 const target = (d: Day, k: number, h: number) => Math.log(d.c[h === 54 ? BARS : Math.min(BARS, k + h)] / d.c[k]);
 const validK = (k: number, h: number) => (h === 54 ? k < BARS : k + h <= BARS);
 
+// ---------------------------------------------------------------- 自創指標
+/**
+ * 從約 1400 個候選組合裡，挑出最能解釋「基本模型預測不到的部分」的幾個（只用訓練資料）。
+ * 1. 用基本特徵做一個簡單的線性模型，算出「到收盤」與「之後 30 分鐘」的殘差；
+ * 2. 每個候選指標跟殘差的關係換成 t 值（以天為單位計算，同一天的樣本互相相關，不會高估）；
+ * 3. |t| > DISC_T 才算數（候選很多，門檻要高，避免挑到運氣），而且跟已經挑的不能太像（相關 < 0.7），最多 DISC_SLOTS 個。
+ */
+const DISC_ON = process.env.DISC !== '0';
+const DISC_T = Number(process.env.DISC_T ?? 4);
+const CANDS = discCandidates();
+function discover(train: Day[]): { disc: DiscSpec[]; t: number[] } {
+  if (!DISC_ON || train.length < 120) return { disc: [], t: [] };
+  const X: number[][] = [];
+  const R: number[][] = [];
+  const ys: number[][] = [[], []];
+  const dayOf: number[] = [];
+  for (const [di, d] of train.entries())
+    for (let k = 0; k < BARS; k += 3) {
+      dayOf.push(di);
+      X.push(features(d.c, k, d.P0, d.ctx));
+      R.push(rawBlocks(d.c, k, d.P0, d.ctx));
+      ys[0].push(target(d, k, 54) / horizonScale(54, k));
+      ys[1].push(validK(k, 6) ? target(d, k, 6) : NaN);
+    }
+  const st = standardizer(X);
+  const Z = X.map(st.apply);
+  const res = ys.map((y) => {
+    const ok = y.map((v) => Number.isFinite(v));
+    const b = ridge(Z.filter((_, i) => ok[i]), y.filter((_, i) => ok[i]), 10);
+    return y.map((v, i) => (ok[i] ? v - (b[0] + Z[i].reduce((s, z, j) => s + b[j + 1] * z, 0)) : NaN));
+  });
+  const n = X.length;
+  // 候選指標：標準化、截斷在 ±4、沒有值當 0
+  const col = (s: DiscSpec): Float64Array | null => {
+    const v = new Float64Array(n);
+    let sm = 0;
+    let c = 0;
+    for (let i = 0; i < n; i++) {
+      v[i] = discValue(R[i], s);
+      if (Number.isFinite(v[i])) (sm += v[i]), c++;
+    }
+    if (c < n * 0.5) return null;
+    const mu = sm / c;
+    let ss = 0;
+    for (let i = 0; i < n; i++) if (Number.isFinite(v[i])) ss += (v[i] - mu) ** 2;
+    const sd = Math.sqrt(ss / c);
+    if (!(sd > 0)) return null;
+    for (let i = 0; i < n; i++) v[i] = Number.isFinite(v[i]) ? Math.max(-4, Math.min(4, (v[i] - mu) / sd)) : 0;
+    return v;
+  };
+  const corr = (a: ArrayLike<number>, b: ArrayLike<number>) => {
+    let sa = 0, sb = 0, sab = 0, saa = 0, sbb = 0, c = 0;
+    for (let i = 0; i < n; i++) {
+      if (!Number.isFinite(b[i])) continue;
+      sa += a[i]; sb += b[i]; sab += a[i] * b[i]; saa += a[i] * a[i]; sbb += b[i] * b[i]; c++;
+    }
+    const cov = sab / c - (sa / c) * (sb / c);
+    const va = saa / c - (sa / c) ** 2;
+    const vb = sbb / c - (sb / c) ** 2;
+    return va > 0 && vb > 0 ? cov / Math.sqrt(va * vb) : 0;
+  };
+  // t 值以「天」為單位（同一天的樣本互相相關）：每天加總 指標×殘差，t＝Σ ÷ √Σ²
+  const rMean = res.map((r) => mean(r.filter(Number.isFinite)));
+  const tOf = (v: Float64Array, hi: number) => {
+    const r = res[hi];
+    let vm = 0, c = 0;
+    for (let i = 0; i < n; i++) if (Number.isFinite(r[i])) (vm += v[i]), c++;
+    vm /= c || 1;
+    let s = 0, ss = 0, cur = 0;
+    for (let i = 0; i < n; i++) {
+      if (Number.isFinite(r[i])) cur += (v[i] - vm) * (r[i] - rMean[hi]);
+      if (i === n - 1 || dayOf[i + 1] !== dayOf[i]) (s += cur), (ss += cur * cur), (cur = 0);
+    }
+    return ss > 0 ? s / Math.sqrt(ss) : 0;
+  };
+  const scored: Array<{ s: DiscSpec; t: number; v: Float64Array }> = [];
+  for (const s of CANDS) {
+    const v = col(s);
+    if (!v) continue;
+    const ts = [tOf(v, 0), tOf(v, 1)];
+    const t = Math.abs(ts[0]) >= Math.abs(ts[1]) ? ts[0] : ts[1];
+    if (Math.abs(t) > DISC_T) scored.push({ s, t, v });
+  }
+  scored.sort((a, b) => Math.abs(b.t) - Math.abs(a.t));
+  if (process.env.DISC_PROBE) for (const c of scored.slice(0, 15)) console.log(`  t=${c.t.toFixed(2)}  ${discName(c.s)}`);
+  const pick: typeof scored = [];
+  for (const c of scored) {
+    if (pick.length >= DISC_SLOTS) break;
+    if (pick.every((p) => Math.abs(corr(p.v, c.v)) < 0.7)) pick.push(c);
+  }
+  return { disc: pick.map((p) => p.s), t: pick.map((p) => Math.round(p.t * 10) / 10) };
+}
+
+// 診斷用：只看開發期間（2025-11-03 起，見 DEV_START）的資料，列出最強的候選（不影響模型；「從沒看過的期間」不碰）
+if (process.env.DISC_PROBE) {
+  const pre = days.filter((d) => d.date >= '2025-11-03');
+  console.log(`自創指標候選（${pre.length} 天，${pre[0]?.date} ～ ${pre.at(-1)?.date}）：`);
+  discover(pre);
+  process.exit(0);
+}
+
 function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: DayModel; lambdas: Record<string, number>; used: Record<string, string[]> } {
   const lambdas: Record<string, number> = {};
   const used: Record<string, string[]> = {};
+  const { disc, t: discT } = discover(train);
   // 收盤走勢：每個長度一組
   const path = HORIZONS.map((h) => {
     const fit = fitLin(train.map((d) => {
       const X: number[][] = [];
       const y: number[] = [];
-      for (let k = 0; k < BARS; k++) if (validK(k, h)) X.push(features(d.c, k, d.P0, d.ctx)), y.push(target(d, k, h) / horizonScale(h, k));
+      for (let k = 0; k < BARS; k++) if (validK(k, h)) X.push(features(d.c, k, d.P0, d.ctx, disc)), y.push(target(d, k, h) / horizonScale(h, k));
       return { X, y };
-    }), PATH_GROUPS);
+    }), disc.length ? PATH_GROUPS : { us: PATH_GROUPS.us, night: PATH_GROUPS.night });
     used[`path${h}`] = fit.use;
     lambdas[`path${h}`] = fit.lambda;
     return fit;
@@ -196,7 +310,7 @@ function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: 
     }
     return out;
   });
-  const m: IntradayModel = { mean: st0.mean, sd: st0.sd, coef, resid: HORIZONS.map(() => new Array(TIME_BUCKETS).fill(0)) };
+  const m: IntradayModel = { mean: st0.mean, sd: st0.sd, coef, resid: HORIZONS.map(() => new Array(TIME_BUCKETS).fill(0)), disc, discT };
   const inSampleResid = () => m.resid; // 振幅模型訓練好後再算（要用波動倍率）
   // 振幅：每個時段的平均，再預測比平均大多少
   const base = Array.from({ length: BARS }, (_, b) => mean(train.map((d) => Math.log(barRange(d.ix[b])))));
@@ -232,7 +346,7 @@ function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: 
   const rb = HORIZONS.map(() => Array.from({ length: TIME_BUCKETS }, () => [] as number[]));
   for (const d of train.filter((_, i) => i % 3 === 0))
     for (let k = 0; k < BARS; k++) {
-      const z = features(d.c, k, d.P0, d.ctx).map((v, j) => (Number.isFinite(v) ? Math.max(-4, Math.min(4, (v - m.mean[j]) / (m.sd[j] || 1))) : 0));
+      const z = features(d.c, k, d.P0, d.ctx, m.disc).map((v, j) => (Number.isFinite(v) ? Math.max(-4, Math.min(4, (v - m.mean[j]) / (m.sd[j] || 1))) : 0));
       const sc = volScale(dmTmp, d.ix, k, d.c[0], d.P0, d.ctx);
       HORIZONS.forEach((h, hi) => {
         if (!validK(k, h)) return;
@@ -468,7 +582,7 @@ for (let n = FIRST; n < days.length; n++) {
   }
   // 這一天收盤走勢的樣本外殘差（給之後的日子畫區間）
   for (let k = 0; k < BARS; k++) {
-    const z = features(d.c, k, d.P0, d.ctx).map((v, j) => (Number.isFinite(v) ? Math.max(-4, Math.min(4, (v - m.mean[j]) / (m.sd[j] || 1))) : 0));
+    const z = features(d.c, k, d.P0, d.ctx, m.disc).map((v, j) => (Number.isFinite(v) ? Math.max(-4, Math.min(4, (v - m.mean[j]) / (m.sd[j] || 1))) : 0));
     HORIZONS.forEach((h, hi) => {
       if (!validK(k, h)) return;
       const p = (m.coef[hi][0] + z.reduce((s, v, j) => s + m.coef[hi][j + 1] * v, 0)) * horizonScale(h, k);
@@ -653,7 +767,7 @@ writeFileSync(
     generatedAt: new Date().toISOString(),
     ready: true,
     beta: r5(beta),
-    model: { mean: final.m.mean.map(r5), sd: final.m.sd.map(r5), coef: final.m.coef.map((b) => b.map(r5)), resid: final.m.resid },
+    model: { mean: final.m.mean.map(r5), sd: final.m.sd.map(r5), coef: final.m.coef.map((b) => b.map(r5)), resid: final.m.resid, disc: final.m.disc, discT: final.m.discT },
     day: { base: final.dm.base.map(r5), rng: lin(final.dm.rng), up: lin(final.dm.up), down: lin(final.dm.down), gap: lin(final.dm.gap), gapSd: r5(final.dm.gapSd) },
     // 走勢：至少一半的預測時間點比「不會動」誤差小 0.5% 以上才算有預測能力
     verdict: byOrigin.filter(verdictOf).length >= ORIGINS.length / 2 ? 'signal' : 'none',
@@ -687,6 +801,6 @@ writeFileSync(
 );
 // 相似日資料庫（網頁即時找相似日用）：[日期, 跳空, 走勢（×1e4 取整）, 開盤前資料]
 const i4 = (v: number) => (Number.isFinite(v) ? Math.round(v * 1e4) : null);
-writeFileSync(join(dir, 'predict-analogs.json'), JSON.stringify(lib.map((a) => [a.date, i4(a.gap), a.r.map((v) => i4(v)), [a.ctx.prevDay, a.ctx.prev5, a.ctx.prevIntra, a.ctx.futChg, a.ctx.prevRange, a.ctx.usSox ?? NaN, a.ctx.usTsm ?? NaN, a.ctx.usSpx ?? NaN, a.ctx.night ?? NaN].map(i4)])));
+writeFileSync(join(dir, 'predict-analogs.json'), JSON.stringify(lib.map((a) => [a.date, i4(a.gap), a.r.map((v) => i4(v)), [a.ctx.prevDay, a.ctx.prev5, a.ctx.prevIntra, a.ctx.futChg, a.ctx.prevRange, a.ctx.usSox ?? NaN, a.ctx.usTsm ?? NaN, a.ctx.usSpx ?? NaN, a.ctx.night ?? NaN, a.ctx.usVix ?? NaN, a.ctx.nightRange ?? NaN, a.ctx.nightPos ?? NaN].map(i4)])));
 for (const o of ORIGINS) console.log(`  ${ORIGIN_LABEL[o]}（n=${bestChoice(o).n}、w=${bestChoice(o).w}）：` + LINES.map((l) => { const t = lineAcc[o][l]; return `${l} ${(Math.sqrt(t.se / (t.n || 1)) * 100).toFixed(2)}%/${((t.hit / (t.days || 1)) * 100).toFixed(0)}%/${((t.best / (t.days || 1)) * 100).toFixed(0)}%`; }).join('  '));
 console.log(`β ${beta.toFixed(3)}；predict-intraday.json 完成（${((Date.now() - t0) / 1000).toFixed(1)}s）`);

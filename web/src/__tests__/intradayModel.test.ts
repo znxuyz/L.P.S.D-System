@@ -72,3 +72,35 @@ describe('simulateRange（進出場模擬）', () => {
     expect(simulateRange(mk([[3, [100, 100, 90, 95]]]), lv).side).toBe(0);
   });
 });
+
+import { DISC_SLOTS, FEATURE_NAMES, RAW_NAMES, discCandidates, discName, discValue, features, predictAt, rawBlocks } from '../domain/intradayModel';
+
+describe('自創指標', () => {
+  const c = Array.from({ length: BARS + 1 }, (_, i) => 100 + Math.sin(i / 5));
+  const ctx = { prevDay: 0.01, prev5: 0.02, prevIntra: -0.003, futChg: 0.5, prevRange: 0.012, usSox: 0.02, usTsm: 0.01, usSpx: 0.005, night: 0.004, usVix: -0.05, nightRange: 0.008, nightPos: 0.9 };
+  it('原始數據與名稱數量一致，特徵多出固定的自創欄位', () => {
+    expect(rawBlocks(c, 10, 99, ctx)).toHaveLength(RAW_NAMES.length);
+    expect(features(c, 10, 99, ctx)).toHaveLength(FEATURE_NAMES.length);
+    expect(features(c, 10, 99, ctx).slice(-DISC_SLOTS)).toEqual([0, 0, 0, 0]);
+  });
+  it('組合方式', () => {
+    const raw = [2, -3];
+    expect(discValue(raw, { a: 0, b: 1, op: 0 })).toBe(-6);
+    expect(discValue(raw, { a: 0, b: 1, op: 1 })).toBe(6);
+    expect(discValue(raw, { a: 0, b: 1, op: 2 })).toBe(-2);
+    expect(discValue(raw, { a: 1, b: 1, op: 3 })).toBe(-3);
+    expect(discName({ a: 17, b: 1, op: 0 })).toBe('夜盤振幅 × 開盤跳空');
+  });
+  it('候選不重複', () => {
+    const all = discCandidates();
+    expect(new Set(all.map((s) => `${s.a},${s.b},${s.op}`)).size).toBe(all.length);
+  });
+  it('模型帶自創指標時會用到（開盤前就知道的夜盤位置）', () => {
+    const n = FEATURE_NAMES.length;
+    const disc = [{ a: 18, b: 18, op: 3 as const }];
+    const coef = HORIZONS.map(() => [0, ...new Array(n - DISC_SLOTS).fill(0), 1, 0, 0, 0]);
+    const m: IntradayModel = { mean: new Array(n).fill(0), sd: new Array(n).fill(1), coef, resid: [], disc };
+    expect(predictAt(m, c, 5, 99, ctx)[0]).toBeCloseTo(0.4, 6);
+    expect(predictAt({ ...m, disc: [] }, c, 5, 99, ctx)[0]).toBe(0);
+  });
+});
