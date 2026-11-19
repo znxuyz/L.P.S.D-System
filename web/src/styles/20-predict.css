@@ -78,3 +78,18 @@
   .pd-table { font-size: 13px; }
   .pd-table th, .pd-table td { padding: 6px 7px; }
 }
+
+/* 5 分 K 走勢預測 */
+.pd-intra-ctrl { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; margin: 4px 0 10px; }
+.pd-intra-ctrl label { display: flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 600; }
+.pd-intra-ctrl select { padding: 7px 10px; border-radius: 10px; border: 1px solid var(--glass-line); background: var(--row); color: var(--ink); font: inherit; }
+.pd-intra-k { flex: 1 1 320px; }
+.pd-intra-k input { flex: 1; accent-color: var(--accent); }
+.pd-intra-chart .k-up line, .pd-intra-chart .k-up rect { stroke: var(--up); fill: var(--up); }
+.pd-intra-chart .k-down line, .pd-intra-chart .k-down rect { stroke: var(--down); fill: var(--down); }
+.pd-intra-chart .is-future { opacity: 0.22; }
+.pd-band { fill: color-mix(in srgb, var(--accent) 16%, transparent); stroke: none; }
+.pd-fc { stroke-width: 2.4; }
+.pd-now { stroke: var(--ink-2); stroke-dasharray: 3 3; stroke-width: 1; }
+.pd-band-key i { background: color-mix(in srgb, var(--accent) 30%, transparent) !important; height: 10px !important; }
+.pd-stats dd small { font-size: 12px; font-weight: 600; }

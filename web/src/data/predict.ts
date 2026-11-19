@@ -2,6 +2,7 @@
  * L.P.L.C. 預測（scripts/predict.ts 部署時產生的 data/predict.json）。
  * 三個模型都是逐段往前滾訓練（只用當時看得到的資料），回測成績是樣本外的。
  */
+import type { IntradayData } from '../ui/predictIntraday';
 import { keyedRefresh } from './refresh';
 
 export type Verdict = 'signal' | 'none';
@@ -99,6 +100,16 @@ const get = keyedRefresh<PredictData | null>(
   (j) => j != null,
 );
 export const loadPredict = (): Promise<PredictData | null> => get('');
+
+const getIntra = keyedRefresh<IntradayData | null>(
+  () =>
+    fetch('data/predict-intraday.json', { cache: 'no-cache' })
+      .then((r) => (r.ok ? (r.json() as Promise<IntradayData>) : null))
+      .catch(() => null),
+  (j) => j != null,
+);
+/** 00631L 5 分 K 走勢預測（scripts/predict-intraday.ts）。 */
+export const loadPredictIntraday = (): Promise<IntradayData | null> => getIntra('');
 
 /** 00631L 當沖：輸入開盤價，算出預測的「開盤到收盤」報酬與建議動作。 */
 export function dayTradeCall(d: NonNullable<PredictData['dayTrade']>, open: number): { gap: number; pred: number; action: 1 | -1 | 0 } {

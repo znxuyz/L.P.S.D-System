@@ -6,7 +6,7 @@ import { applyEtfInfo, loadEtfInfo } from './data/etfInfo';
 import type { MarketDataProvider, PlaybackControl } from './data/provider';
 import { loadSettings, saveSettings, type SourceSettings } from './data/settings';
 import { sessionOpenMs } from './data/twse';
-import type { MarketSnapshot, Universe } from './data/types';
+import type { IndexPoint, MarketSnapshot, Universe } from './data/types';
 import { EventDetector, type MarketEvent } from './domain/events';
 import { computeMetrics, type MarketMetrics } from './domain/metrics';
 import { computeRotation, type Rotation } from './domain/rotation';
@@ -196,7 +196,11 @@ class App {
     if (snap) this.onSnapshot(snap);
   }
 
+  /** 即時行情的加權指數走勢（預測頁的 5 分 K 預測用）。 */
+  private lastIndex: IndexPoint[] | null = null;
+
   private onSnapshot(snap: MarketSnapshot): void {
+    this.lastIndex = snap.index.series;
     if (laplaceBusy()) {
       this.pendingSnap = snap;
       return;
@@ -342,7 +346,7 @@ class App {
       /* 存不了就算了 */
     }
     if (page === 'learn') renderLearnPage($('#page-learn'));
-    if (page === 'predict') renderPredictPage($('#page-predict'), (code) => this.analyze(code));
+    if (page === 'predict') renderPredictPage($('#page-predict'), (code) => this.analyze(code), () => (this.live ? (this.lastIndex ?? null) : null));
     if (page === 'sim') this.sim.show();
     else {
       this.beforeSim = page;
