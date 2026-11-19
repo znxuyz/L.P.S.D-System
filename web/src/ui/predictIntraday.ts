@@ -43,6 +43,8 @@ export interface IntradayData {
   /** 分期間的成績：hold＝調整模型時從沒看過的期間；dev＝開發期間（看過，可能偏樂觀）。 */
   periods?: Record<'hold' | 'dev', { from: string; to: string; days: number; byOrigin: IntradayData['backtest']['byOrigin']; lines: NonNullable<IntradayData['lines']> } | null>;
   devStart?: string;
+  /** 最終模型自己選用的資料（每個預測長度、開盤跳空）。 */
+  used?: Record<string, string[]>;
   /** 00631L 當天進出場（區間來回）。 */
   rangeTrade?: {
     plan: RangePlanOut;
@@ -330,6 +332,12 @@ function rangeHtml(d: IntradayData, v: View): string {
     <p class="muted pd-small">設定（幾點掛單、離現價多遠、停利停損多遠、幅度要超過成本幾倍才掛）有 144 組，每天只用「之前的日子」挑；而且要求過去的獲利在統計上明顯大於 0（t 值 > 2）才出手，否則選「不交易」。</p></div>`;
 }
 
+const usedTxt = (u?: Record<string, string[]>) => {
+  if (!u) return '—';
+  const nm = (k: string) => (k === 'gap' ? '開盤跳空' : k === 'path54' ? '到收盤' : `${Number(k.slice(4)) * 5} 分鐘`);
+  const g = (x: string[]) => (x.length ? x.map((v) => (v === 'us' ? '美股' : '夜盤')).join('＋') : '都不用');
+  return Object.entries(u).map(([k, v]) => `${nm(k)}：${g(v)}`).join('、');
+};
 /** 預測邏輯（白話）。 */
 function logicHtml(d: IntradayData): string {
   const ch = (d.choice ?? []).map((c) => `${c.origin < 0 ? '開盤前' : c.origin === 0 ? '開盤' : clock(c.origin)}：相似日 ${c.n} 天、模型 ${Math.round(c.w * 100)}%`).join('；');
@@ -341,6 +349,7 @@ function logicHtml(d: IntradayData): string {
       <li><b>相似日走勢</b>：把歷史上每一天都跟今天比——開盤前的資料、跳空、到目前為止的走勢形狀（最近 6 根加重）都先除以各自的波動——找出最像的 20 天。前 3 名各畫一條（依波動比例縮放、接在現在的價格後面），前 n 名平均成「相似日平均」。</li>
       <li><b>綜合預測</b>：模型主線與相似日平均依權重混合。相似日要取幾天（5／10／20）、模型佔多少（0～100%），每個預測時間點分開挑：用「到前一天為止」所有回測日的實際誤差，選誤差最小的組合。目前：${esc(ch)}。</li>
       <li><b>振幅與高低點</b>：每根 K 棒的振幅＝這個時段平常的振幅 × 今天／昨天的波動延續；今天剩下時間的最高最低另外預測。80% 區間依時段與當天波動放大縮小，回測校準過。</li>
+      <li><b>自己決定用哪些資料</b>：前一晚美股（費半、台積電 ADR、S&P 500）與臺指期夜盤可以整組不用；每次訓練用最後 20% 的資料比較「都不用／只用美股／只用夜盤／都用」，挑誤差最小的。目前：${esc(usedTxt(d.used))}。</li>
       <li><b>不看答案</b>：回測一律逐段往前滾；網頁的回放用「回放那幾天之前」訓練的模型；成績分成「從沒看過的期間」與「開發期間」（模型是看著開發期間調的，可能偏樂觀）；另外每天收盤後把隔天的預測事前存檔，之後才打「實盤成績」。</li>
       <li><b>持續修正</b>：每天資料更新、網站部署時，用最新的全部資料重新訓練、重新挑設定、重新計算所有回測成績；回測一律「逐段往前滾」——每一天只用那天以前的資料預測，跟實際使用時一樣。</li>
     </ol>

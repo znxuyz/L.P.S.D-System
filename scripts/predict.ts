@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { adjustForSplits, detectSplits } from '../web/src/domain/splits.ts';
 import { canArchive, readPreOpen, writeArchive } from './lib/archive.ts';
 import { loadUs, usMove } from './lib/us.ts';
+import { loadTx, nightMove } from './lib/txNight.ts';
 import { loadFinQuarters } from './lib/finQuarters.ts';
 import { dot, logistic, maxDrawdown, mean, rankCenter, ridge, sigmoid, spearman, standardizer, std } from './lib/ml.ts';
 
@@ -51,6 +52,11 @@ const calIdx = new Map(cal.map((d, i) => [d, i]));
 const ixOpen = taiex.map((r) => r[1]);
 const ixClose = taiex.map((r) => r[4]);
 console.log(`日曆 ${T} 天：${cal[0]} ～ ${cal[T - 1]}`);
+// 只存檔（ARCHIVE_ONLY）而且不在存檔時間內：不用算
+if (process.env.ARCHIVE_ONLY && !canArchive(cal[T - 1])) {
+  console.log(`事前存檔：現在不是 ${cal[T - 1]} 收盤後到下一個交易日開盤前，不算`);
+  process.exit(0);
+}
 
 // ---------------------------------------------------------------- 個股日 K（分割還原、對齊日曆）
 const exDays = new Map<string, Set<string>>();
@@ -703,10 +709,32 @@ if (dt) {
     { id: 'usSox', name: '前一晚費城半導體' },
     { id: 'usTsm', name: '前一晚台積電 ADR' },
     { id: 'usSpx', name: '前一晚 S&P 500' },
+    { id: 'night', name: '臺指期夜盤' },
   ] as const;
   // 前一晚美股：上一個台股交易日（含）到第 i 天（不含）之間收盤的美股；i＝最後＋1 時是下一個交易日（晚上存檔時還沒收盤 → NaN）
   const usD = loadUs(dir);
-  const usAt = (i: number) => (['SOX', 'TSM', 'GSPC'] as const).map((k) => usMove(usD[k], cal[i - 1], cal[i] ?? '9999-12-31'));
+  const txD = loadTx(dir);
+  const usAt = (i: number) => [...(['SOX', 'TSM', 'GSPC'] as const).map((k) => usMove(usD[k], cal[i - 1], cal[i] ?? '9999-12-31')), nightMove(txD, cal[i - 1], cal[i] ?? null)];
+  // 美股（第 11～13 個）、夜盤（第 14 個）可以整組拿掉：每次訓練用最後 20% 的資料決定要不要用
+  const DT_GROUPS: Record<string, number[]> = { us: [10, 11, 12], night: [13] };
+  const fitDT = (rows: number[][], ys: number[]) => {
+    const st = standardizer(rows);
+    const Z = rows.map(st.apply);
+    const names = Object.keys(DT_GROUPS);
+    const cut = Math.floor(Z.length * 0.8);
+    let best = { use: names, err: Infinity };
+    for (let b = 0; b < 1 << names.length; b++) {
+      const use = names.filter((_, i) => b & (1 << i));
+      const drop = new Set(names.filter((n) => !use.includes(n)).flatMap((n) => DT_GROUPS[n]));
+      const zz = Z.map((z) => z.map((v, j) => (drop.has(j) ? 0 : v)));
+      const beta = ridge(zz.slice(0, cut), ys.slice(0, cut), 0.05);
+      let err = 0;
+      for (let i = cut; i < zz.length; i++) err += (ys[i] - dot(beta, zz[i])) ** 2;
+      if (err < best.err) best = { use, err };
+    }
+    const drop = new Set(names.filter((n) => !best.use.includes(n)).flatMap((n) => DT_GROUPS[n]));
+    return { st, b: ridge(Z.map((z) => z.map((v, j) => (drop.has(j) ? 0 : v))), ys, 0.05), use: best.use };
+  };
   // 第 i 天開盤時看得到的資料（只有開盤價是當天的）
   const feat = (i: number): number[] | null => {
     const o = dt.open;
@@ -745,8 +773,7 @@ if (dt) {
         const v = y(j);
         if (x && Number.isFinite(v) && Number.isFinite(x[0])) rows.push(x), ys.push(v);
       }
-      const st = standardizer(rows);
-      fit = { st, b: ridge(rows.map(st.apply), ys, 0.05) };
+      fit = fitDT(rows, ys);
       fLast = i;
     }
     const x = feat(i);
@@ -782,8 +809,7 @@ if (dt) {
       const v = y(j);
       if (x && Number.isFinite(v) && Number.isFinite(x[0])) rows.push(x), ys.push(v);
     }
-    const st = standardizer(rows);
-    fit = { st, b: ridge(rows.map(st.apply), ys, 0.05) };
+    fit = fitDT(rows, ys);
   }
   const zNext = fit.st.apply(xNext);
   const a = fit.b[0] + zNext.slice(1).reduce((s, v, j) => s + fit!.b[j + 2] * v, 0);
@@ -814,7 +840,7 @@ if (dt) {
     },
   };
   const b = (dayTradeOut as { backtest: { trades: number; winRate: number; total: number; alwaysLong: number } }).backtest;
-  console.log(`00631L 當沖：${b.trades} 筆、勝率 ${b.winRate}、累計 ${b.total}（一直做多 ${b.alwaysLong}）`);
+  console.log(`00631L 當沖（自己選用：${(fit as { use?: string[] }).use?.join('、') || '基本資料'}）：${b.trades} 筆、勝率 ${b.winRate}、累計 ${b.total}（一直做多 ${b.alwaysLong}）`);
 }
 
 // ================================================================ 事前存檔與實盤成績
