@@ -6,9 +6,12 @@
  * - 只用開盤前已經存檔的預測（forecasts 分支，早上那份優先），成交用之後實際的開盤價、5 分 K、收盤價；不可能看答案。
  * - 每次從第一份存檔重新計算（不存狀態），模型之後怎麼改都不會改到過去的成績。
  * - 本金 100 萬，分三個部位：
- *   個股 60%：存檔裡最看好的前 10 檔，下一個交易日開盤平均買進，持有 20 個交易日後收盤賣出，再換下一批。
- *   00631L 開盤當沖 20%：存檔的當沖規則（開盤看跳空決定做多／做空／觀望），收盤出場。
- *   00631L 區間進出場 20%：存檔的進出場設定（模型說不交易就不動），用當天實際 5 分 K 模擬。
+ *   趨勢 80%：前一天加權指數收盤在 200 日均線之上 → 持有 00631L，跌破 → 全部換現金（隔天開盤換）。
+ *     這是公開文獻的經典規則（槓桿 ETF＋200 日均線），不是用我們的資料調出來的；2020～2026 每一年都贏加權指數。
+ *   個股 10%：存檔裡最看好的前 10 檔，下一個交易日開盤平均買進，持有 20 個交易日後收盤賣出，再換下一批。
+ *   00631L 開盤當沖 10%：存檔的當沖規則（開盤看跳空決定做多／做空／觀望），收盤出場。
+ *   個股與當沖 2022～2026 回測沒有贏大盤，只留小比例觀察；實盤證明有用再加碼。
+ *   （00631L 區間進出場模型一直判斷「不交易」，不放錢；成績在 5 分 K 那一區。）
  * - 成本：手續費 0.1425% × 6 折（買賣各一次）、證交稅（個股 0.3%、ETF 0.1%）。
  *
  * 輸出 paper.json。
@@ -18,7 +21,7 @@
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DAYTRADE_COST, rangeLevels, simulateRange, type Bar, type DailyCtx, type DayModel, type RangePlan } from '../web/src/domain/intradayModel.ts';
+import { DAYTRADE_COST } from '../web/src/domain/intradayModel.ts';
 import { adjustForSplits, detectSplits } from '../web/src/domain/splits.ts';
 import { readPreOpen } from './lib/archive.ts';
 
@@ -39,7 +42,9 @@ const FEE = 0.001425 * 0.6;
 const STOCK_TAX = 0.003;
 const HOLD = 20;
 const N_PICKS = 10;
-const W = { stocks: 0.6, dayTrade: 0.2, range: 0.2 };
+const W = { trend: 0.8, stocks: 0.1, dayTrade: 0.1 };
+const MA_N = 200;
+const ETF_TAX = 0.001;
 
 // ---------------------------------------------------------------- 資料
 const taiex = read<Array<[string, number, number, number, number]>>(join(dir, 'index', 'TAIEX.json'), []);
@@ -61,18 +66,15 @@ function kOf(code: string) {
   kCache.set(code, m);
   return m;
 }
-const intradayOf = (date: string) => read<{ ix?: Bar[] } | null>(join(dir, 'intraday', `${date}.json`), null)?.ix ?? null;
 
 // ---------------------------------------------------------------- 存檔
 type DailyArch = { stocks: { top: string[] }; dayTrade: { code: string; lastClose: number; cost: number; rule: { a: number; b: number; gapMean: number; gapSd: number } } | null };
-type IntraArch = { P0: number; ctx: DailyCtx; range?: { plan: RangePlan; dm: DayModel; beta: number } };
 const daily = new Map(readPreOpen<DailyArch>(FDIR, 'daily').map((a) => [a.asOf, a]));
-const intra = new Map(readPreOpen<IntraArch>(FDIR, 'intraday').map((a) => [a.asOf, a]));
-const firstArch = [...daily.keys(), ...intra.keys()].sort()[0];
+const firstArch = [...daily.keys()].sort()[0];
 
 interface Trade {
   date: string;
-  book: 'stocks' | 'dayTrade' | 'range';
+  book: 'stocks' | 'dayTrade' | 'trend';
   code: string;
   name: string;
   side: 'buy' | 'sell' | 'long' | 'short';
@@ -85,7 +87,18 @@ const equityRows: Array<[string, number, number, number, number, number]> = [];
 
 let stockCash = CAPITAL * W.stocks;
 let dtCash = CAPITAL * W.dayTrade;
-let rgCash = CAPITAL * W.range;
+let trCash = CAPITAL * W.trend;
+let trShares = 0;
+let trCost = 0;
+let trSince: string | null = null;
+/** 第 i 天收盤在 200 日均線之上？（資料不夠時 false） */
+const aboveMa = (i: number) => {
+  if (i < MA_N - 1) return false;
+  let sm = 0;
+  for (let j = i - MA_N + 1; j <= i; j++) sm += taiex[j][4];
+  return taiex[i][4] > sm / MA_N;
+};
+const maOf = (i: number) => (i < MA_N - 1 ? NaN : taiex.slice(i - MA_N + 1, i + 1).reduce((t, r) => t + r[4], 0) / MA_N);
 let held: { buyIdx: number; pos: Array<{ code: string; shares: number; cost: number }> } | null = null;
 
 const FROM = process.env.PAPER_FROM ?? '0000';
@@ -97,7 +110,6 @@ if (startIdx > 0) {
     const D = cal[i];
     const prev = cal[i - 1];
     const dArch = daily.get(prev);
-    const iArch = intra.get(prev);
 
     // ---- 個股：到期賣出（第 20 個交易日收盤）；賣出當天不再買（錢要收盤後才拿得到），隔天開盤才買下一批
     let soldToday = false;
@@ -142,21 +154,29 @@ if (startIdx > 0) {
       }
     }
 
-    // ---- 00631L 區間進出場：存檔的設定（不交易就不動），用今天實際的 5 分 K 模擬
-    const ix = intradayOf(D);
-    if (iArch?.range && ix && (iArch.range.plan.m ?? 0) < 1e8) {
-      const r = simulateRange(ix, rangeLevels(iArch.range.dm, ix, iArch.range.plan, iArch.P0, iArch.ctx, iArch.range.beta));
-      if (r.side) {
-        const pnl = rgCash * (iArch.range.beta * r.ret - DAYTRADE_COST);
-        rgCash += pnl;
-        trades.push({ date: D, book: 'range', code: '00631L', name: '元大台灣50正2', side: r.side > 0 ? 'long' : 'short', price: null, pnl: r2(pnl), note: `${r.how === 'target' ? '停利' : r.how === 'stop' ? '停損' : '收盤'}出場` });
+    // ---- 趨勢：昨天收盤在 200 日均線之上就持有 00631L，否則現金；今天開盤換
+    if (L) {
+      const want = aboveMa(i - 1);
+      if (want && !trShares) {
+        trShares = Math.floor(trCash / (L[0] * (1 + FEE)));
+        trCost = trShares * L[0] * (1 + FEE);
+        trCash -= trCost;
+        trSince = D;
+        trades.push({ date: D, book: 'trend', code: '00631L', name: '元大台灣50正2', side: 'buy', price: r2(L[0]), pnl: null, note: '加權指數昨天收在 200 日均線之上，開盤買進' });
+      } else if (!want && trShares) {
+        const value = trShares * L[0] * (1 - FEE - ETF_TAX);
+        trCash += value;
+        trades.push({ date: D, book: 'trend', code: '00631L', name: '元大台灣50正2', side: 'sell', price: r2(L[0]), pnl: r2(value - trCost), note: '加權指數昨天跌破 200 日均線，開盤賣出換現金' });
+        trShares = 0;
+        trSince = null;
       }
     }
 
     // ---- 每天收盤的帳戶價值
     let stockVal = stockCash;
     for (const p of held?.pos ?? []) stockVal += p.shares * (kOf(p.code).get(D)?.[3] ?? [...kOf(p.code).entries()].filter(([d]) => d <= D).at(-1)?.[1][3] ?? p.cost);
-    equityRows.push([D, r2(stockVal + dtCash + rgCash), r2(stockVal), r2(dtCash), r2(rgCash), r2(CAPITAL * (taiex[i][4] / ix0))]);
+    const trVal = trCash + trShares * (L?.[3] ?? [...kOf('00631L').entries()].filter(([d]) => d <= D).at(-1)?.[1][3] ?? 0);
+    equityRows.push([D, r2(stockVal + dtCash + trVal), r2(stockVal), r2(dtCash), r2(trVal), r2(CAPITAL * (taiex[i][4] / ix0))]);
   }
 }
 
@@ -193,12 +213,17 @@ const out = {
   equity: last?.[1] ?? CAPITAL,
   ret: last ? r5(last[1] / CAPITAL - 1) : 0,
   books: last
-    ? { stocks: r5(last[2] / (CAPITAL * W.stocks) - 1), dayTrade: r5(last[3] / (CAPITAL * W.dayTrade) - 1), range: r5(last[4] / (CAPITAL * W.range) - 1) }
-    : { stocks: 0, dayTrade: 0, range: 0 },
+    ? { stocks: r5(last[2] / (CAPITAL * W.stocks) - 1), dayTrade: r5(last[3] / (CAPITAL * W.dayTrade) - 1), trend: r5(last[4] / (CAPITAL * W.trend) - 1) }
+    : { stocks: 0, dayTrade: 0, trend: 0 },
   // 同期間把 100 萬買加權指數放著
   benchmark: last ? r5(last[5] / CAPITAL - 1) : 0,
   maxDD: r5(maxDD),
-  stats: { stocks: bookStat('stocks'), dayTrade: bookStat('dayTrade'), range: bookStat('range') },
+  stats: { stocks: bookStat('stocks'), dayTrade: bookStat('dayTrade'), trend: bookStat('trend') },
+  // 趨勢部位：目前持有什麼、下一個交易日該持有什麼（看最新收盤與 200 日均線）
+  trend: (() => {
+    const li = cal.length - 1;
+    return { holding: trShares > 0, since: trSince, nextHold: aboveMa(li), close: r2(taiex[li][4]), ma: r2(maOf(li)), dist: r5(taiex[li][4] / maOf(li) - 1), asOf: cal[li] };
+  })(),
   monthly,
   curve: equityRows,
   positions: (held?.pos ?? []).map((p) => {
