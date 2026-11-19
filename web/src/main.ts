@@ -40,6 +40,7 @@ function setInner(el: HTMLElement, html: string): void {
 }
 import { startUpdateCheck } from './data/appUpdate';
 import { renderLearnPage } from './ui/learnPage';
+import { renderPredictPage } from './ui/predictPage';
 import { laplaceBusy, playLaplaceIntro, playLaplaceOutro } from './ui/laplaceIntro';
 import { industryIdOf, loadStockDirectory, searchDirectory, type StockDirectory } from './data/stockDirectory';
 import { externalFundamentals } from './data/mockUniverse';
@@ -90,7 +91,7 @@ try {
   /* 無痕模式等情況讀不到，就從熱力圖開始 */
 }
 
-const PAGES = ['map', 'intel', 'screen', 'etf', 'stock', 'learn', 'sim'] as const;
+const PAGES = ['map', 'intel', 'screen', 'etf', 'stock', 'predict', 'learn', 'sim'] as const;
 type Page = (typeof PAGES)[number];
 
 function pageFromHash(): Page {
@@ -341,6 +342,7 @@ class App {
       /* 存不了就算了 */
     }
     if (page === 'learn') renderLearnPage($('#page-learn'));
+    if (page === 'predict') renderPredictPage($('#page-predict'), (code) => this.analyze(code));
     if (page === 'sim') this.sim.show();
     else {
       this.beforeSim = page;
