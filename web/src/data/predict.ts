@@ -44,6 +44,9 @@ export interface RevStocks {
   universe: number;
   n: number;
   revMonth: string | null;
+  /** 全部股票的分數（0～100）。 */
+  all?: Record<string, number>;
+  calib?: import('../domain/stockForecast').StockCalib;
   top: Array<{ code: string; name: string; close: number | null; score: number; vals: Record<string, number | null> }>;
   backtest: { from: string | null; to: string; periods: number; total: number | null; market: number | null; win: number | null; years: Array<{ year: string; ret: number | null; market: number | null }>; curve: Array<[string, number, number]> };
 }

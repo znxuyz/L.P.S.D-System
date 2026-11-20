@@ -10,6 +10,7 @@ import { sessionOpenMs } from '../data/twse';
 import type { IndexPoint } from '../data/types';
 import type { AnalogDay } from '../domain/intradayModel';
 import { intradayHtml, liveBars, type IntradayData, type IntradayState } from './predictIntraday';
+import { bindStockForecast, stockForecastShell } from './predictStock';
 import { escapeHtml as esc, num } from './format';
 
 const pctTxt = (v: number | null | undefined, digits = 1, sign = true) => {
@@ -430,6 +431,7 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
   root.innerHTML = `<div class="pd-main">${head}${summary}
     ${paperHtml(paper, paperBt)}
     ${d.revStocks ? revStocksHtml(d.revStocks) : ''}
+    ${stockForecastShell()}
     ${marketHtml(d.market, d.horizon, d.forward)}
     ${stocksHtml(d.stocks, d.horizon, d.forward)}
     ${d.dayTrade ? dayTradeHtml(d.dayTrade, d.forward) : ''}
@@ -437,6 +439,7 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
     <p class="muted pd-foot">預測是依歷史資料統計的結果，<b>不構成投資建議</b>；過去的回測成績不代表未來。更新時間 ${esc(new Date(d.generatedAt).toLocaleString('zh-TW', { hour12: false }))}。</p>
   </div>`;
 
+  bindStockForecast(root, d.revStocks);
   // 點股票跳到個股分析
   root.querySelectorAll<HTMLElement>('tr[data-code]').forEach((tr) => {
     const go = () => onStock(tr.dataset.code!);

@@ -182,3 +182,23 @@
 .pd-advice b { color: var(--ink); }
 .pd-rules { margin: 0 0 10px; padding-left: 1.2em; display: grid; gap: 3px; font-size: 14px; }
 .pd-rules b { color: var(--ink); }
+
+/* 個股預測 */
+.pd-stock-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 12px; }
+.pd-stock-form input[type='search'] {
+  flex: 1 1 220px; min-width: 0; padding: 7px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-line); background: rgba(0, 0, 0, 0.25); color: var(--ink); font: inherit; font-size: 14px;
+}
+.pd-stock-form input[type='search']:focus { outline: none; border-color: rgba(143, 240, 255, 0.6); }
+.pd-tf { border-color: var(--glass-line) !important; }
+.pd-tf { display: inline-flex; border: 1px solid var(--line, rgba(255,255,255,.15)); border-radius: 10px; overflow: hidden; }
+.pd-tf button { background: none; border: 0; color: var(--ink-2); padding: 6px 12px; font: inherit; cursor: pointer; }
+.pd-tf button.is-on { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--ink); }
+.pd-k.up { stroke: var(--up, #f87171); fill: var(--up, #f87171); }
+.pd-k.down { stroke: var(--down, #4ade80); fill: var(--down, #4ade80); }
+.pd-mid { stroke: var(--accent); stroke-width: 2; }
+.pd-axis { fill: var(--muted); font-size: 11px; }
+.pd-sw { display: inline-block; width: 16px; height: 10px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
+.pd-sw.band { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.pd-sw.mid { height: 3px; background: var(--accent); }
+.pd-chart svg { display: block; width: 100%; height: auto; }

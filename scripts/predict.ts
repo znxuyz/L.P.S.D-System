@@ -890,7 +890,15 @@ const nextWeekday = (d: string) => {
 function revPicks(i: number, date: string) {
   const { uni, vals, combo } = sigs.scoreAll(stocks, i, date);
   const ord = uni.map((s, k) => [s, k] as const).filter(([, k]) => Number.isFinite(combo[k])).sort((a, b) => combo[b[1]] - combo[a[1]]);
-  return { uni: uni.length, picks: ord.slice(0, REV_N).map(([st, k]) => ({ code: st.code, k, score: combo[k], vals: Object.fromEntries(COMBO.concat(['revYoy3']).map((id) => [id, vals[id][k]])) })) };
+  // 分數換成 0～100 的百分位（100＝最看好）
+  const pctOf = new Map(ord.map(([st], r) => [st.code, ord.length > 1 ? 1 - r / (ord.length - 1) : 0.5]));
+  return { uni: uni.length, pctOf, picks: ord.slice(0, REV_N).map(([st, k]) => ({ code: st.code, k, score: combo[k], vals: Object.fromEntries(COMBO.concat(['revYoy3']).map((id) => [id, vals[id][k]])) })) };
+}
+/** 第 i 天（不含）以前 60 個交易日的日報酬標準差（對數）。 */
+function vol60(st: Stock, i: number): number {
+  const r: number[] = [];
+  for (let k = Math.max(st.first + 1, i - 60); k < i; k++) if (st.close[k] > 0 && st.close[k - 1] > 0) r.push(Math.log(st.close[k] / st.close[k - 1]));
+  return r.length >= 40 ? std(r) : NaN;
 }
 const revOut = (() => {
   const t0r = Date.now();
@@ -899,10 +907,36 @@ const revOut = (() => {
   const rbs = rebalanceDays(cal).filter((i) => cal[i] >= '2021-01-01');
   const periods: Array<[string, number, number, number]> = []; // [換股日, 選股報酬, 加權指數, 是否持有現金]
   let prev = new Set<string>();
+  // 個股日 K 預測的校準（每一期、每一檔）：
+  // - 分數分 10 組，每組之後一個月的平均報酬、比全部平均多多少、贏全部平均的比例
+  // - 之後一個月的實際漲跌 ÷（近 60 日波動 × √天數）的分佈 → 預測區間要多寬才準
+  const dec = Array.from({ length: 10 }, () => ({ n: 0, sum: 0, ex: 0, beat: 0 }));
+  const zs: Array<[string, number]> = [];
   for (let p = 0; p + 1 < rbs.length; p++) {
     const i = rbs[p];
     const j = rbs[p + 1];
     const mk = ixClose[j - 1] / ixClose[i - 1] - 1;
+    {
+      const rp = revPicks(i, cal[i]);
+      const rows: Array<[number, number]> = [];
+      for (const [code, pc] of rp.pctOf) {
+        const st = stocks[sIdx.get(code)!];
+        if (!(st.open[i] > 0)) continue;
+        const r = (st.open[j] > 0 ? st.open[j] : st.close[j - 1]) / st.open[i] - 1;
+        if (!Number.isFinite(r)) continue;
+        rows.push([pc, r]);
+        const v = vol60(st, i);
+        if (v > 0 && st.close[j - 1] > 0 && st.close[i - 1] > 0) zs.push([cal[i], Math.log(st.close[j - 1] / st.close[i - 1]) / (v * Math.sqrt(j - i))]);
+      }
+      const avg = mean(rows.map((x) => x[1]));
+      for (const [pc, r] of rows) {
+        const d = dec[Math.min(9, Math.floor(pc * 10))];
+        d.n++;
+        d.sum += r;
+        d.ex += r - avg;
+        if (r > avg) d.beat++;
+      }
+    }
     if (!aboveMa200(i - 1)) {
       periods.push([cal[i], prev.size ? -COSTR / 2 : 0, mk, 1]);
       prev = new Set();
@@ -918,6 +952,15 @@ const revOut = (() => {
     periods.push([cal[i], mean(rs) - turnover * COSTR, mk, 0]);
   }
   const comp = (xs: number[]) => xs.reduce((t, x) => t * (1 + x), 1) - 1;
+  const zsorted = zs.map((x) => x[1]).sort((a, b) => a - b);
+  const q = (p: number) => zsorted[Math.floor(p * (zsorted.length - 1))];
+  const zq = { p10: r4(q(0.1)), p50: r4(q(0.5)), p90: r4(q(0.9)) };
+  // 用整段的分位數，各年份實際落在 10%～90% 區間內的比例（看區間穩不穩定）
+  const coverage = [...new Set(zs.map((x) => x[0].slice(0, 4)))].map((y) => {
+    const ys = zs.filter((x) => x[0].startsWith(y)).map((x) => x[1]);
+    return { year: y, n: ys.length, inside: r4(ys.filter((z) => z >= zq.p10! && z <= zq.p90!).length / (ys.length || 1)) };
+  });
+  const deciles = dec.map((d, k) => ({ decile: k + 1, n: d.n, avg: r4(d.sum / (d.n || 1)), excess: r4(d.ex / (d.n || 1)), beat: r4(d.beat / (d.n || 1)) }));
   const years = [...new Set(periods.map((p) => p[0].slice(0, 4)))].map((y) => {
     const ps = periods.filter((p) => p[0].startsWith(y));
     return { year: y, ret: r4(comp(ps.map((p) => p[1]))), market: r4(comp(ps.map((p) => p[2]))) };
@@ -947,6 +990,9 @@ const revOut = (() => {
     universe: now.uni,
     n: REV_N,
     revMonth: latestKnownMonth(nd),
+    // 全部股票的分數（0～100）與近 60 日波動：給「個股預測」用
+    all: Object.fromEntries([...now.pctOf].map(([c, pc]) => [c, Math.round(pc * 100)])),
+    calib: { deciles, zq, coverage, horizon: 21 },
     top: now.picks.map((x) => ({ code: x.code, name: names[x.code] ?? '', close: r4(stocks[sIdx.get(x.code)!].close[T - 1]), score: Math.round(x.score * 100), vals: Object.fromEntries(Object.entries(x.vals).map(([k, v]) => [k, r4(v)])) })),
     backtest: { from: periods[0]?.[0] ?? null, to: cal[rbs.at(-1) ?? T - 1], periods: periods.length, total: r4(comp(periods.map((p) => p[1]))), market: r4(comp(periods.map((p) => p[2]))), win: r4(periods.filter((p) => p[1] > p[2]).length / (periods.length || 1)), years, curve },
   };
