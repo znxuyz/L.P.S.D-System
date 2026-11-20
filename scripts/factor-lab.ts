@@ -20,7 +20,7 @@ import { COMBO, SIGNAL_NAMES, makeSignals, rebalanceDays, type SignalId } from '
 
 const dir = process.argv[2] ?? 'data';
 const N = Number(process.env.LAB_N ?? 20);
-const COST = 0.001425 * 0.6 * 2 + 0.003;
+const COST = 0.001425 * 2 + 0.003;
 const read = <T>(p: string, fb: T): T => {
   try {
     return JSON.parse(readFileSync(p, 'utf8')) as T;

@@ -531,8 +531,8 @@ export function decodeAnalogs(raw: Array<[string, number | null, Array<number | 
  * - 往下的買進點：現價 × exp(−e × 預估下跌幅度)；往上的放空點：現價 × exp(＋e × 預估上漲幅度)。
  * - 成交後：停利往回走 tp × 進場距離（tp＝1 回到掛單時的價格）；停損再往外 sl × 預估幅度；最晚收盤出場。
  */
-/** 00631L 當沖成本（手續費 6 折來回＋ETF 證交稅 0.1%）。 */
-export const DAYTRADE_COST = 0.001425 * 2 * 0.6 + 0.001;
+/** 00631L 當沖成本（手續費不打折來回（保守）＋ETF 證交稅 0.1%）。 */
+export const DAYTRADE_COST = 0.001425 * 2 + 0.001;
 
 export interface RangePlan {
   k: number;
