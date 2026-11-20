@@ -202,3 +202,8 @@
 .pd-sw.band { background: color-mix(in srgb, var(--accent) 30%, transparent); }
 .pd-sw.mid { height: 3px; background: var(--accent); }
 .pd-chart svg { display: block; width: 100%; height: auto; }
+
+.pd-an { stroke: var(--accent-2, #c4b5fd); stroke-width: 1; opacity: 0.55; }
+.pd-an-avg { stroke: #fbbf24; stroke-width: 2.5; }
+.pd-sw.an-avg { height: 3px; background: #fbbf24; }
+.pd-sw.an { height: 2px; background: var(--accent-2, #c4b5fd); opacity: 0.7; }

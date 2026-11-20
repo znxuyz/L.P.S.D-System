@@ -121,6 +121,34 @@ export function makeSignals(dir: string, cal: string[]) {
     mom: (s, i) => (s.close[i - 21] > 0 && s.close[i - 126] > 0 ? s.close[i - 21] / s.close[i - 126] - 1 : NaN),
   };
 
+  /**
+   * 「營收大增」的根本原因檢查（看結果前定好的三個條件）：
+   * - oneOff：近 3 個月裡單一個月就佔 60% 以上（一次性出貨、認列）
+   * - lowBase：近 3 個月營收沒有超過「兩年前」同期（只是從低基期回來）
+   * - loss：最新一季本業虧損（營業利益 ≤ 0）
+   */
+  const flags = (s: SigStock, date: string): { oneOff: boolean; lowBase: boolean; loss: boolean } => {
+    const m = rev.get(s.code);
+    const ym = latestKnownMonth(date);
+    let oneOff = false;
+    let lowBase = false;
+    if (m && ym) {
+      const xs = [0, 1, 2].map((k) => m.get(addMonths(ym, -k)) ?? NaN);
+      const sum = xs.reduce((a, b) => a + b, 0);
+      if (sum > 0) oneOff = Math.max(...xs) / sum > 0.6;
+      const two = sumRev(m, addMonths(ym, -24), 3);
+      lowBase = Number.isFinite(two) && two > 0 && sum <= two;
+    }
+    let loss = false;
+    const qs = finBy.get(s.code);
+    if (qs) {
+      let q: (typeof qs)[number] | undefined;
+      for (const x of qs) if (x[1] < date && (!q || x[1] >= q[1])) q = x;
+      loss = q?.[4] != null && q[4] <= 0;
+    }
+    return { oneOff, lowBase, loss };
+  };
+
   /** 可以選的股票：上市櫃滿一年、前一天有收盤價、近 20 日平均成交額 ≥ MIN_TURN 億。 */
   const eligible = (s: SigStock, i: number) => {
     if (i - s.first < 250 || !(s.close[i - 1] > 0)) return false;
@@ -146,5 +174,5 @@ export function makeSignals(dir: string, cal: string[]) {
     });
     return { uni, vals, ranks, combo };
   }
-  return { f, eligible, scoreAll, revMonths: months, rev };
+  return { f, flags, eligible, scoreAll, revMonths: months, rev };
 }

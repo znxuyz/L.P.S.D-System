@@ -27,3 +27,22 @@ describe('個股日 K 預測', () => {
     expect(dailyForecast(closes, null, calib).avg).toBeCloseTo(0, 6);
   });
 });
+
+import { analogBacktest, analogForecast } from '../domain/stockForecast';
+describe('相似走勢預測線', () => {
+  // 週期 40 天的正弦走勢：最像的過去時段之後的走勢應該跟真實的一樣
+  const cyc = Array.from({ length: 600 }, (_, i) => 100 * Math.exp(0.1 * Math.sin((2 * Math.PI * i) / 40) + 0.002 * Math.sin(i * 1.7)));
+  it('只用結果已經揭曉的時段，平均線抓得到週期', () => {
+    const end = 500;
+    const f = analogForecast(cyc, end)!;
+    expect(f.lines.length).toBeGreaterThan(0);
+    for (const l of f.lines) expect(l.at + 21).toBeLessThanOrEqual(end);
+    const act = Math.log(cyc[end + 10] / cyc[end]);
+    expect(Math.sign(f.avg[9])).toBe(Math.sign(act));
+  });
+  it('回測：週期走勢的方向命中率高、誤差比不會動小', () => {
+    const b = analogBacktest(cyc)!;
+    expect(b.hit).toBeGreaterThan(0.8);
+    expect(b.rmse).toBeLessThan(b.rmseFlat);
+  });
+});

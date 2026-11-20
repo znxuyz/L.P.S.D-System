@@ -46,6 +46,16 @@ export interface RevStocks {
   revMonth: string | null;
   /** 全部股票的分數（0～100）。 */
   all?: Record<string, number>;
+  /** 歷史上各種決定之後一個月的平均報酬、贏加權指數的比例。 */
+  decisionStats?: Record<string, { n: number; avg: number | null; win: number | null }>;
+  /** 今天收盤後對前 30 名的決定。 */
+  decisions?: Array<{ code: string; name: string; rank: number; action: 'buy' | 'watch' | 'skip'; reason: string; notes: string[] }>;
+  /** 每日決策紀錄（事前存檔）與之後的實際表現。 */
+  log?: {
+    days: number;
+    summary: Record<'buy' | 'watch' | 'skip', { n: number; avg: number | null; beat: number | null }>;
+    rows: Array<{ asOf: string; code: string; name: string; action: string; reason: string; notes: string[]; rank: number; ret: number | null; market: number | null; done: boolean }>;
+  };
   calib?: import('../domain/stockForecast').StockCalib;
   top: Array<{ code: string; name: string; close: number | null; score: number; vals: Record<string, number | null> }>;
   backtest: { from: string | null; to: string; periods: number; total: number | null; market: number | null; win: number | null; years: Array<{ year: string; ret: number | null; market: number | null }>; curve: Array<[string, number, number]> };

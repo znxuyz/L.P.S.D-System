@@ -210,6 +210,45 @@ function marketHtml(m: PredictData['market'], h: number, f?: PredictData['forwar
   </section>`;
 }
 
+const ACT: Record<string, [string, string]> = { buy: ['買進', 'up'], watch: ['觀察', ''], skip: ['不買', 'down'] };
+/** 今天的決定（前 30 名）、每日決策紀錄與之後的實際表現、歷史驗證。 */
+function decisionsHtml(r: RevStocks): string {
+  const ds = r.decisions ?? [];
+  const pct = (v: number | null | undefined, d = 1) => (v == null ? '—' : pctTxt(v, d));
+  const today = ds.length
+    ? `<details class="pd-more" open><summary>今天收盤後的決定（前 ${ds.length} 名，每一檔都記錄下來，之後追蹤結果）</summary>
+      <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>#</th><th>股票</th><th>決定</th><th>原因</th></tr></thead><tbody>${ds
+        .map((d) => `<tr data-code="${esc(d.code)}" tabindex="0"><td class="num muted">${d.rank}</td><td><b>${esc(d.code)}</b> ${esc(d.name)}</td><td class="${ACT[d.action][1]}"><b>${ACT[d.action][0]}</b></td><td class="muted">${esc(d.reason)}${d.notes.length ? `<br><small>注意：${esc(d.notes.join('、'))}</small>` : ''}</td></tr>`)
+        .join('')}</tbody></table></div></details>`
+    : '';
+  const lg = r.log;
+  const sumRow = (k: 'buy' | 'watch' | 'skip') => {
+    const x = lg?.summary[k];
+    return `<tr><td class="${ACT[k][1]}"><b>${ACT[k][0]}</b></td><td class="num">${num(x?.n ?? 0)}</td><td class="num ${cls(x?.avg)}">${pct(x?.avg)}</td><td class="num">${x?.beat == null ? '—' : num(x.beat * 100, 0) + '%'}</td></tr>`;
+  };
+  const log = `<details class="pd-more"><summary>決策紀錄與實際結果（事前存檔，${num(lg?.days ?? 0)} 天）</summary>
+    ${
+      lg && lg.rows.length
+        ? `<div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>決定</th><th class="num">已滿一個月的筆數</th><th class="num">之後一個月平均</th><th class="num">贏加權指數</th></tr></thead><tbody>${sumRow('buy')}${sumRow('watch')}${sumRow('skip')}</tbody></table></div>
+      <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>決定日</th><th>股票</th><th>決定</th><th class="num">之後報酬</th><th class="num">加權指數</th><th>原因</th></tr></thead><tbody>${lg.rows
+        .slice()
+        .reverse()
+        .slice(0, 90)
+        .map((x) => `<tr data-code="${esc(x.code)}" tabindex="0"><td class="num">${esc(x.asOf.slice(5))}</td><td><b>${esc(x.code)}</b> ${esc(x.name)}</td><td class="${ACT[x.action]?.[1] ?? ''}">${ACT[x.action]?.[0] ?? esc(x.action)}</td><td class="num ${cls(x.ret)}">${pct(x.ret)}${x.done ? '' : '<small class="muted">（進行中）</small>'}</td><td class="num ${cls(x.market)}">${pct(x.market)}</td><td class="muted">${esc(x.reason)}</td></tr>`)
+        .join('')}</tbody></table></div>`
+        : '<p class="muted">從今天開始記錄：每天收盤後把前 30 名每一檔「買／觀察／不買」和原因存進事前存檔（只新增、不覆蓋），之後自動算出每個決定後來的實際報酬。</p>'
+    }</details>`;
+  const st = r.decisionStats;
+  const row = (k: string, name: string) => (st?.[k] ? `<tr><td>${name}</td><td class="num">${num(st[k].n)}</td><td class="num ${cls(st[k].avg)}">${pct(st[k].avg)}</td><td class="num">${st[k].win == null ? '—' : num(st[k].win! * 100, 0) + '%'}</td></tr>` : '');
+  const hist = st
+    ? `<details class="pd-more"><summary>歷史驗證：這些判斷過去對不對（2021 年起每次換股的前 30 名）</summary>
+      <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>當時的判斷</th><th class="num">筆數</th><th class="num">之後一個月平均</th><th class="num">贏加權指數</th></tr></thead><tbody>
+      ${row('buyClean', '買進')}${row('buyLowBase', '買進，但只是回到兩年前水準')}${row('buyLoss', '買進，但本業虧損')}${row('oneOff', '不買：營收是一次性的')}${row('rank', '不買：排在 20 名之後')}
+      </tbody></table></div><p class="muted pd-small">單一一檔贏加權指數的比例都不到一半：賺錢主要靠少數大漲的股票把平均拉高，所以要分散買 20 檔、不要只買一兩檔。</p></details>`
+    : '';
+  return today + log + hist;
+}
+
 function revStocksHtml(r: RevStocks): string {
   const b = r.backtest;
   const pct = (v: number | null | undefined, d = 0) => (v == null ? '—' : pctTxt(v, d));
@@ -226,9 +265,11 @@ function revStocksHtml(r: RevStocks): string {
       <li><b>營收創新高</b>：近 3 個月營收 ÷ 過去 3 年最好的 3 個月</li>
       <li><b>毛利率改善</b>：最新一季毛利率 − 去年同季（產品漲價、缺貨的證據）</li>
       <li><b>法人買超</b>：近 20 日法人買超 ÷ 成交量（拿到研究資料的人在買）</li></ul>
+    <p class="muted pd-small">再檢查營收增加的<b>根本原因</b>：近 3 個月裡單一個月就佔 60% 以上的（一次性出貨、認列）不買，由下一名遞補；回測過去這種股票之後一個月平均 ${pctTxt(r.decisionStats?.oneOff?.avg ?? 0, 1)}，買進的平均 ${pctTxt(r.decisionStats?.buyClean?.avg ?? 0, 1)}。「只是回到兩年前水準」「本業虧損」只註記不排除（回測排除反而沒有比較好）。</p>
     <p class="pd-advice">${status}<br><span class="muted">用到的營收：${esc(r.revMonth ?? '—')}；資料到 ${esc(md(r.asOf))}。</span></p>
     <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>#</th><th>股票</th><th class="num">收盤</th><th class="num">分數</th><th class="num">近 3 月營收年增</th><th class="num">成長加速</th><th class="num">營收 ÷ 3 年最高</th><th class="num">毛利率變化</th></tr></thead>
     <tbody>${r.top.map((x, i) => `<tr data-code="${esc(x.code)}" tabindex="0" title="看 ${esc(x.code)} 個股分析"><td class="num muted">${i + 1}</td><td><b>${esc(x.code)}</b> ${esc(x.name)}</td><td class="num">${x.close == null ? '—' : num(x.close, x.close < 100 ? 2 : 1)}</td><td class="num">${num(x.score)}</td><td class="num ${cls(x.vals.revYoy3)}">${v(x.vals.revYoy3)}</td><td class="num ${cls(x.vals.revAccel)}">${v(x.vals.revAccel)}</td><td class="num">${x.vals.revHigh == null ? '—' : num(x.vals.revHigh, 2) + ' 倍'}</td><td class="num ${cls(x.vals.gmChg)}">${v(x.vals.gmChg, 1)}</td></tr>`).join('')}</tbody></table></div>
+    ${decisionsHtml(r)}
     <h3 class="pd-sub">回測（${esc(b.from ?? '')} ～ ${esc(b.to)}，${num(b.periods)} 次換股，逐段往前滾、扣交易成本）</h3>
     <dl class="pd-stats">
       <div><dt>選股總報酬</dt><dd class="num ${cls(b.total)}">${pct(b.total)}</dd></div>
