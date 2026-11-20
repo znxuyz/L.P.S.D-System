@@ -3,12 +3,13 @@
  *
  * - 09:00:00 那一筆是開盤前的值（等於昨收），09:00:05 起才是盤中；13:30:00 是收盤。
  * - 5 分 K 共 54 根：第 b 根涵蓋 09:00＋5b 分（不含）到 09:05＋5b 分（含），開盤價是那段時間的第一筆。
- * - 3 分 K 共 90 根（v2 起）：同樣的切法，每根 3 分鐘。
+ * - 3 分 K 共 90 根（v2 起）、1 分 K 共 270 根（v3 起）：同樣的切法。
  */
 
 export const BARS = 54;
 export const BARS3 = 90;
-export const INTRADAY_VERSION = 2;
+export const BARS1 = 270;
+export const INTRADAY_VERSION = 3;
 type Ohlc = [number, number, number, number];
 
 export interface IntradayDay {
@@ -19,6 +20,8 @@ export interface IntradayDay {
   ix: Array<[number, number, number, number]>;
   /** 90 根 3 分 K [開, 高, 低, 收]（v2 起）。 */
   ix3?: Array<[number, number, number, number]>;
+  /** 270 根 1 分 K（v3 起）。 */
+  ix1?: Array<[number, number, number, number]>;
 }
 
 const numOf = (s: unknown) => {
@@ -51,9 +54,10 @@ export function parseMi5Index(j: unknown): IntradayDay | null {
   }
   const ix = toBars(pts, 300, BARS, pre);
   const ix3 = toBars(pts, 180, BARS3, pre);
-  if (!ix || !ix3) return null;
+  const ix1 = toBars(pts, 60, BARS1, pre);
+  if (!ix || !ix3 || !ix1) return null;
   if (!Number.isFinite(pre)) pre = ix[0][0];
-  return { v: INTRADAY_VERSION, pre: r2(pre), ix, ix3 };
+  return { v: INTRADAY_VERSION, pre: r2(pre), ix, ix3, ix1 };
 }
 
 /** 把逐筆指數切成每 step 秒一根、共 n 根的 K 棒；缺的 K 棒（極少見）用前一根收盤補。 */

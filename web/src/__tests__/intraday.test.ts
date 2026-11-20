@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BARS, BARS3, parseMi5Index } from '../../../scripts/lib/intraday';
+import { BARS, BARS1, BARS3, parseMi5Index } from '../../../scripts/lib/intraday';
 
 /** 產生一天每 5 秒的資料：09:00:00 是昨收 100，之後每 5 秒 +0.01。 */
 function fakeDay(): unknown {
@@ -32,6 +32,9 @@ describe('parseMi5Index', () => {
     expect(d.ix3![0][0]).toBeCloseTo(100.01);
     expect(d.ix3![0][3]).toBeCloseTo(100.36);
     expect(d.ix3![89][3]).toBeCloseTo(d.ix[53][3]);
+    expect(d.ix1).toHaveLength(BARS1);
+    expect(d.ix1![0][3]).toBeCloseTo(100.12);
+    expect(d.ix1![269][3]).toBeCloseTo(d.ix[53][3]);
   });
   it('新版 tables 格式、沒有資料', () => {
     const j = fakeDay() as { fields: string[]; data: string[][] };

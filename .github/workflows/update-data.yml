@@ -53,6 +53,7 @@ jobs:
       - name: 抓資料（證交所／櫃買、公開資訊觀測站、集保 平行）
         timeout-minutes: 60
         env:
+          FUGLE_API_KEY: ${{ secrets.FUGLE_API_KEY }}
           CANDLE_MAX_DATES: '1000'
           INST_MAX: '1000'
           RATIO_MAX: '1000'
@@ -89,6 +90,8 @@ jobs:
           ( HISTORY_PARTS=tdcc node scripts/history.ts .data ) > tdcc.log 2>&1 &
           # 美股（費城半導體、那斯達克、S&P 500、台積電 ADR、VIX）
           ( node scripts/us-market.ts .data ) > us.log 2>&1 &
+          # 個股 1 分 K（富果，金鑰在 GitHub Secret FUGLE_API_KEY；沒有設就略過）
+          ( node scripts/stock-intraday.ts .data ) > fugle.log 2>&1 &
           # 期交所：外資台指期淨未平倉（每月一次請求）
           # 臺指期近月日 K（一般時段＋夜盤）也在這一組（同一個網站，依序請求）
           ( PART=futures node scripts/market-risk.ts .data; node scripts/taifex-daily.ts .data ) > taifex.log 2>&1 &
@@ -112,7 +115,7 @@ jobs:
           if [ "$HOURLY" != true ] || [ ! -f .data/pattern-stats.json ]; then
             DEADLINE=$(( $(date +%s) * 1000 + 12 * 60 * 1000 )) node --import ./scripts/lib/ts-resolve.mjs scripts/pattern-stats.ts .data > stats.log 2>&1
           fi
-          for f in twse mops tdcc taifex us risk chips2 archive stats; do [ -f $f.log ] || continue; echo "::group::$f"; tail -n 80 $f.log; echo "::endgroup::"; done
+          for f in twse mops tdcc taifex us fugle risk chips2 archive stats; do [ -f $f.log ] || continue; echo "::group::$f"; tail -n 80 $f.log; echo "::endgroup::"; done
           # 跑滿時間代表還有沒補完的資料
           if [ $(( $(date +%s) - START_S )) -ge $(( 45 * 60 )) ]; then echo "MORE=true" >> "$GITHUB_ENV"; fi
 
