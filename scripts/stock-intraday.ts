@@ -9,7 +9,7 @@
  * - 當天：收盤後（台北 13:35 以後）用「盤中 K 線」收當天的 1 分 K。
  * - 存 stock1m/<日期>.json：{ 代號: [基準價, 開[], 高[], 低[], 收[], 量[]] }，價格存成相對基準價的萬分之幾（整數），
  *   一天約 70 檔 × 5KB；3 分、5 分 K 由 1 分 K 合成。
- * - 富果免費方案每分鐘約 60 次請求：每次請求間隔 STOCK1M_GAP_MS，最多 STOCK1M_MAX 次。
+ * - 富果免費方案每分鐘約 60 次請求：每次請求間隔 STOCK1M_GAP_MS（約 55 次／分），每輪最多 STOCK1M_MAX 次（約 36 分鐘，受 DEADLINE 限制）。
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,7 +17,7 @@ import { join } from 'node:path';
 const dir = process.argv[2] ?? 'data';
 const KEY = process.env.FUGLE_API_KEY ?? '';
 const TOP = Number(process.env.STOCK1M_TOP ?? 50);
-const MAX = Number(process.env.STOCK1M_MAX ?? 700);
+const MAX = Number(process.env.STOCK1M_MAX ?? 2000);
 const GAP = Number(process.env.STOCK1M_GAP_MS ?? 1100);
 const START = process.env.STOCK1M_START ?? '2024-01-01';
 const DEADLINE = Number(process.env.DEADLINE ?? Infinity);
