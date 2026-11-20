@@ -115,3 +115,31 @@ export function analogBacktest(closes: number[], H = 21, tests = 120): { n: numb
   }
   return n >= 20 ? { n, hit: hit / n, rmse: Math.sqrt(se / n), rmseFlat: Math.sqrt(seFlat / n) } : null;
 }
+
+/**
+ * 這一檔（或指數）自己的歷史校準：過去每一天「之後 H 天的漲跌 ÷（當時近 60 日波動 × √H）」的 10%／90% 分位數，
+ * 以及各年實際落在區間內的比例。用整段歷史估分位數（區間寬度的校準，不是方向）。
+ */
+export function bandCalib(closes: number[], dates: string[] = [], H = 21): { p10: number; p90: number; coverage: Array<{ year: string; inside: number }> } | null {
+  const lr = closes.map((c, k) => (k > 0 && c > 0 && closes[k - 1] > 0 ? Math.log(c / closes[k - 1]) : NaN));
+  const zs: Array<[number, number]> = [];
+  for (let e = 80; e + H < closes.length; e += 2) {
+    const v = volAt(lr, e);
+    if (!(v > 0)) continue;
+    zs.push([e, Math.log(closes[e + H] / closes[e]) / (v * Math.sqrt(H))]);
+  }
+  if (zs.length < 50) return null;
+  const s = zs.map((z) => z[1]).sort((a, b) => a - b);
+  const p10 = s[Math.floor(0.1 * (s.length - 1))];
+  const p90 = s[Math.floor(0.9 * (s.length - 1))];
+  const years = new Map<string, [number, number]>();
+  for (const [e, z] of zs) {
+    const y = dates[e]?.slice(0, 4);
+    if (!y) continue;
+    const c = years.get(y) ?? [0, 0];
+    c[0]++;
+    if (z >= p10 && z <= p90) c[1]++;
+    years.set(y, c);
+  }
+  return { p10, p90, coverage: [...years].map(([year, [n, k]]) => ({ year, inside: k / n })) };
+}

@@ -115,7 +115,7 @@ async function show(sec: HTMLElement, rev: RevStocks | undefined): Promise<void>
 }
 
 /** 日 K（最近 120 天）＋未來的中線與區間。 */
-function chartSvg(c: Candle[], path: Array<{ t: number; mid: number; lo: number; hi: number }>, an: AnalogResult | null = null, _off = 0): string {
+export function chartSvg(c: Candle[], path: Array<{ t: number; mid: number; lo: number; hi: number }>, an: AnalogResult | null = null, _off = 0, midLabel = '中線（同分數組的平均）'): string {
   const W = 640;
   const H = 300;
   const n = c.length + path.length;
@@ -149,5 +149,5 @@ function chartSvg(c: Candle[], path: Array<{ t: number; mid: number; lo: number;
     <line x1="${x(i0 + 0.5)}" x2="${x(i0 + 0.5)}" y1="8" y2="${H - 16}" class="pd-now"/>
     <text x="8" y="${H - 2}" class="pd-axis">${esc(c[0].date.slice(0, 7))}</text><text x="${x(i0)}" y="${H - 2}" class="pd-axis" text-anchor="middle">今天</text><text x="${W - 8}" y="${H - 2}" class="pd-axis" text-anchor="end">約一個月後</text>
   </svg>
-  <p class="pd-legend muted"><span class="pd-sw band"></span>80% 區間　<span class="pd-sw mid"></span>中線（同分數組的平均）${an ? '　<span class="pd-sw an-avg"></span>相似走勢預測線　<span class="pd-sw an"></span>最像的 3 段' : ''}</p></div>`;
+  <p class="pd-legend muted"><span class="pd-sw band"></span>80% 區間　<span class="pd-sw mid"></span>${midLabel}${an ? '　<span class="pd-sw an-avg"></span>相似走勢預測線　<span class="pd-sw an"></span>最像的 3 段' : ''}</p></div>`;
 }

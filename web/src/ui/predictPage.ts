@@ -11,6 +11,7 @@ import type { IndexPoint } from '../data/types';
 import { setTimeframe, type AnalogDay } from '../domain/intradayModel';
 import { intradayHtml, liveBars, type IntradayData, type IntradayState } from './predictIntraday';
 import { bindStockForecast, stockForecastShell } from './predictStock';
+import { fillDaily } from './predictDaily';
 import { escapeHtml as esc, num } from './format';
 
 const pctTxt = (v: number | null | undefined, digits = 1, sign = true) => {
@@ -447,6 +448,15 @@ function drawIntra(root: HTMLElement): void {
 }
 
 function bindIntra(root: HTMLElement): void {
+  root.querySelector<HTMLButtonElement>('[data-intra-daily]')?.addEventListener('click', () => {
+    intraState.daily = true;
+    drawIntra(root);
+  });
+  if (intraState.daily) {
+    const el = root.querySelector<HTMLElement>('#pd-intra-daily');
+    // 台指期日 K 放在 5 分 K 的預測檔裡
+    if (el) void loadPredictIntraday(5).then((d5) => fillDaily(el, intraState.asset ?? 'L', (d5 as unknown as { txd?: Array<[string, number, number, number, number]> } | null)?.txd));
+  }
   root.querySelectorAll<HTMLButtonElement>('[data-intra-asset]').forEach((b) =>
     b.addEventListener('click', () => {
       intraState.asset = b.dataset.intraAsset as IntradayState['asset'];
@@ -456,6 +466,10 @@ function bindIntra(root: HTMLElement): void {
   root.querySelectorAll<HTMLButtonElement>('[data-intra-tf]').forEach((b) =>
     b.addEventListener('click', () => {
       const tf = Number(b.dataset.intraTf) as 1 | 3 | 5;
+      if (intraState.daily) {
+        intraState.daily = false;
+        if (tf === intraState.tf) return drawIntra(root);
+      }
       if (tf === intraState.tf) return;
       intraState.tf = tf;
       intraState.k = -1;
