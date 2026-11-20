@@ -213,3 +213,5 @@
 .pd-steps li { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--glass-line); opacity: 0.6; }
 .pd-steps li.is-now { opacity: 1; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .pd-steps li.is-done { opacity: 0.85; }
+
+.pd-intra-pick { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }

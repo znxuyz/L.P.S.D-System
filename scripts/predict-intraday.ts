@@ -72,6 +72,8 @@ const IXKEY = TF === 5 ? 'ix' : TF === 3 ? 'ix3' : 'ix1';
 const SUF = TF === 5 ? '' : `-${TF}m`;
 /** 訓練時每隔幾根取一個時間點（約每 5 分鐘一個）。 */
 const KS = nb(5);
+/** 1 分、3 分 K 只用這一天以後的資料訓練（全部 2020 年起要跑很久；2023 年起約 950 天已經夠）。 */
+const FROM = process.env.INTRA_FROM ?? (TF === 5 ? '0000' : '2023-01-01');
 const read = <T>(p: string, fb: T): T => {
   try {
     return JSON.parse(readFileSync(p, 'utf8')) as T;
@@ -134,6 +136,7 @@ const idir = join(dir, 'intraday');
 const days: Day[] = [];
 for (const f of existsSync(idir) ? readdirSync(idir).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort() : []) {
   const date = f.slice(0, 10);
+  if (date < FROM) continue;
   const i = dIdx.get(date);
   if (i == null || i < 6) continue;
   const j = read<Record<string, Bar[] | undefined>>(join(idir, f), {});
@@ -673,6 +676,9 @@ console.log('最終模型自己選用的資料：', JSON.stringify(final.used));
 final.m.resid = residBy.map((row, hi) => row.map((e, tb) => r5(e.length > 30 ? std(e) : final.m.resid[hi][tb])!));
 
 const prevL = (date: string) => lClose.get(taiex[dIdx.get(date)! - 1][0]) ?? null;
+/** 臺指期近月一般時段收盤（txdaily/）：換算台指期的預測價位用（前一個交易日收盤時的期現貨比例）。 */
+const txClose = (date: string) => txData.get(date)?.d?.[3] ?? null;
+const prevT = (date: string) => txClose(taiex[dIdx.get(date)! - 1][0]);
 const lastDate = taiex[taiex.length - 1][0];
 const ctxOut = (c: DailyCtx) => Object.fromEntries(Object.entries(c).map(([k, v]) => [k, r5(v)]));
 const lin = (x: LinModel) => ({ mean: x.mean.map(r5), sd: x.sd.map(r5), coef: x.coef.map(r5) });
@@ -808,8 +814,8 @@ writeFileSync(
         ? 'signal'
         : 'none',
     backtest: { from: days[FIRST]?.date, to: days.at(-1)!.date, days: days.length - FIRST, byOrigin },
-    next: { after: lastDate, P0: taiex[taiex.length - 1][4], L0: lClose.get(lastDate) ?? null, ctx: ctxOut(dailyCtx(taiex.length)!) },
-    recent: days.slice(-10).map((d) => ({ date: d.date, P0: d.P0, L0: prevL(d.date), ix: d.ix, ctx: ctxOut(d.ctx) })),
+    next: { after: lastDate, P0: taiex[taiex.length - 1][4], L0: lClose.get(lastDate) ?? null, T0: txClose(lastDate), ctx: ctxOut(dailyCtx(taiex.length)!) },
+    recent: days.slice(-10).map((d) => ({ date: d.date, P0: d.P0, L0: prevL(d.date), T0: prevT(d.date), ix: d.ix, ctx: ctxOut(d.ctx) })),
     // 各種預測線的樣本外成績（每根收盤誤差 RMSE、收盤方向命中率、最接近實際的比例）
     lines: summarizeLines(lineAcc),
     // 分期間：hold＝調整模型時從沒看過的期間（公正）、dev＝開發期間（看過，可能偏樂觀）
