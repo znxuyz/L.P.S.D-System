@@ -909,6 +909,17 @@ function revPicks(i: number, date: string) {
   }
   return { uni: uni.length, pctOf, picks, cands };
 }
+/** 內部人近 30 天申報要在市場上賣的股數（insider/，2026-11-20 起才有資料；只註記、還沒驗證，不影響決定）。 */
+const insiderSell = (() => {
+  const m = new Map<string, number>();
+  const idir = join(dir, 'insider');
+  if (!existsSync(idir)) return m;
+  const since = new Date(Date.parse(`${cal[T - 1]}T00:00:00Z`) - 30 * 86400_000).toISOString().slice(0, 10);
+  for (const f of readdirSync(idir).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f) && f.slice(0, 10) >= since))
+    for (const r of read<Array<{ code: string; how: string; shares: number }>>(join(idir, f), []))
+      if (/一般交易|鉅額|盤後/.test(r.how)) m.set(r.code, (m.get(r.code) ?? 0) + r.shares);
+  return m;
+})();
 /** 每一檔候選的決定與原因（每天存進事前存檔，之後追蹤結果）。 */
 function decide(rp: ReturnType<typeof revPicks>, trendOk: boolean, rebalance: boolean) {
   const inPick = new Set(rp.picks.map((x) => x.code));
@@ -920,7 +931,8 @@ function decide(rp: ReturnType<typeof revPicks>, trendOk: boolean, rebalance: bo
     else if (!trendOk) (action = 'skip'), (reason = '加權指數在 200 日均線之下，全部持有現金');
     else if (rebalance) (action = 'buy'), (reason = '換股日：分數前 20、營收不是一次性的');
     else (action = 'watch'), (reason = '分數前 20；下一個換股日才買');
-    const notes = [c.flags.lowBase ? '只是回到兩年前水準（低基期）' : '', c.flags.loss ? '最新一季本業虧損' : ''].filter(Boolean);
+    const ins = insiderSell.get(c.code);
+    const notes = [c.flags.lowBase ? '只是回到兩年前水準（低基期）' : '', c.flags.loss ? '最新一季本業虧損' : '', ins ? `內部人近 30 天申報要賣 ${Math.round(ins / 1000).toLocaleString()} 張` : ''].filter(Boolean);
     return { code: c.code, rank: c.rank, action, reason, notes };
   });
 }

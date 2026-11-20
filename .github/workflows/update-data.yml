@@ -87,6 +87,8 @@ jobs:
             node scripts/financials.ts .data
             # 每月營收（2019 年起；第一手的獲利資料，個股模型用）
             node scripts/revenue.ts .data
+            # 內部人持股轉讓事前申報（開放資料只有最新一天，每天收集累積）
+            node scripts/insider.ts .data
             HISTORY_PARTS=events node scripts/history.ts .data
           ) > mops.log 2>&1 &
           ( HISTORY_PARTS=tdcc node scripts/history.ts .data ) > tdcc.log 2>&1 &
