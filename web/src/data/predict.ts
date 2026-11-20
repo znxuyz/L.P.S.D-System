@@ -157,14 +157,15 @@ const get = keyedRefresh<PredictData | null>(
 export const loadPredict = (): Promise<PredictData | null> => get('');
 
 const getIntra = keyedRefresh<IntradayData | null>(
-  () =>
-    fetch('data/predict-intraday.json', { cache: 'no-cache' })
+  (k) =>
+    fetch(`data/predict-intraday${tfSuffix(k)}.json`, { cache: 'no-cache' })
       .then((r) => (r.ok ? (r.json() as Promise<IntradayData>) : null))
       .catch(() => null),
   (j) => j != null,
 );
 /** 00631L 5 分 K 走勢預測（scripts/predict-intraday.ts）。 */
-export const loadPredictIntraday = (): Promise<IntradayData | null> => getIntra('');
+/** tf：5、3、1 分 K。 */
+export const loadPredictIntraday = (tf: 1 | 3 | 5 = 5): Promise<IntradayData | null> => getIntra(String(tf));
 
 /** 00631L 當沖：輸入開盤價，算出預測的「開盤到收盤」報酬與建議動作。 */
 export function dayTradeCall(d: NonNullable<PredictData['dayTrade']>, open: number): { gap: number; pred: number; action: 1 | -1 | 0 } {
@@ -192,15 +193,18 @@ export function dayTradeBands(d: NonNullable<PredictData['dayTrade']>): { long: 
 }
 
 const getAnalogs = keyedRefresh<AnalogDay[] | null>(
-  () =>
-    fetch('data/predict-analogs.json', { cache: 'no-cache' })
+  (k) =>
+    fetch(`data/predict-analogs${tfSuffix(k)}.json`, { cache: 'no-cache' })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => (Array.isArray(j) ? decodeAnalogs(j) : null))
       .catch(() => null),
   (j) => j != null,
 );
 /** 相似日資料庫（歷史上每天的 5 分 K 走勢）。 */
-export const loadAnalogs = (): Promise<AnalogDay[] | null> => getAnalogs('');
+export const loadAnalogs = (tf: 1 | 3 | 5 = 5): Promise<AnalogDay[] | null> => getAnalogs(String(tf));
+function tfSuffix(k: string): string {
+  return k === '3' ? '-3m' : k === '1' ? '-1m' : '';
+}
 
 /** 模型模擬帳戶（scripts/paper-trade.ts）：完全照事前存檔的預測自動下單。 */
 export interface PaperData {

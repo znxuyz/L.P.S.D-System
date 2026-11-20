@@ -12,8 +12,22 @@
  * - 開盤前：先預測開盤跳空。
  */
 
-export const BARS = 54;
-export const HORIZONS = [1, 2, 3, 6, 12, 54] as const;
+/**
+ * K 棒的時間單位（分鐘）：5（54 根）、3（90 根）、1（270 根）。用 setTimeframe() 切換；
+ * 底下的 BARS、HORIZONS 是「活的」匯出，切換後所有用到它們的函式跟著變。
+ * 預測的長度、特徵的回看長度都以「分鐘」定義，換算成根數，所以三種 K 線的模型意思一樣。
+ */
+export let STEP = 5;
+export let BARS = 54;
+/** 預測長度：5、10、15、30、60 分鐘與到收盤（換算成根數）。 */
+export let HORIZONS: number[] = [1, 2, 3, 6, 12, 54];
+/** 幾分鐘＝幾根（至少 1 根）。 */
+export const nb = (min: number) => Math.max(1, Math.round(min / STEP));
+export function setTimeframe(step: 1 | 3 | 5): void {
+  STEP = step;
+  BARS = 270 / step;
+  HORIZONS = [...new Set([5, 10, 15, 30, 60].map(nb))].concat(BARS);
+}
 
 /** 每天開盤前就知道的資料（前一天收盤後）。 */
 export interface DailyCtx {
@@ -127,9 +141,9 @@ export function rawBlocks(c: ArrayLike<number>, k: number, P0: number, d: DailyC
     k / BARS,
     gap,
     lr(c[k], c[0]),
-    k >= 1 ? lr(c[k], c[k - 1]) : NaN,
-    k >= 3 ? lr(c[k], c[k - 3]) : NaN,
-    k >= 6 ? lr(c[k], c[k - 6]) : NaN,
+    k >= nb(5) ? lr(c[k], c[k - nb(5)]) : NaN,
+    k >= nb(15) ? lr(c[k], c[k - nb(15)]) : NaN,
+    k >= nb(30) ? lr(c[k], c[k - nb(30)]) : NaN,
     rv,
     hi > lo ? (c[k] - lo) / (hi - lo) - 0.5 : 0,
     d.prevDay,
@@ -187,9 +201,9 @@ export function features(c: ArrayLike<number>, k: number, P0: number, d: DailyCt
     t * t,
     lr(c[0], P0),
     lr(c[k], c[0]),
-    k >= 1 ? lr(c[k], c[k - 1]) : NaN,
-    k >= 3 ? lr(c[k], c[k - 3]) : NaN,
-    k >= 6 ? lr(c[k], c[k - 6]) : NaN,
+    k >= nb(5) ? lr(c[k], c[k - nb(5)]) : NaN,
+    k >= nb(15) ? lr(c[k], c[k - nb(15)]) : NaN,
+    k >= nb(30) ? lr(c[k], c[k - nb(30)]) : NaN,
     rv,
     hi > lo ? (c[k] - lo) / (hi - lo) : 0.5,
     d.prevDay,
@@ -226,13 +240,13 @@ export interface IntradayModel {
 
 /** 殘差分段：剛開盤（還不知道今天的波動）單獨一段，之後每 9 根一段。 */
 export const TIME_BUCKETS = 7;
-export const timeBucket = (k: number) => (k <= 0 ? 0 : 1 + Math.min(5, Math.floor((k - 1) / 9)));
+export const timeBucket = (k: number) => (k <= 0 ? 0 : 1 + Math.min(5, Math.floor((k - 1) / nb(45))));
 
 /**
  * 「到收盤」剩下的時間長短不一：越接近收盤能走的幅度越小。
  * 訓練時把目標除以 √(剩下的比例)，預測時再乘回來，各時間點的誤差才在同一個尺度。
  */
-export const horizonScale = (h: number, k: number) => (h === 54 ? Math.sqrt(Math.max(1, BARS - k) / BARS) : 1);
+export const horizonScale = (h: number, k: number) => (h === BARS ? Math.sqrt(Math.max(1, BARS - k) / BARS) : 1);
 
 export function standardize(m: Pick<IntradayModel, 'mean' | 'sd'>, x: number[]): number[] {
   // 模型沒有的特徵（例如瀏覽器還拿著舊版模型）當作 0＝平均
@@ -276,7 +290,7 @@ export function forecastPath(m: IntradayModel, c: ArrayLike<number>, k: number, 
   // 錨點：(距離, 預測報酬, 標準差)，距離超過收盤的不要
   const anchors: Array<[number, number, number]> = [[0, 0, 0]];
   HORIZONS.forEach((h, i) => {
-    const dist = h === 54 ? BARS - k : h;
+    const dist = h === BARS ? BARS - k : h;
     if (k + dist > BARS || dist <= 0) return;
     if (anchors.some((a) => a[0] === dist)) return;
     anchors.push([dist, p[i], m.resid[i][tb]]);
@@ -448,12 +462,12 @@ export function analogDistance(t: TodayState, a: AnalogDay): number {
     let p = 0;
     let w = 0;
     for (let b = 1; b <= t.k; b++) {
-      const wb = b > t.k - 6 ? 3 : 1;
+      const wb = b > t.k - nb(30) ? 3 : 1;
       p += wb * sq(t.r[b] / st, a.r[b] / sa);
       w += wb;
     }
     // 走勢形狀佔的比重隨時間變大
-    dist += (p / w) * (4 + t.k / 6);
+    dist += (p / w) * (4 + t.k / nb(30));
   }
   return dist;
 }

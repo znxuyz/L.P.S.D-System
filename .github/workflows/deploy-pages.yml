@@ -61,6 +61,8 @@ jobs:
           if [ -d .data/candles ] && [ -f .data/index/TAIEX.json ]; then BACKFILL_DIR=.backfill BACKFILL_FROM=2021-12-01 FORECASTS_DIR=.forecasts node scripts/predict.ts .data; fi
           # 00631L 5 分 K 走勢預測（加權指數 5 分 K，資料不夠時輸出 ready: false）
           if [ -f .data/index/TAIEX.json ]; then FORECASTS_DIR=.forecasts node scripts/predict-intraday.ts .data; fi
+          # 同一套模型的 3 分 K、1 分 K（加權指數每 5 秒資料切的；不存檔、不做區間進出場）
+          if [ -f .data/index/TAIEX.json ]; then TF=3 node scripts/predict-intraday.ts .data; TF=1 node scripts/predict-intraday.ts .data; fi
           # 模型模擬帳戶：完全照事前存檔的預測自動下單（紙上交易）
           if [ -d .forecasts ]; then FORECASTS_DIR=.forecasts node scripts/paper-trade.ts .data; fi
           # 模擬帳戶歷史回測（2022 起；同一套規則，用逐段往前滾的預測）
@@ -71,7 +73,7 @@ jobs:
       - name: 放進網站
         run: |
           mkdir -p web/public/data
-          for f in active-etf.json stocks.json chips.json fundamentals.json pe5y.json pattern-stats.json close.json etf-info.json market-risk.json predict.json predict-intraday.json predict-analogs.json paper.json paper-backtest.json; do
+          for f in active-etf.json stocks.json chips.json fundamentals.json pe5y.json pattern-stats.json close.json etf-info.json market-risk.json predict.json predict-intraday.json predict-analogs.json predict-intraday-3m.json predict-analogs-3m.json predict-intraday-1m.json predict-analogs-1m.json paper.json paper-backtest.json; do
             if [ -f ".data/$f" ]; then cp ".data/$f" web/public/data/; fi
           done
           if [ -d .data/candles ]; then cp -r .data/candles web/public/data/; fi

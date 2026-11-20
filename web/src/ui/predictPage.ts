@@ -8,7 +8,7 @@ import { dayTradeBands, dayTradeCall, loadAnalogs, loadPaper, loadPaperBacktest,
 import { sessionAt, taipeiDate } from '../data/liveProvider';
 import { sessionOpenMs } from '../data/twse';
 import type { IndexPoint } from '../data/types';
-import type { AnalogDay } from '../domain/intradayModel';
+import { setTimeframe, type AnalogDay } from '../domain/intradayModel';
 import { intradayHtml, liveBars, type IntradayData, type IntradayState } from './predictIntraday';
 import { bindStockForecast, stockForecastShell } from './predictStock';
 import { escapeHtml as esc, num } from './format';
@@ -366,7 +366,7 @@ function dayTradeHtml(d: NonNullable<PredictData['dayTrade']>, f?: PredictData['
 let data: PredictData | null | undefined;
 let intra: IntradayData | null | undefined;
 let loading = false;
-const intraState: IntradayState = { mode: '', k: -1, showActual: true, showAnalogs: true, showCandles: false, showBand: false, showLevels: true };
+const intraState: IntradayState = { mode: '', k: -1, tf: 5, showActual: true, showAnalogs: true, showCandles: false, showBand: false, showLevels: true };
 let analogLib: AnalogDay[] | null = null;
 let paper: PaperData | null = null;
 let paperBt: PaperData | null = null;
@@ -418,6 +418,25 @@ function drawIntra(root: HTMLElement): void {
 }
 
 function bindIntra(root: HTMLElement): void {
+  root.querySelectorAll<HTMLButtonElement>('[data-intra-tf]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const tf = Number(b.dataset.intraTf) as 1 | 3 | 5;
+      if (tf === intraState.tf) return;
+      intraState.tf = tf;
+      intraState.k = -1;
+      setTimeframe(tf);
+      intra = undefined;
+      analogLib = null;
+      const el = root.querySelector<HTMLElement>('#pd-intra');
+      el?.querySelector('.pd-intra-tf')?.querySelectorAll('button').forEach((x) => x.classList.toggle('is-on', x === b));
+      void Promise.all([loadPredictIntraday(tf), loadAnalogs(tf)]).then(([i, a]) => {
+        if (intraState.tf !== tf) return;
+        intra = i;
+        analogLib = a;
+        drawIntra(root);
+      });
+    }),
+  );
   root.querySelector<HTMLSelectElement>('#pd-intra-day')?.addEventListener('change', (e) => {
     intraState.mode = (e.target as HTMLSelectElement).value;
     drawIntra(root);

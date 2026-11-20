@@ -7,7 +7,7 @@
  * - 00631L 的價格由加權指數換算（β 倍），不是 00631L 真實的 5 分 K。
  */
 import type { IndexPoint } from '../data/types';
-import { BARS, DAYTRADE_COST, analogLines, avgOf, barRange, blendLine, rangeLevels, simulateRange, type RangeLevels, type RangePlan, forecastDay, toLeveraged, type AnalogDay, type Bar, type DailyCtx, type DayForecast, type DayModel, type IntradayModel, discName } from '../domain/intradayModel';
+import { BARS, STEP, DAYTRADE_COST, analogLines, avgOf, barRange, blendLine, rangeLevels, simulateRange, type RangeLevels, type RangePlan, forecastDay, toLeveraged, type AnalogDay, type Bar, type DailyCtx, type DayForecast, type DayModel, type IntradayModel, discName } from '../domain/intradayModel';
 import { escapeHtml as esc, num } from './format';
 
 type Verdict = 'signal' | 'none';
@@ -85,7 +85,7 @@ const ctxOf = (c: Record<keyof DailyCtx, number | null>): DailyCtx => ({
 });
 /** 第 bar 根的開始時間。 */
 const clock = (bar: number) => {
-  const m = 9 * 60 + bar * 5;
+  const m = 9 * 60 + bar * STEP;
   return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
 };
 const kLabel = (k: number) => (k < 0 ? '開盤前' : k === 0 ? '09:00 開盤' : `${clock(k)}`);
@@ -94,13 +94,14 @@ const cls = (v: number) => (v > 0 ? 'up' : v < 0 ? 'down' : '');
 
 /** 即時的加權指數（每分鐘或更密）→ 今天已經走完的 5 分 K 與開盤價。 */
 export function liveBars(series: IndexPoint[], openMs: number): { open: number | null; bars: Bar[] } {
-  const pts = series.filter((p) => p.t >= openMs && p.t <= openMs + BARS * 300_000 && p.v > 0).sort((a, b) => a.t - b.t);
+  const ms = STEP * 60_000;
+  const pts = series.filter((p) => p.t >= openMs && p.t <= openMs + BARS * ms && p.v > 0).sort((a, b) => a.t - b.t);
   if (!pts.length) return { open: null, bars: [] };
   const bars: Bar[] = [];
   const last = pts[pts.length - 1].t;
   let i = 0;
   for (let b = 0; b < BARS; b++) {
-    const end = openMs + (b + 1) * 300_000;
+    const end = openMs + (b + 1) * ms;
     if (last < end - 30_000) break; // 這根還沒走完
     const inBar: number[] = [];
     while (i < pts.length && pts[i].t <= end) inBar.push(pts[i++].v);
@@ -238,7 +239,7 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
   }
   const ticks = [lo, (lo + hi) / 2, hi];
   const dates = an?.lines.slice(0, 3).map((l) => l.date) ?? [];
-  return `<div class="pd-intra-scroll"><svg class="pd-chart pd-intra-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="整天 5 分 K 預測線">
+  return `<div class="pd-intra-scroll"><svg class="pd-chart pd-intra-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="整天 ${STEP} 分 K 預測線">
     <defs><clipPath id="pd-clip"><rect x="${pad.l}" y="${pad.t}" width="${W - pad.l - pad.r}" height="${H - pad.t - pad.b}"/></clipPath></defs>
     <line class="pd-base" x1="${pad.l}" x2="${W - pad.r}" y1="${sy(v.P0).toFixed(1)}" y2="${sy(v.P0).toFixed(1)}"/>
     <text class="pd-tick" x="${pad.l + 4}" y="${(sy(v.P0) - 4).toFixed(1)}">昨收 ${num(L(v.P0), 2)}</text>
@@ -250,7 +251,7 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
     <g clip-path="url(#pd-clip)">${levelSvg}${order.map(path).join('')}${order.map(endLabel).join('')}</g>
     ${f.from > 0 ? `<line class="pd-now" x1="${startX.toFixed(1)}" x2="${startX.toFixed(1)}" y1="${pad.t}" y2="${H - pad.b}"/>` : ''}
     ${ticks.map((t) => `<text class="pd-tick" x="${pad.l - 6}" y="${(pad.t + (1 - (t - lo) / (hi - lo || 1)) * (H - pad.t - pad.b) + 4).toFixed(1)}" text-anchor="end">${num(t, 2)}</text>`).join('')}
-    ${[0, 12, 24, 36, 48].map((b) => `<text class="pd-tick" x="${(pad.l + b * bw).toFixed(1)}" y="${H - 6}" text-anchor="${b === 0 ? 'start' : 'middle'}">${clock(b)}</text>`).join('')}
+    ${[0, 60, 120, 180, 240].map((mm) => mm / STEP).map((b) => `<text class="pd-tick" x="${(pad.l + b * bw).toFixed(1)}" y="${H - 6}" text-anchor="${b === 0 ? 'start' : 'middle'}">${clock(b)}</text>`).join('')}
     <text class="pd-tick" x="${W - pad.r}" y="${H - 6}" text-anchor="end">13:30</text>
   </svg></div>
   <p class="pd-legend pd-intra-legend">
@@ -324,7 +325,7 @@ function rangeHtml(d: IntradayData, v: View): string {
         <tr><td><span class="down">往上放空</span></td><td class="num">${P(l2.lv.short)}</td><td class="num">${P(l2.lv.shortTarget)}</td><td class="num">${P(l2.lv.shortStop)}</td><td>13:30 收盤出場</td></tr>
       </tbody></table></div>
       <p class="muted pd-small">${when} 依「剩下時間預估會往上、往下走多遠」同時掛兩張單，先成交的那邊算數、另一張取消；「—」代表預估幅度不夠大（停利扣掉成本不划算），那邊不掛。${l2.sim ? (l2.sim.side ? `這一天：${l2.sim.side > 0 ? '買進' : '放空'}在 ${clock(l2.sim.entryBar)}～ 成交，${l2.sim.how === 'target' ? '停利' : l2.sim.how === 'stop' ? '停損' : '收盤'}出場，00631L 約 <b class="${cls(l2.sim.ret)}">${pctTxt(l2.sim.ret * d.beta - DAYTRADE_COST)}</b>（扣成本）。` : '這一天兩邊都沒成交。') : ''}</p>`
-    : `<p class="muted">${when} 之後（走完前 ${use?.k ?? 6} 根 5 分 K）才算得出價位；把「預測時間」拉到 ${when} 以後。</p>`;
+    : `<p class="muted">${when} 之後（走完前 ${use?.k ?? 6} 根 ${STEP} 分 K）才算得出價位；把「預測時間」拉到 ${when} 以後。</p>`;
   const row = (name: string, x: RangeStat | null) =>
     x
       ? `<tr><td>${esc(name)}<br><small class="muted">${esc(x.from)}～${esc(x.to)}</small></td><td class="num">${num(x.days)}</td><td class="num">${num(x.trades)}</td><td class="num">${x.trades ? `${num(x.win * 100, 0)}%` : '—'}</td><td class="num ${cls(x.avg)}">${x.trades ? pctTxt(x.avg, 2) : '—'}</td><td class="num ${cls(x.total)}">${pctTxt(x.total)}</td><td class="num down">${pctTxt(x.maxDD)}</td><td class="num ${cls(x.hold)}">${pctTxt(x.hold)}</td></tr>`
@@ -338,7 +339,7 @@ function rangeHtml(d: IntradayData, v: View): string {
 
 const usedTxt = (u?: Record<string, string[]>) => {
   if (!u) return '—';
-  const nm = (k: string) => (k === 'gap' ? '開盤跳空' : k === 'path54' ? '到收盤' : `${Number(k.slice(4)) * 5} 分鐘`);
+  const nm = (k: string) => (k === 'gap' ? '開盤跳空' : k === `path${BARS}` ? '到收盤' : `${Number(k.slice(4)) * STEP} 分鐘`);
   const g = (x: string[]) => (x.length ? x.map((v) => (v === 'us' ? '美股' : v === 'night' ? '夜盤' : '自創指標')).join('＋') : '都不用');
   return Object.entries(u).map(([k, v]) => `${nm(k)}：${g(v)}`).join('、');
 };
@@ -431,8 +432,10 @@ function recordTable(d: IntradayData, lev: number): string {
 export interface IntradayState {
   /** 'live' 或回放日期。 */
   mode: string;
-  /** -1 開盤前、0 開盤、1～53。 */
+  /** -1 開盤前、0 開盤、1～BARS−1。 */
   k: number;
+  /** K 線的時間單位（分鐘）。 */
+  tf: 1 | 3 | 5;
   showActual: boolean;
   /** 相似日走勢線、預測 K 棒、80% 區間要不要畫。 */
   showAnalogs: boolean;
@@ -443,10 +446,11 @@ export interface IntradayState {
 }
 
 export function intradayHtml(d: IntradayData | null | undefined, st: IntradayState, live: { open: number | null; bars: Bar[]; ok: boolean; why: string }, lib: AnalogDay[] | null): string {
-  const head = (badge: string) => `<header class="pd-head"><div><p class="eyebrow">Intraday · 5 分 K</p><h2>00631L 整天 5 分 K 預測線</h2></div>${badge}</header>`;
+  const tfBtns = `<div class="pd-tf pd-intra-tf" role="group" aria-label="K 線週期">${([5, 3, 1] as const).map((t) => `<button type="button" data-intra-tf="${t}" class="${st.tf === t ? 'is-on' : ''}">${t} 分 K</button>`).join('')}</div>`;
+  const head = (badge: string) => `<header class="pd-head"><div><p class="eyebrow">Intraday · ${STEP} 分 K</p><h2>00631L 整天 ${STEP} 分 K 預測線</h2></div>${badge}</header>${tfBtns}`;
   if (d === undefined) return `<section class="pd-card glass" id="pd-intra">${head('')}<p class="muted">載入中⋯⋯</p></section>`;
   if (!d || !d.ready || !d.day)
-    return `<section class="pd-card glass" id="pd-intra">${head('')}<p class="muted">正在收集加權指數 5 分 K 的歷史資料（目前 ${d?.days ?? 0} 天，至少要 60 天才會開始訓練；每小時往回補一批）。</p></section>`;
+    return `<section class="pd-card glass" id="pd-intra">${head('')}<p class="muted">正在收集加權指數 ${STEP} 分 K 的歷史資料（目前 ${d?.days ?? 0} 天，至少要 60 天才會開始訓練；每小時往回補一批）。</p></section>`;
   const vb = (v: Verdict, yes: string, no: string) => `<span class="pd-verdict ${v === 'signal' ? 'is-ok' : 'is-warn'}">${v === 'signal' ? `✅ ${yes}` : `⚠️ ${no}`}</span>`;
   const badges = `<div class="pd-badges">${vb(d.rangeVerdict, '振幅與高低點：盤中比簡單猜法準', '振幅與高低點沒有比簡單猜法準')}${vb(d.verdict, '漲跌方向有預測能力', '漲跌方向沒有預測能力')}</div>`;
   let v: View;
@@ -488,7 +492,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
   const b = d.backtest;
   const pct2 = (x: number) => `${num(x * lev * 100, 2)}%`;
   return `<section class="pd-card glass" id="pd-intra">${head(badges)}
-    <p class="pd-lead">以 5 分鐘為單位畫出整天（09:00～13:30，54 根）的預測線：<b>模型主線</b>是統計上誤差最小的預測；<b>相似日走勢線</b>是從歷史裡找出到目前為止跟今天最像的幾天，把它們接下來的真實走勢（依波動比例縮放）接在現在的價格後面。
+    <p class="pd-lead">以 ${STEP} 分鐘為單位畫出整天（09:00～13:30，${BARS} 根）的預測線：<b>模型主線</b>是統計上誤差最小的預測；<b>相似日走勢線</b>是從歷史裡找出到目前為止跟今天最像的幾天，把它們接下來的真實走勢（依波動比例縮放）接在現在的價格後面。
       開盤前先預測跳空，盤中每走完一根就重新預測。下面列出每條線過去的準確度。
       00631L 的價格用「加權指數 × ${num(d.beta, 2)} 倍」換算（近一年日報酬估計）。</p>
     <div class="pd-intra-ctrl">
