@@ -65,8 +65,8 @@ export interface IntradayData {
     rmse: Record<'blend' | 'model' | 'avg' | 'flat', number>;
     rows: Array<{ asOf: string; date: string; P0: number; actual: number; blend: number; model: number; avg: number; rmse: Record<string, number>; hiErr: number; loErr: number }>;
   };
-  next: { after: string; P0: number; L0: number | null; ctx: Record<keyof DailyCtx, number | null> };
-  recent: Array<{ date: string; P0: number; L0: number | null; ix: Bar[]; ctx: Record<keyof DailyCtx, number | null> }>;
+  next: { after: string; P0: number; L0: number | null; T0?: number | null; ctx: Record<keyof DailyCtx, number | null> };
+  recent: Array<{ date: string; P0: number; L0: number | null; T0?: number | null; ix: Bar[]; ctx: Record<keyof DailyCtx, number | null> }>;
 }
 
 const ctxOf = (c: Record<keyof DailyCtx, number | null>): DailyCtx => ({
@@ -92,6 +92,11 @@ const kLabel = (k: number) => (k < 0 ? '開盤前' : k === 0 ? '09:00 開盤' : 
 const pctTxt = (v: number, d = 2) => `${v > 0 ? '+' : ''}${num(v * 100, d)}%`;
 const cls = (v: number) => (v > 0 ? 'up' : v < 0 ? 'down' : '');
 
+/** 加權指數 → 顯示的標的價位：00631L（β 倍）、台指期（前一天收盤時的期現貨比例）、加權指數本身。 */
+const convOf = (v: View, d: IntradayData) => (x: number) => (v.L0 ? toLeveraged(x, v.P0, v.L0, d.beta) : v.T0 ? (x * v.T0) / v.P0 : x);
+export type IntraAsset = 'L' | 'ix' | 'tx';
+export const ASSET_NAME: Record<IntraAsset, string> = { L: '00631L', ix: '加權指數', tx: '台指期（日盤）' };
+
 /** 即時的加權指數（每分鐘或更密）→ 今天已經走完的 5 分 K 與開盤價。 */
 export function liveBars(series: IndexPoint[], openMs: number): { open: number | null; bars: Bar[] } {
   const ms = STEP * 60_000;
@@ -115,7 +120,10 @@ export function liveBars(series: IndexPoint[], openMs: number): { open: number |
 interface View {
   live: boolean;
   P0: number;
+  /** 00631L 前一天收盤（看 00631L 時才有；看加權指數、台指期時 null）。 */
   L0: number | null;
+  /** 看台指期時：前一天臺指期收盤（價位＝指數 × T0 ÷ P0）。 */
+  T0?: number | null;
   ctx: DailyCtx;
   /** 已經知道的 K 棒（回放是整天）。 */
   ix: Bar[];
@@ -172,7 +180,7 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
   const W = 760;
   const H = 320;
   const pad = { l: 54, r: 12, t: 12, b: 24 };
-  const L = (x: number) => (v.L0 ? toLeveraged(x, v.P0, v.L0, d.beta) : x);
+  const L = convOf(v, d);
   const known = v.ix.slice(0, f.from);
   const future = st.showActual && !v.live ? v.ix.slice(f.from) : [];
   const series = lineSeries(v, f, an, choiceFor(v.choice, v.k));
@@ -311,7 +319,7 @@ function dayErrors(d: IntradayData, v: View, f: DayForecast) {
 function rangeHtml(d: IntradayData, v: View): string {
   const rt = d.rangeTrade;
   if (!rt) return '';
-  const L = (x: number) => (v.L0 ? toLeveraged(x, v.P0, v.L0, d.beta) : x);
+  const L = convOf(v, d);
   const P = (x: number) => (x > 0 && Number.isFinite(x) ? num(L(x), 2) : '—');
   const use = v.plan && !v.plan.noTrade ? v.plan : v.ref;
   const l2 = levelsFor(d, v);
@@ -390,7 +398,7 @@ function linesTableOf(lines: NonNullable<IntradayData['lines']>, lev: number, ti
   }).join('');
   return `<h3 class="pd-sub">${title}</h3>${note ? `<p class="muted pd-small">${esc(note)}</p>` : ''}
     <div class="pd-table-wrap"><table class="pd-table pd-lines-table"><thead><tr><th>預測線＼預測時間</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="muted pd-small">大字：每根 5 分 K 收盤價的平均誤差（換算成 00631L，越小越準，紅色是該時間點最準的線）。方向：預測的收盤比現在高或低，跟實際一致的比例（50% 等於擲硬幣）。最準：五條線裡這條最接近實際走勢的天數比例。</p>`;
+    <p class="muted pd-small">大字：每根 K 棒收盤價的平均誤差（換算成上面選的標的，越小越準，紅色是該時間點最準的線）。方向：預測的收盤比現在高或低，跟實際一致的比例（50% 等於擲硬幣）。最準：五條線裡這條最接近實際走勢的天數比例。</p>`;
 }
 
 /** 事前存檔的實盤成績：每天收盤後就存好的預測 vs 之後的實際走勢。 */
@@ -436,6 +444,8 @@ export interface IntradayState {
   k: number;
   /** K 線的時間單位（分鐘）。 */
   tf: 1 | 3 | 5;
+  /** 看哪個標的。 */
+  asset?: IntraAsset;
   showActual: boolean;
   /** 相似日走勢線、預測 K 棒、80% 區間要不要畫。 */
   showAnalogs: boolean;
@@ -447,7 +457,10 @@ export interface IntradayState {
 
 export function intradayHtml(d: IntradayData | null | undefined, st: IntradayState, live: { open: number | null; bars: Bar[]; ok: boolean; why: string }, lib: AnalogDay[] | null): string {
   const tfBtns = `<div class="pd-tf pd-intra-tf" role="group" aria-label="K 線週期">${([5, 3, 1] as const).map((t) => `<button type="button" data-intra-tf="${t}" class="${st.tf === t ? 'is-on' : ''}">${t} 分 K</button>`).join('')}</div>`;
-  const head = (badge: string) => `<header class="pd-head"><div><p class="eyebrow">Intraday · ${STEP} 分 K</p><h2>00631L 整天 ${STEP} 分 K 預測線</h2></div>${badge}</header>${tfBtns}`;
+  const asset: IntraAsset = st.asset ?? 'L';
+  const NAME = ASSET_NAME[asset];
+  const assetBtns = `<div class="pd-tf pd-intra-asset" role="group" aria-label="標的">${(['L', 'ix', 'tx'] as const).map((a) => `<button type="button" data-intra-asset="${a}" class="${asset === a ? 'is-on' : ''}">${ASSET_NAME[a]}</button>`).join('')}</div>`;
+  const head = (badge: string) => `<header class="pd-head"><div><p class="eyebrow">Intraday · ${STEP} 分 K</p><h2>${NAME} 整天 ${STEP} 分 K 預測線</h2></div>${badge}</header><div class="pd-intra-pick">${assetBtns}${tfBtns}</div>`;
   if (d === undefined) return `<section class="pd-card glass" id="pd-intra">${head('')}<p class="muted">載入中⋯⋯</p></section>`;
   if (!d || !d.ready || !d.day)
     return `<section class="pd-card glass" id="pd-intra">${head('')}<p class="muted">正在收集加權指數 ${STEP} 分 K 的歷史資料（目前 ${d?.days ?? 0} 天，至少要 60 天才會開始訓練；每小時往回補一批）。</p></section>`;
@@ -463,6 +476,11 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
     const rp = d.replay;
     v = { live: false, P0: day.P0, L0: day.L0, ctx: ctxOf(day.ctx), ix: day.ix, open: day.ix[0][0], k: Math.max(-1, Math.min(BARS - 1, st.k)), m: rp?.m ?? d.model, dm: rp?.dm ?? d.day, choice: rp?.choice ?? d.choice, plan: d.rangeTrade?.replayPlan, ref: d.rangeTrade?.replayRef };
   }
+  if (asset !== 'L') {
+    const T0 = v.live ? d.next.T0 : d.recent.find((r) => r.date === st.mode)?.T0;
+    v.L0 = null;
+    v.T0 = asset === 'tx' ? (T0 ?? null) : null;
+  }
   const f = forecastDay(v.m, v.dm, v.ix, v.k, v.k < 0 ? null : v.open, v.P0, v.ctx);
   // 相似日：只從這一天以前的日子找（回放時不會用到之後的資料）
   const viewDate = v.live ? '9999' : st.mode;
@@ -475,7 +493,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
         20,
       )
     : null;
-  const L = (x: number) => (v.L0 ? toLeveraged(x, v.P0, v.L0, d.beta) : x);
+  const L = convOf(v, d);
   const lev = v.L0 ? d.beta : 1;
   const last = f.bars[f.bars.length - 1];
   const now = v.k < 0 ? null : f.from === 0 ? f.open : v.ix[f.from - 1][3];
@@ -494,7 +512,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
   return `<section class="pd-card glass" id="pd-intra">${head(badges)}
     <p class="pd-lead">以 ${STEP} 分鐘為單位畫出整天（09:00～13:30，${BARS} 根）的預測線：<b>模型主線</b>是統計上誤差最小的預測；<b>相似日走勢線</b>是從歷史裡找出到目前為止跟今天最像的幾天，把它們接下來的真實走勢（依波動比例縮放）接在現在的價格後面。
       開盤前先預測跳空，盤中每走完一根就重新預測。下面列出每條線過去的準確度。
-      00631L 的價格用「加權指數 × ${num(d.beta, 2)} 倍」換算（近一年日報酬估計）。</p>
+      ${asset === 'L' ? `00631L 的價格用「加權指數 × ${num(d.beta, 2)} 倍」換算（近一年日報酬估計）。` : asset === 'tx' ? `台指期（近月、日盤）的價位用「加權指數 × 前一天收盤時的期貨 ÷ 現貨」換算：盤中期貨跟現貨幾乎同步，差的是價差（逆價差、正價差）會慢慢變；夜盤（15:00～05:00）沒有現貨，不在這個預測裡。${v.T0 ? '' : '<b>（這一天沒有臺指期收盤資料，先顯示加權指數）</b>'}` : '直接預測加權指數（點數）。'}</p>
     <div class="pd-intra-ctrl">
       <label>看哪一天<select id="pd-intra-day">${opts}</select></label>
       ${v.live ? `<span class="muted">每 30 秒更新</span>` : `<span class="muted pd-small">回放用的是 ${esc(d.recent[0]?.date ?? '')} 之前訓練的模型，沒看過這幾天的答案</span>`}
@@ -530,12 +548,12 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
             .join('')}</div>`
         : ''
     }
-    ${rangeHtml(d, v)}
+    ${asset === 'L' ? rangeHtml(d, v) : ''}
     ${logicHtml(d)}
     ${forwardHtml(d, lev)}
     ${linesTable(d, lev)}
     ${recordTable(d, lev)}
-    <h3 class="pd-sub">振幅、高低點與 80% 區間的回測（${b.from} ～ ${b.to}，${num(b.days)} 天，樣本外；誤差換算成 00631L）</h3>
+    <h3 class="pd-sub">振幅、高低點與 80% 區間的回測（${b.from} ～ ${b.to}，${num(b.days)} 天，樣本外；誤差換算成 ${NAME}）</h3>
     <div class="pd-table-wrap"><table class="pd-table">
       <thead><tr><th>預測時間</th><th class="num">每根收盤誤差<br><small>模型／不會動</small></th><th class="num">80% 區間<br><small>實際涵蓋</small></th><th class="num">每根振幅誤差<br><small>模型／時段平均</small></th><th class="num">今日高低點誤差<br><small>模型／平均幅度</small></th></tr></thead>
       <tbody>${b.byOrigin

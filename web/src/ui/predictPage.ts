@@ -393,7 +393,7 @@ function dayTradeHtml(d: NonNullable<PredictData['dayTrade']>, f?: PredictData['
 let data: PredictData | null | undefined;
 let intra: IntradayData | null | undefined;
 let loading = false;
-const intraState: IntradayState = { mode: '', k: -1, tf: 5, showActual: true, showAnalogs: true, showCandles: false, showBand: false, showLevels: true };
+const intraState: IntradayState = { mode: '', k: -1, tf: 5, asset: 'L', showActual: true, showAnalogs: true, showCandles: false, showBand: false, showLevels: true };
 let analogLib: AnalogDay[] | null = null;
 let paper: PaperData | null = null;
 let paperBt: PaperData | null = null;
@@ -447,6 +447,12 @@ function drawIntra(root: HTMLElement): void {
 }
 
 function bindIntra(root: HTMLElement): void {
+  root.querySelectorAll<HTMLButtonElement>('[data-intra-asset]').forEach((b) =>
+    b.addEventListener('click', () => {
+      intraState.asset = b.dataset.intraAsset as IntradayState['asset'];
+      drawIntra(root);
+    }),
+  );
   root.querySelectorAll<HTMLButtonElement>('[data-intra-tf]').forEach((b) =>
     b.addEventListener('click', () => {
       const tf = Number(b.dataset.intraTf) as 1 | 3 | 5;
