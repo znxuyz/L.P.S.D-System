@@ -17,6 +17,7 @@
  *     （分兩批輪流換的版本只當對照，見 TRANCHES。）
  * - 舊的個股排名（逆勢撿便宜）、00631L 開盤當沖、區間進出場：2022～2026 回測都沒有贏大盤，不放錢（成績在各自的區塊）。
  * - 成本：手續費 0.1425% 不打折（保守；實際券商多有折扣，買賣各一次）、證交稅（個股 0.3%、ETF 0.1%）。
+ *   不足一張的零股成交價比開盤價差 0.5%、手續費每筆最低 20 元（見 ODD）。回測（2022 起）：營收選股部位 +165% → +111%，整個帳戶 +193% → +166%（大盤 +98%）。
  *
  * 輸出 paper.json。
  *
@@ -48,6 +49,34 @@ const REV_N = 20;
 const W = { trend: 0.5, stocks: 0.5, dayTrade: 0 };
 const MA_N = 200;
 const ETF_TAX = 0.001;
+/**
+ * 真實下單的限制：50 萬分 20 檔、每檔只有約 2.5 萬，很多股票一張就買不起，只能買零股。
+ * - 整張的部分用開盤價；不足一張的零股另外下單，價格比開盤價差 PAPER_ODD_SPREAD（預設 0.5%，保守：買貴、賣便宜）。
+ * - 手續費每筆最低 20 元（整股、零股是不同筆）。PAPER_ODD_SPREAD=0 且 MIN_FEE=0 就是舊的理想算法（比較用）。
+ */
+const ODD = Number(process.env.PAPER_ODD_SPREAD ?? 0.005);
+const MIN_FEE = Number(process.env.PAPER_MIN_FEE ?? 20);
+const feeOf = (amt: number) => (amt > 0 ? Math.max(MIN_FEE, amt * FEE) : 0);
+/** 買 shares 股要付的總金額（含手續費）。 */
+const buyCost = (px: number, shares: number) => {
+  const lots = Math.floor(shares / 1000) * 1000;
+  const a = lots * px;
+  const b = (shares - lots) * px * (1 + ODD);
+  return a + b + feeOf(a) + feeOf(b);
+};
+/** 賣 shares 股拿回的金額（扣手續費、證交稅）。 */
+const sellValue = (px: number, shares: number, tax: number) => {
+  const lots = Math.floor(shares / 1000) * 1000;
+  const a = lots * px;
+  const b = (shares - lots) * px * (1 - ODD);
+  return a + b - feeOf(a) - feeOf(b) - (a + b) * tax;
+};
+/** 預算內最多能買幾股。 */
+const maxShares = (px: number, budget: number) => {
+  let n = Math.floor(budget / (px * (1 + FEE)));
+  while (n > 0 && buyCost(px, n) > budget) n -= Math.max(1, Math.ceil((buyCost(px, n) - budget) / (px * (1 + ODD + FEE))));
+  return Math.max(0, n);
+};
 const CASH_RATE = 0.015;
 /** 依波動調整持有比例；VOL_TARGET=0 關掉（比較用）。 */
 const VOL_TARGET = process.env.VOL_TARGET !== '0';
@@ -98,7 +127,7 @@ const equityRows: Array<[string, number, number, number, number, number]> = [];
  * 整段 +166% vs +165% 打平 → 沒通過保留期檢驗，不採用；部署時另外輸出 paper-backtest-2t.json 繼續對照。
  */
 const TRANCHES = Math.max(1, Number(process.env.REV_TRANCHES ?? 1));
-type Pos = { code: string; shares: number; cost: number };
+type Pos = { code: string; shares: number; cost: number; paid: number };
 const tranches: Array<{ cash: number; pos: Pos[]; since: number | null }> = Array.from({ length: TRANCHES }, () => ({ cash: (CAPITAL * W.stocks) / TRANCHES, pos: [], since: null }));
 let rebCount = 0;
 let dtCash = CAPITAL * W.dayTrade;
@@ -167,9 +196,9 @@ if (startIdx > 0) {
         for (const p of t.pos) {
           if (keep.has(p.code)) continue;
           const px = kOf(p.code).get(D)?.[0] ?? [...kOf(p.code).entries()].filter(([d]) => d < D).at(-1)?.[1][3] ?? p.cost;
-          const value = p.shares * px * (1 - FEE - STOCK_TAX);
+          const value = sellValue(px, p.shares, STOCK_TAX);
           t.cash += value;
-          trades.push({ date: D, book: 'stocks', code: p.code, name: names[p.code] ?? '', side: 'sell', price: r2(px), pnl: r2(value - p.shares * p.cost * (1 + FEE)), note: (rs.trendOk ? '掉出營收選股名單，開盤賣' : '大盤在 200 日均線之下，換現金') + tag });
+          trades.push({ date: D, book: 'stocks', code: p.code, name: names[p.code] ?? '', side: 'sell', price: r2(px), pnl: r2(value - p.paid), note: (rs.trendOk ? '掉出營收選股名單，開盤賣' : '大盤在 200 日均線之下，換現金') + tag });
         }
         const kept = t.pos.filter((p) => keep.has(p.code));
         const have = new Set(kept.map((p) => p.code));
@@ -179,11 +208,12 @@ if (startIdx > 0) {
           const each = t.cash / fresh.length;
           for (const code of fresh) {
             const px = kOf(code).get(D)![0];
-            const shares = Math.floor(each / (px * (1 + FEE)));
+            const shares = maxShares(px, each);
             if (!shares) continue;
-            t.cash -= shares * px * (1 + FEE);
+            const paid = buyCost(px, shares);
+            t.cash -= paid;
             trades.push({ date: D, book: 'stocks', code, name: names[code] ?? '', side: 'buy', price: r2(px), pnl: null, note: '新進營收選股名單，開盤買' + tag });
-            pos.push({ code, shares, cost: px });
+            pos.push({ code, shares, cost: px, paid });
           }
         }
         t.pos = pos;
@@ -200,11 +230,11 @@ if (startIdx > 0) {
       const cur = val > 0 ? (trShares * L[0]) / val : 0;
       const full = want === 0 || cur === 0;
       if ((full && want !== cur && (want === 0 ? trShares > 0 : want >= 0.2)) || (!full && Math.abs(want - cur) > 0.2)) {
-        const target = Math.floor((want * val) / (L[0] * (1 + FEE)));
+        const target = maxShares(L[0], want * val);
         const diff = target - trShares;
         const why = want === 0 ? '加權指數昨天跌破 200 日均線，換現金' : cur === 0 ? `加權指數在 200 日均線之上，買進（持有 ${Math.round(want * 100)}%）` : `波動變化，持有比例 ${Math.round(cur * 100)}% → ${Math.round(want * 100)}%`;
         if (diff > 0) {
-          const cost = diff * L[0] * (1 + FEE);
+          const cost = buyCost(L[0], diff);
           trCash -= cost;
           trCost += cost;
           trShares += diff;
@@ -212,7 +242,7 @@ if (startIdx > 0) {
           trades.push({ date: D, book: 'trend', code: '00631L', name: '元大台灣50正2', side: 'buy', price: r2(L[0]), pnl: null, note: why });
         } else if (diff < 0) {
           const sell = -diff;
-          const value = sell * L[0] * (1 - FEE - ETF_TAX);
+          const value = sellValue(L[0], sell, ETF_TAX);
           const basis = (trCost * sell) / trShares;
           trCash += value;
           trCost -= basis;
@@ -280,7 +310,7 @@ const out = {
   curve: equityRows,
   positions: [...tranches.flatMap((t) => t.pos).reduce((m, p) => {
     const o = m.get(p.code);
-    if (o) (o.cost = (o.cost * o.shares + p.cost * p.shares) / (o.shares + p.shares)), (o.shares += p.shares);
+    if (o) (o.cost = (o.cost * o.shares + p.cost * p.shares) / (o.shares + p.shares)), (o.shares += p.shares), (o.paid += p.paid);
     else m.set(p.code, { ...p });
     return m;
   }, new Map<string, Pos>()).values()].map((p) => {
