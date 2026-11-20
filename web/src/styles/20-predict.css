@@ -198,6 +198,8 @@
 .pd-k.down { stroke: var(--down, #4ade80); fill: var(--down, #4ade80); }
 .pd-mid { stroke: var(--accent); stroke-width: 2; }
 .pd-axis { fill: var(--muted); font-size: 11px; }
+.pd-axis.is-future { font-style: italic; }
+.pd-grid { stroke: var(--muted); stroke-opacity: 0.3; stroke-width: 1; }
 .pd-sw { display: inline-block; width: 16px; height: 10px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
 .pd-sw.band { background: color-mix(in srgb, var(--accent) 30%, transparent); }
 .pd-sw.mid { height: 3px; background: var(--accent); }
@@ -215,3 +217,4 @@
 .pd-steps li.is-done { opacity: 0.85; }
 
 .pd-intra-pick { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+@media (max-width: 600px) { .pd-chart .pd-axis { font-size: 18px; } }

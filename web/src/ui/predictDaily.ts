@@ -1,5 +1,5 @@
 /**
- * 盤中預測區塊的「日 K」：00631L、加權指數、台指期（日盤）未來約一個月的預測。
+ * 盤中預測區塊的「日 K」：00631L、加權指數、台指期（日盤）未來約三個月的預測。
  * 跟個股預測一樣：中線＝不會動（指數、期貨沒有營收選股分數，方向沒有可靠的預測）、80% 區間用自己的歷史校準、
  * 相似走勢預測線（自己的歷史裡最像的 5 段）附回測準確度。
  */
@@ -7,7 +7,7 @@ import type { Candle } from '../domain/technicals';
 import { analogBacktest, analogForecast, bandCalib, dailyVol } from '../domain/stockForecast';
 import { adjustSplits, loadOfficialCandles } from '../data/candles';
 import { escapeHtml as esc, num } from './format';
-import { chartSvg } from './predictStock';
+import { chartSvg, FH } from './predictStock';
 
 export type DailyAsset = 'L' | 'ix' | 'tx';
 const NAME: Record<DailyAsset, string> = { L: '00631L', ix: '加權指數', tx: '台指期（近月日盤）' };
@@ -39,11 +39,11 @@ export async function fillDaily(el: HTMLElement, asset: DailyAsset, txd?: Array<
     return;
   }
   const closes = candles.map((c) => c.close);
-  const H = 21;
+  const H = FH;
   const sigma = dailyVol(closes);
   const cal = bandCalib(closes, candles.map((c) => c.date), H);
-  const an = analogForecast(closes);
-  const bt = analogBacktest(closes);
+  const an = analogForecast(closes, closes.length - 1, 20, H);
+  const bt = analogBacktest(closes, H);
   const last = candles[candles.length - 1];
   const p10 = cal?.p10 ?? -1.28;
   const p90 = cal?.p90 ?? 1.28;
@@ -53,16 +53,19 @@ export async function fillDaily(el: HTMLElement, asset: DailyAsset, txd?: Array<
   });
   const end = path[H - 1];
   const anEnd = an ? last.close * Math.exp(an.avg[H - 1]) : null;
+  const an1 = an ? last.close * Math.exp(an.avg[20]) : null;
+  const m1 = path[20];
   const d = (x: number) => num(x, x < 100 ? 2 : 0);
   el.innerHTML = `
     <dl class="pd-stats">
       <div><dt>${NAME[asset]} 收盤（${esc(last.date.slice(5))}）</dt><dd class="num">${d(last.close)}</dd></div>
-      <div><dt>約一個月後 80% 區間</dt><dd class="num">${d(end.lo)}～${d(end.hi)}</dd></div>
-      <div><dt>相似走勢預測線（一個月後）</dt><dd class="num">${anEnd == null ? '—' : `${d(anEnd)} <small>${pctTxt(anEnd / last.close - 1)}</small>`}</dd></div>
-      <div><dt>這條線過去的準確度</dt><dd class="num">${bt ? `方向 ${num(bt.hit * 100, 0)}% <small class="muted">／誤差 ${num(bt.rmse * 100, 1)}% vs 不會動 ${num(bt.rmseFlat * 100, 1)}%</small>` : '—'}</dd></div>
+      <div><dt>80% 區間（一個月後）</dt><dd class="num">${d(m1.lo)}～${d(m1.hi)}</dd></div>
+      <div><dt>80% 區間（三個月後）</dt><dd class="num">${d(end.lo)}～${d(end.hi)}</dd></div>
+      <div><dt>相似走勢預測線（一個月／三個月後）</dt><dd class="num">${anEnd == null || an1 == null ? '—' : `${d(an1)} <small>${pctTxt(an1 / last.close - 1)}</small>／${d(anEnd)} <small>${pctTxt(anEnd / last.close - 1)}</small>`}</dd></div>
+      <div><dt>這條線過去的準確度（三個月後）</dt><dd class="num">${bt ? `方向 ${num(bt.hit * 100, 0)}% <small class="muted">／誤差 ${num(bt.rmse * 100, 1)}% vs 不會動 ${num(bt.rmseFlat * 100, 1)}%</small>` : '—'}</dd></div>
     </dl>
-    ${chartSvg(candles.slice(-80), path, an, 0, '中線（不會動）')}
-    <p class="pd-note">怎麼算的：<b>中線</b>＝不會動（今天的收盤）：${NAME[asset]}一個月後漲或跌沒有可靠的預測（大盤展望的模型回測也沒有贏過「一直猜漲」），所以不假裝。<b>80% 區間</b>＝近 60 日波動 ${num(sigma * 100, 2)}%／天 × √天數，再用${NAME[asset]}自己過去每一天「之後一個月實際漲跌」的 10%／90% 分位數校準${cal?.coverage.length ? `，各年實際落在區間內：${cal.coverage.map((x) => `${esc(x.year)} ${num(x.inside * 100, 0)}%`).join('、')}` : ''}。<b>相似走勢預測線</b>＝自己的歷史裡最近 20 天走勢最像的 5 段，之後一個月的真實走勢依波動比例接在今天後面（粗線平均、細線最像的 3 段）；準確度是同樣方法、只用當時以前的資料回測過去約兩年的成績。</p>
+    ${chartSvg(candles.slice(-H), path, an, 0, '中線（不會動）')}
+    <p class="pd-note">怎麼算的：<b>中線</b>＝不會動（今天的收盤）：${NAME[asset]}幾個月後漲或跌沒有可靠的預測（大盤展望的模型回測也沒有贏過「一直猜漲」），所以不假裝。<b>80% 區間</b>＝近 60 日波動 ${num(sigma * 100, 2)}%／天 × √天數，再用${NAME[asset]}自己過去每一天「之後三個月實際漲跌」的 10%／90% 分位數校準${cal?.coverage.length ? `，各年實際落在區間內：${cal.coverage.map((x) => `${esc(x.year)} ${num(x.inside * 100, 0)}%`).join('、')}` : ''}。<b>相似走勢預測線</b>＝自己的歷史裡最近 20 天走勢最像的 5 段，之後三個月的真實走勢依波動比例接在今天後面（粗線平均、細線最像的 3 段）；準確度是同樣方法、只用當時以前的資料回測過去約兩年的成績。</p>
     ${asset === 'tx' ? '<p class="muted pd-small">台指期用近月一般時段（日盤）的日 K，換月時價格會跳一下（新舊合約價差），波動與區間會稍微高估。</p>' : ''}
     ${asset === 'L' ? '<p class="muted pd-small">00631L 是 2 倍槓桿，區間大約是加權指數的兩倍；真正要不要持有，看上面模擬帳戶的趨勢規則（200 日均線＋依波動調整）。</p>' : ''}`;
 }
