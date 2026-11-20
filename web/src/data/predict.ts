@@ -225,7 +225,7 @@ export interface PaperData {
   curve: Array<[string, number, number, number, number, number]>;
   positions: Array<{ code: string; name: string; shares: number; cost: number; price: number | null; ret: number | null }>;
   heldSince: string | null;
-  trend?: { holding: boolean; since: string | null; nextHold: boolean; close: number; ma: number; dist: number; asOf: string };
+  trend?: { holding: boolean; since: string | null; nextHold: boolean; nextWeight?: number; vol20?: number; volMed?: number; close: number; ma: number; dist: number; asOf: string };
   trades: Array<{ date: string; book: 'stocks' | 'dayTrade' | 'trend' | 'range'; code: string; name: string; side: string; price: number | null; pnl: number | null; note: string }>;
   tradeCount: number;
 }
@@ -237,4 +237,4 @@ const getPaper = keyedRefresh<PaperData | null>(
   (j) => j != null,
 );
 export const loadPaper = (): Promise<PaperData | null> => getPaper('paper.json');
-export const loadPaperBacktest = (): Promise<PaperData | null> => getPaper('paper-backtest.json');
+export const loadPaperBacktest = (file = 'paper-backtest.json'): Promise<PaperData | null> => getPaper(file);

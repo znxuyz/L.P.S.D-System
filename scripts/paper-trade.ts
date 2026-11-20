@@ -7,6 +7,10 @@
  * - 每次從第一份存檔重新計算（不存狀態），模型之後怎麼改都不會改到過去的成績。
  * - 本金 100 萬，分兩個部位：
  *   趨勢 50%：前一天加權指數收盤在 200 日均線之上 → 持有 00631L，跌破 → 全部換現金（隔天開盤換）。
+ *     持有比例依波動調整（公開研究的標準做法）：比例＝長期一般波動 ÷ 近 20 日波動（最多 100%），
+ *     長期一般波動＝到前一天為止所有近 20 日波動的中位數（不偷看未來）；比例變動超過 20% 才調整，避免一直換手。
+ *     回測 2020-11 起：最大回落 −41% → −32%（跟大盤一樣），總報酬 +728% → +523%（大盤 +206%），每一年都贏大盤。
+ *   現金（趨勢不持有、營收選股持有現金時）以年息 1.5% 計（定存或貨幣基金）。
  *     這是公開文獻的經典規則（槓桿 ETF＋200 日均線），不是用我們的資料調出來的；2020～2026 每一年都贏加權指數。
  *   營收選股 50%：每月 12 日後第一個交易日開盤，換成存檔裡「營收成長加速＋營收創新高＋毛利率改善＋法人買超」綜合分數最高的 20 檔
  *     （留在名單裡的不動，掉出名單的賣、新進的買）；換股前一天加權指數在 200 日均線之下就全部持有現金。
@@ -43,6 +47,9 @@ const REV_N = 20;
 const W = { trend: 0.5, stocks: 0.5, dayTrade: 0 };
 const MA_N = 200;
 const ETF_TAX = 0.001;
+const CASH_RATE = 0.015;
+/** 依波動調整持有比例；VOL_TARGET=0 關掉（比較用）。 */
+const VOL_TARGET = process.env.VOL_TARGET !== '0';
 
 // ---------------------------------------------------------------- 資料
 const taiex = read<Array<[string, number, number, number, number]>>(join(dir, 'index', 'TAIEX.json'), []);
@@ -96,6 +103,32 @@ const aboveMa = (i: number) => {
   for (let j = i - MA_N + 1; j <= i; j++) sm += taiex[j][4];
   return taiex[i][4] > sm / MA_N;
 };
+// 加權指數近 20 日波動（年化）與「到前一天為止」的中位數
+const ixLr = taiex.map((r, i) => (i ? Math.log(r[4] / taiex[i - 1][4]) : 0));
+const vol20 = taiex.map((_, i) => {
+  if (i < 20) return NaN;
+  let s = 0;
+  let s2 = 0;
+  for (let j = i - 19; j <= i; j++) (s += ixLr[j]), (s2 += ixLr[j] ** 2);
+  return Math.sqrt(Math.max(0, s2 / 20 - (s / 20) ** 2) * 252);
+});
+const volMed: number[] = [];
+{
+  const sorted: number[] = [];
+  for (let i = 0; i < taiex.length; i++) {
+    volMed.push(sorted.length ? sorted[Math.floor(sorted.length / 2)] : NaN);
+    if (Number.isFinite(vol20[i])) sorted.splice(sorted.findIndex((x) => x > vol20[i]) < 0 ? sorted.length : sorted.findIndex((x) => x > vol20[i]), 0, vol20[i]);
+  }
+  // 最後一天之後（下一個交易日）用的中位數
+  volMed.push(sorted.length ? sorted[Math.floor(sorted.length / 2)] : NaN);
+}
+/** 第 i 天收盤後算出的「下一個交易日」00631L 持有比例（0～1）。 */
+const trendWeight = (i: number) => {
+  if (!aboveMa(i)) return 0;
+  if (!VOL_TARGET) return 1;
+  const w = volMed[i + 1] / vol20[i];
+  return Number.isFinite(w) ? Math.max(0, Math.min(1, w)) : 1;
+};
 const maOf = (i: number) => (i < MA_N - 1 ? NaN : taiex.slice(i - MA_N + 1, i + 1).reduce((t, r) => t + r[4], 0) / MA_N);
 let held: { buyIdx: number; pos: Array<{ code: string; shares: number; cost: number }> } | null = null;
 
@@ -107,6 +140,9 @@ if (startIdx > 0) {
   for (let i = startIdx; i < cal.length && cal[i] <= TO; i++) {
     const D = cal[i];
     const prev = cal[i - 1];
+    // 現金的利息（每個交易日）
+    stockCash *= 1 + CASH_RATE / 252;
+    trCash *= 1 + CASH_RATE / 252;
     const dArch = daily.get(prev);
 
     // ---- 營收選股：換股日開盤，照前一天收盤後存檔的名單換股（大盤跌破 200 日均線 → 全部現金）
@@ -141,21 +177,33 @@ if (startIdx > 0) {
 
     const L = kOf('00631L').get(D);
 
-    // ---- 趨勢：昨天收盤在 200 日均線之上就持有 00631L，否則現金；今天開盤換
+    // ---- 趨勢：昨天收盤在 200 日均線之上就持有 00631L（比例依波動調整），否則現金；今天開盤換
     if (L) {
-      const want = aboveMa(i - 1);
-      if (want && !trShares) {
-        trShares = Math.floor(trCash / (L[0] * (1 + FEE)));
-        trCost = trShares * L[0] * (1 + FEE);
-        trCash -= trCost;
-        trSince = D;
-        trades.push({ date: D, book: 'trend', code: '00631L', name: '元大台灣50正2', side: 'buy', price: r2(L[0]), pnl: null, note: '加權指數昨天收在 200 日均線之上，開盤買進' });
-      } else if (!want && trShares) {
-        const value = trShares * L[0] * (1 - FEE - ETF_TAX);
-        trCash += value;
-        trades.push({ date: D, book: 'trend', code: '00631L', name: '元大台灣50正2', side: 'sell', price: r2(L[0]), pnl: r2(value - trCost), note: '加權指數昨天跌破 200 日均線，開盤賣出換現金' });
-        trShares = 0;
-        trSince = null;
+      const want = trendWeight(i - 1);
+      const val = trCash + trShares * L[0];
+      const cur = val > 0 ? (trShares * L[0]) / val : 0;
+      const full = want === 0 || cur === 0;
+      if ((full && want !== cur && (want === 0 ? trShares > 0 : want >= 0.2)) || (!full && Math.abs(want - cur) > 0.2)) {
+        const target = Math.floor((want * val) / (L[0] * (1 + FEE)));
+        const diff = target - trShares;
+        const why = want === 0 ? '加權指數昨天跌破 200 日均線，換現金' : cur === 0 ? `加權指數在 200 日均線之上，買進（持有 ${Math.round(want * 100)}%）` : `波動變化，持有比例 ${Math.round(cur * 100)}% → ${Math.round(want * 100)}%`;
+        if (diff > 0) {
+          const cost = diff * L[0] * (1 + FEE);
+          trCash -= cost;
+          trCost += cost;
+          trShares += diff;
+          trSince ??= D;
+          trades.push({ date: D, book: 'trend', code: '00631L', name: '元大台灣50正2', side: 'buy', price: r2(L[0]), pnl: null, note: why });
+        } else if (diff < 0) {
+          const sell = -diff;
+          const value = sell * L[0] * (1 - FEE - ETF_TAX);
+          const basis = (trCost * sell) / trShares;
+          trCash += value;
+          trCost -= basis;
+          trShares -= sell;
+          if (!trShares) (trSince = null), (trCost = 0);
+          trades.push({ date: D, book: 'trend', code: '00631L', name: '元大台灣50正2', side: 'sell', price: r2(L[0]), pnl: r2(value - basis), note: why });
+        }
       }
     }
 
@@ -209,7 +257,7 @@ const out = {
   // 趨勢部位：目前持有什麼、下一個交易日該持有什麼（看最新收盤與 200 日均線）
   trend: (() => {
     const li = cal.length - 1;
-    return { holding: trShares > 0, since: trSince, nextHold: aboveMa(li), close: r2(taiex[li][4]), ma: r2(maOf(li)), dist: r5(taiex[li][4] / maOf(li) - 1), asOf: cal[li] };
+    return { holding: trShares > 0, since: trSince, nextHold: aboveMa(li), nextWeight: r5(trendWeight(li)), vol20: r5(vol20[li]), volMed: r5(volMed[li + 1] ?? volMed[li]), close: r2(taiex[li][4]), ma: r2(maOf(li)), dist: r5(taiex[li][4] / maOf(li) - 1), asOf: cal[li] };
   })(),
   monthly,
   curve: equityRows,
