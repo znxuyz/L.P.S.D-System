@@ -54,6 +54,8 @@ jobs:
         timeout-minutes: 60
         env:
           FUGLE_API_KEY: ${{ secrets.FUGLE_API_KEY }}
+          PRIVATE_DATA_TOKEN: ${{ secrets.PRIVATE_DATA_TOKEN }}
+          PRIVATE_DATA_REPO: ${{ vars.PRIVATE_DATA_REPO || format('{0}/lpsd-private-data', github.repository_owner) }}
           CANDLE_MAX_DATES: '1000'
           INST_MAX: '1000'
           RATIO_MAX: '1000'
@@ -90,8 +92,22 @@ jobs:
           ( HISTORY_PARTS=tdcc node scripts/history.ts .data ) > tdcc.log 2>&1 &
           # 美股（費城半導體、那斯達克、S&P 500、台積電 ADR、VIX）
           ( node scripts/us-market.ts .data ) > us.log 2>&1 &
-          # 個股 1 分 K（富果，金鑰在 GitHub Secret FUGLE_API_KEY；沒有設就略過）
-          ( node scripts/stock-intraday.ts .data ) > fugle.log 2>&1 &
+          # 個股 1 分 K（富果，金鑰在 GitHub Secret FUGLE_API_KEY）：富果資料不能公開，只存進私人儲存庫
+          # （PRIVATE_DATA_TOKEN 有設才做；儲存庫名稱預設 <擁有者>/lpsd-private-data，可用 repository variable PRIVATE_DATA_REPO 改）
+          (
+            if [ -n "$PRIVATE_DATA_TOKEN" ] && [ -n "$FUGLE_API_KEY" ]; then
+              PRIV="https://x-access-token:${PRIVATE_DATA_TOKEN}@github.com/${PRIVATE_DATA_REPO}.git"
+              if git clone -q --depth 1 "$PRIV" .private 2>/dev/null; then :; else
+                git init -q -b main .private && git -C .private remote add origin "$PRIV"
+              fi
+              STOCK1M_OUT=.private node scripts/stock-intraday.ts .data
+              ( cd .private && git add -A && if ! git diff --cached --quiet; then
+                  git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "stock1m $(date -u +'%F %H:%M')" && git push -q origin HEAD:main && echo "已推送到私人儲存庫"
+                fi )
+            else
+              echo "個股 1 分 K：沒有 PRIVATE_DATA_TOKEN 或 FUGLE_API_KEY，略過（富果資料只存私人儲存庫）"
+            fi
+          ) > fugle.log 2>&1 &
           # 期交所：外資台指期淨未平倉（每月一次請求）
           # 臺指期近月日 K（一般時段＋夜盤）也在這一組（同一個網站，依序請求）
           ( PART=futures node scripts/market-risk.ts .data; node scripts/taifex-daily.ts .data ) > taifex.log 2>&1 &

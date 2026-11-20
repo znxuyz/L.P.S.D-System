@@ -1,8 +1,9 @@
 /**
  * 個股 1 分 K（富果行情 API，GitHub Actions 執行；金鑰放在 GitHub Secret FUGLE_API_KEY，不進程式碼、不進資料）：
  *
- *   FUGLE_API_KEY=… node scripts/stock-intraday.ts <資料資料夾>
+ *   FUGLE_API_KEY=… STOCK1M_OUT=<私人儲存庫資料夾> node scripts/stock-intraday.ts <資料資料夾>
  *
+ * 富果的資料不能公開轉載：只存進「私人儲存庫」（STOCK1M_OUT），絕不存進公開的 data 分支；沒有設 STOCK1M_OUT 就不收。
  * - 對象：00631L、0050、近 20 日成交額最大的 STOCK1M_TOP 檔、營收選股目前的名單（約 70 檔）。
  * - 過去的日子：先試富果「歷史 K 線」的 1 分 K（timeframe=1）往回補；富果不給的話就只收當天。
  * - 當天：收盤後（台北 13:35 以後）用「盤中 K 線」收當天的 1 分 K。
@@ -30,6 +31,11 @@ const read = <T>(p: string, fb: T): T => {
   }
 };
 
+const OUT = process.env.STOCK1M_OUT ?? '';
+if (!OUT) {
+  console.log('個股 1 分 K：沒有私人儲存庫（STOCK1M_OUT），富果資料不能存在公開的 data 分支，略過');
+  process.exit(0);
+}
 if (!KEY) {
   console.log('個股 1 分 K：沒有 FUGLE_API_KEY（請在 GitHub 儲存庫 Settings → Secrets → Actions 新增），略過');
   process.exit(0);
@@ -48,7 +54,7 @@ const codes = [...new Set(['00631L', '0050', ...turn.sort((a, b) => b[1] - a[1])
 
 // ---------------------------------------------------------------- 存檔格式
 type Day = Record<string, [number, number[], number[], number[], number[], number[]]>;
-const out = join(dir, 'stock1m');
+const out = join(OUT, 'stock1m');
 mkdirSync(out, { recursive: true });
 const fileOf = (d: string) => join(out, `${d}.json`);
 const loadDay = (d: string): Day => read<Day>(fileOf(d), {});
