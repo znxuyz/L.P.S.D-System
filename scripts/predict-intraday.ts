@@ -802,6 +802,8 @@ writeFileSync(
     generatedAt: new Date().toISOString(),
     ready: true,
     tf: TF,
+    // 臺指期近月一般時段日 K（給「日 K」預測用；只在 5 分 K 的輸出放）
+    txd: TF === 5 ? [...txData.entries()].filter(([, v]) => v.d).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, v]) => [date, v.d![0], v.d![1], v.d![2], v.d![3]]) : undefined,
     beta: r5(beta),
     model: { mean: final.m.mean.map(r5), sd: final.m.sd.map(r5), coef: final.m.coef.map((b) => b.map(r5)), resid: final.m.resid, disc: final.m.disc, discT: final.m.discT },
     day: { base: final.dm.base.map(r5), rng: lin(final.dm.rng), up: lin(final.dm.up), down: lin(final.dm.down), gap: lin(final.dm.gap), gapSd: r5(final.dm.gapSd) },

@@ -446,6 +446,8 @@ export interface IntradayState {
   tf: 1 | 3 | 5;
   /** 看哪個標的。 */
   asset?: IntraAsset;
+  /** 看日 K（未來一個月）而不是盤中。 */
+  daily?: boolean;
   showActual: boolean;
   /** 相似日走勢線、預測 K 棒、80% 區間要不要畫。 */
   showAnalogs: boolean;
@@ -456,11 +458,15 @@ export interface IntradayState {
 }
 
 export function intradayHtml(d: IntradayData | null | undefined, st: IntradayState, live: { open: number | null; bars: Bar[]; ok: boolean; why: string }, lib: AnalogDay[] | null): string {
-  const tfBtns = `<div class="pd-tf pd-intra-tf" role="group" aria-label="K 線週期">${([5, 3, 1] as const).map((t) => `<button type="button" data-intra-tf="${t}" class="${st.tf === t ? 'is-on' : ''}">${t} 分 K</button>`).join('')}</div>`;
+  const tfBtns = `<div class="pd-tf pd-intra-tf" role="group" aria-label="K 線週期">${([5, 3, 1] as const).map((t) => `<button type="button" data-intra-tf="${t}" class="${!st.daily && st.tf === t ? 'is-on' : ''}">${t} 分 K</button>`).join('')}<button type="button" data-intra-daily="1" class="${st.daily ? 'is-on' : ''}">日 K</button></div>`;
   const asset: IntraAsset = st.asset ?? 'L';
   const NAME = ASSET_NAME[asset];
   const assetBtns = `<div class="pd-tf pd-intra-asset" role="group" aria-label="標的">${(['L', 'ix', 'tx'] as const).map((a) => `<button type="button" data-intra-asset="${a}" class="${asset === a ? 'is-on' : ''}">${ASSET_NAME[a]}</button>`).join('')}</div>`;
-  const head = (badge: string) => `<header class="pd-head"><div><p class="eyebrow">Intraday · ${STEP} 分 K</p><h2>${NAME} 整天 ${STEP} 分 K 預測線</h2></div>${badge}</header><div class="pd-intra-pick">${assetBtns}${tfBtns}</div>`;
+  const head = (badge: string) =>
+    st.daily
+      ? `<header class="pd-head"><div><p class="eyebrow">Daily · 日 K</p><h2>${NAME} 日 K：未來約一個月</h2></div>${badge}</header><div class="pd-intra-pick">${assetBtns}${tfBtns}</div>`
+      : `<header class="pd-head"><div><p class="eyebrow">Intraday · ${STEP} 分 K</p><h2>${NAME} 整天 ${STEP} 分 K 預測線</h2></div>${badge}</header><div class="pd-intra-pick">${assetBtns}${tfBtns}</div>`;
+  if (st.daily) return `<section class="pd-card glass" id="pd-intra">${head('')}<div id="pd-intra-daily"><p class="muted">載入日 K⋯⋯</p></div></section>`;
   if (d === undefined) return `<section class="pd-card glass" id="pd-intra">${head('')}<p class="muted">載入中⋯⋯</p></section>`;
   if (!d || !d.ready || !d.day)
     return `<section class="pd-card glass" id="pd-intra">${head('')}<p class="muted">正在收集加權指數 ${STEP} 分 K 的歷史資料（目前 ${d?.days ?? 0} 天，至少要 60 天才會開始訓練；每小時往回補一批）。</p></section>`;
