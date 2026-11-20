@@ -100,7 +100,10 @@ for (let p = 0; p + 1 < rb.length; p++) {
   };
   const uniRet = (uni as Stock[]).map(ret).filter(Number.isFinite);
   bench.push([cal[i], taiex[j - 1][4] / taiex[i - 1][4] - 1, uniRet.reduce((a, b) => a + b, 0) / uniRet.length]);
-  const all: Record<string, number[]> = { ...vals, combo };
+  // 根本原因檢查：被標記的股票排除（分數設成 NaN），由下一名遞補
+  const fl = (uni as Stock[]).map((st) => sig.flags(st, cal[i]));
+  const without = (key: 'oneOff' | 'lowBase' | 'loss' | 'any') => combo.map((v, k) => ((key === 'any' ? fl[k].oneOff || fl[k].lowBase || fl[k].loss : fl[k][key]) ? NaN : v));
+  const all: Record<string, number[]> = { ...vals, combo, comboNoOneOff: without('oneOff'), comboNoLowBase: without('lowBase'), comboNoLoss: without('loss'), comboClean: without('any') };
   for (const [id, v] of Object.entries(all)) {
     const ok = (uni as Stock[]).map((s, k) => [s, v[k]] as const).filter(([s, x]) => Number.isFinite(x) && s.open[i] > 0);
     if (ok.length < N * 3) continue;
@@ -111,7 +114,8 @@ for (let p = 0; p + 1 < rb.length; p++) {
     const turnover = picks.filter((s) => !prev.has(s.code)).length / picks.length;
     const r = cashMonth ? (prev.size ? -COST / 2 : 0) : rs.reduce((a, b) => a + b, 0) / rs.length - turnover * COST;
     prevPicks[id] = cashMonth ? new Set() : new Set(picks.map((s) => s.code));
-    const res = (results[id] ??= { name: id === 'combo' ? `綜合（${COMBO.join('＋')} 排名平均）` : SIGNAL_NAMES[id as SignalId], periods: [] });
+    const NAMES: Record<string, string> = { combo: `綜合（${COMBO.join('＋')} 排名平均）`, comboNoOneOff: '綜合－排除一次性營收', comboNoLowBase: '綜合－排除低基期', comboNoLoss: '綜合－排除本業虧損', comboClean: '綜合－三項都排除' };
+    const res = (results[id] ??= { name: NAMES[id] ?? SIGNAL_NAMES[id as SignalId], periods: [] });
     res.periods.push([cal[i], r, bench.length - 1]);
   }
 }

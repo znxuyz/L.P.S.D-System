@@ -887,12 +887,42 @@ const nextWeekday = (d: string) => {
   return x.toISOString().slice(0, 10);
 };
 /** 第 i 天（交易日，可以是 T＝下一個交易日）開盤要買的 REV_N 檔與各訊號。 */
+const CAND_N = 30;
+type Flags = { oneOff: boolean; lowBase: boolean; loss: boolean };
+/**
+ * 第 i 天開盤要買的 REV_N 檔：綜合分數由高到低，但「營收是一次性的」（近 3 個月單月佔 60% 以上）不買、由下一名遞補
+ * （回測 10／20／30／50 檔都比不排除好或持平）。cands＝前 CAND_N 名候選（含沒買的，決策紀錄用）。
+ */
 function revPicks(i: number, date: string) {
   const { uni, vals, combo } = sigs.scoreAll(stocks, i, date);
   const ord = uni.map((s, k) => [s, k] as const).filter(([, k]) => Number.isFinite(combo[k])).sort((a, b) => combo[b[1]] - combo[a[1]]);
   // 分數換成 0～100 的百分位（100＝最看好）
   const pctOf = new Map(ord.map(([st], r) => [st.code, ord.length > 1 ? 1 - r / (ord.length - 1) : 0.5]));
-  return { uni: uni.length, pctOf, picks: ord.slice(0, REV_N).map(([st, k]) => ({ code: st.code, k, score: combo[k], vals: Object.fromEntries(COMBO.concat(['revYoy3']).map((id) => [id, vals[id][k]])) })) };
+  type Row = { code: string; k: number; score: number; vals: Record<string, number>; flags: Flags; rank: number };
+  const picks: Row[] = [];
+  const cands: Row[] = [];
+  for (const [r, [st, k]] of ord.entries()) {
+    if (picks.length >= REV_N && cands.length >= CAND_N) break;
+    const row: Row = { code: st.code, k, score: combo[k], vals: Object.fromEntries(COMBO.concat(['revYoy3']).map((id) => [id, vals[id][k]])), flags: sigs.flags(st, date), rank: r + 1 };
+    if (picks.length < REV_N && !row.flags.oneOff) picks.push(row);
+    if (cands.length < CAND_N) cands.push(row);
+  }
+  return { uni: uni.length, pctOf, picks, cands };
+}
+/** 每一檔候選的決定與原因（每天存進事前存檔，之後追蹤結果）。 */
+function decide(rp: ReturnType<typeof revPicks>, trendOk: boolean, rebalance: boolean) {
+  const inPick = new Set(rp.picks.map((x) => x.code));
+  return rp.cands.map((c) => {
+    let action: 'buy' | 'watch' | 'skip';
+    let reason: string;
+    if (c.flags.oneOff) (action = 'skip'), (reason = '營收是一次性的（近 3 個月單月佔 60% 以上），不會延續');
+    else if (!inPick.has(c.code)) (action = 'skip'), (reason = '排在 20 名之後（候補）');
+    else if (!trendOk) (action = 'skip'), (reason = '加權指數在 200 日均線之下，全部持有現金');
+    else if (rebalance) (action = 'buy'), (reason = '換股日：分數前 20、營收不是一次性的');
+    else (action = 'watch'), (reason = '分數前 20；下一個換股日才買');
+    const notes = [c.flags.lowBase ? '只是回到兩年前水準（低基期）' : '', c.flags.loss ? '最新一季本業虧損' : ''].filter(Boolean);
+    return { code: c.code, rank: c.rank, action, reason, notes };
+  });
 }
 /** 第 i 天（不含）以前 60 個交易日的日報酬標準差（對數）。 */
 function vol60(st: Stock, i: number): number {
@@ -911,6 +941,7 @@ const revOut = (() => {
   // - 分數分 10 組，每組之後一個月的平均報酬、比全部平均多多少、贏全部平均的比例
   // - 之後一個月的實際漲跌 ÷（近 60 日波動 × √天數）的分佈 → 預測區間要多寬才準
   const dec = Array.from({ length: 10 }, () => ({ n: 0, sum: 0, ex: 0, beat: 0 }));
+  const dstat: Record<string, { n: number; sum: number; win: number }> = {};
   const zs: Array<[string, number]> = [];
   for (let p = 0; p + 1 < rbs.length; p++) {
     const i = rbs[p];
@@ -918,6 +949,21 @@ const revOut = (() => {
     const mk = ixClose[j - 1] / ixClose[i - 1] - 1;
     {
       const rp = revPicks(i, cal[i]);
+      // 歷史決策紀錄：每一次換股日，前 30 名候選各自的決定與之後一個月的實際報酬
+      const ret1 = (code: string) => {
+        const st = stocks[sIdx.get(code)!];
+        return st.open[i] > 0 ? (st.open[j] > 0 ? st.open[j] : st.close[j - 1]) / st.open[i] - 1 : NaN;
+      };
+      const inPick = new Set(rp.picks.map((x) => x.code));
+      for (const c of rp.cands) {
+        const r = ret1(c.code);
+        if (!Number.isFinite(r)) continue;
+        const key = c.flags.oneOff ? 'oneOff' : inPick.has(c.code) ? (c.flags.lowBase ? 'buyLowBase' : c.flags.loss ? 'buyLoss' : 'buyClean') : 'rank';
+        const g = (dstat[key] ??= { n: 0, sum: 0, win: 0 });
+        g.n++;
+        g.sum += r;
+        if (r > mk) g.win++;
+      }
       const rows: Array<[number, number]> = [];
       for (const [code, pc] of rp.pctOf) {
         const st = stocks[sIdx.get(code)!];
@@ -993,6 +1039,9 @@ const revOut = (() => {
     // 全部股票的分數（0～100）與近 60 日波動：給「個股預測」用
     all: Object.fromEntries([...now.pctOf].map(([c, pc]) => [c, Math.round(pc * 100)])),
     calib: { deciles, zq, coverage, horizon: 21 },
+    // 歷史上各種決定之後一個月的平均報酬、贏加權指數的比例（看「不買」的判斷對不對）
+    decisionStats: Object.fromEntries(Object.entries(dstat).map(([k, g]) => [k, { n: g.n, avg: r4(g.sum / g.n), win: r4(g.win / g.n) }])),
+    decisions: decide(now, aboveMa200(T - 1), isRebalanceDate(nd, cal[T - 1])).map((x) => ({ ...x, name: names[x.code] ?? '' })),
     top: now.picks.map((x) => ({ code: x.code, name: names[x.code] ?? '', close: r4(stocks[sIdx.get(x.code)!].close[T - 1]), score: Math.round(x.score * 100), vals: Object.fromEntries(Object.entries(x.vals).map(([k, v]) => [k, r4(v)])) })),
     backtest: { from: periods[0]?.[0] ?? null, to: cal[rbs.at(-1) ?? T - 1], periods: periods.length, total: r4(comp(periods.map((p) => p[1]))), market: r4(comp(periods.map((p) => p[2]))), win: r4(periods.filter((p) => p[1] > p[2]).length / (periods.length || 1)), years, curve },
   };
@@ -1008,7 +1057,7 @@ if (process.env.ARCHIVE_DIR) {
     market: { probUp: marketOut.probUp, expReturn: marketOut.expReturn },
     stocks: { all: stockOut.all, top: stockOut.top.map((x) => x.code), bottom: stockOut.bottom.map((x) => x.code) },
     // 營收選股：下一個交易日如果是換股日就照這份買（模擬帳戶用）
-    revStocks: { top: revOut.top.map((x) => x.code), trendOk: revOut.trendOk, tradeDate: revOut.tradeDate, rebalance: revOut.rebalanceTomorrow },
+    revStocks: { top: revOut.top.map((x) => x.code), trendOk: revOut.trendOk, tradeDate: revOut.tradeDate, rebalance: revOut.rebalanceTomorrow, decisions: revOut.decisions.map(({ code, action, reason, notes, rank }) => ({ code, action, reason, notes, rank })) },
     dayTrade: dtr ? { code: dtr.code, lastClose: dtr.lastClose, cost: dtr.cost, rule: dtr.rule } : null,
   };
   if (canArchive(asOf, Date.now(), !!process.env.ARCHIVE_KIND_SUFFIX)) console.log(writeArchive(process.env.ARCHIVE_DIR, 'daily' + (process.env.ARCHIVE_KIND_SUFFIX ?? ''), asOf, data) ? `事前存檔：${asOf} 收盤後的預測` : `事前存檔：${asOf} 已經存過`);
@@ -1058,5 +1107,28 @@ if (BF_DIR) {
   for (const [asOf, v] of bfDaily) writeArchive(BF_DIR, 'daily', asOf, v);
   console.log(`歷史模擬存檔：${bfDaily.size} 天（${BF_FROM} ～ ${BF_TO}）→ ${BF_DIR}`);
 }
-writeFileSync(join(dir, 'predict.json'), JSON.stringify({ generatedAt: new Date().toISOString(), horizon: H, market: marketOut, stocks: stockOut, revStocks: revOut, dayTrade: dayTradeOut, forward }));
+// 營收選股的每日決策紀錄（事前存檔）：每一個決定之後的實際表現（隔天開盤進場，21 個交易日後；還沒滿的算到最新收盤）
+const decisionLog = (() => {
+  type Dec = { code: string; action: string; reason: string; notes?: string[]; rank: number };
+  const rows: Array<{ asOf: string; code: string; name: string; action: string; reason: string; notes: string[]; rank: number; ret: number | null; market: number | null; done: boolean }> = [];
+  for (const a of readPreOpen<{ revStocks?: { decisions?: Dec[] } }>(process.env.FORECASTS_DIR, 'daily')) {
+    const i = calIdx.get(a.asOf);
+    if (i == null || !a.revStocks?.decisions) continue;
+    const e = Math.min(T - 1, i + 22);
+    for (const d of a.revStocks.decisions) {
+      const k = sIdx.get(d.code);
+      const st = k == null ? null : stocks[k];
+      const buy = st && i + 1 < T ? st.open[i + 1] : NaN;
+      const ret = st && buy > 0 && e > i ? st.close[e] / buy - 1 : NaN;
+      rows.push({ asOf: a.asOf, code: d.code, name: names[d.code] ?? '', action: d.action, reason: d.reason, notes: d.notes ?? [], rank: d.rank, ret: r4(ret), market: e > i ? r4(ixClose[e] / ixClose[i] - 1) : null, done: i + 22 < T });
+    }
+  }
+  const sum = (act: string) => {
+    const xs = rows.filter((r) => r.action === act && r.done && r.ret != null);
+    return { n: xs.length, avg: xs.length ? r4(mean(xs.map((r) => r.ret!))) : null, beat: xs.length ? r4(xs.filter((r) => r.ret! > (r.market ?? 0)).length / xs.length) : null };
+  };
+  return { days: new Set(rows.map((r) => r.asOf)).size, summary: { buy: sum('buy'), watch: sum('watch'), skip: sum('skip') }, rows: rows.slice(-300) };
+})();
+console.log(`營收選股決策紀錄：${decisionLog.days} 天、${decisionLog.rows.length} 筆`);
+writeFileSync(join(dir, 'predict.json'), JSON.stringify({ generatedAt: new Date().toISOString(), horizon: H, market: marketOut, stocks: stockOut, revStocks: { ...revOut, log: decisionLog }, dayTrade: dayTradeOut, forward }));
 console.log(`predict.json 完成（${((Date.now() - t0) / 1000).toFixed(1)}s）`);
