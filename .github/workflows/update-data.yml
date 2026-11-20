@@ -83,6 +83,8 @@ jobs:
             node scripts/intraday.ts .data
           ) > twse.log 2>&1 &
           (
+            # 營收公布時間最先跑（記錄「第一次看到」的時間，越早越準）
+            node scripts/revenue-dates.ts .data
             # 財報先跑：歷史事件回補很久，放前面會把時間用完，財報季報就一直補不到
             node scripts/financials.ts .data
             # 每月營收（2019 年起；第一手的獲利資料，個股模型用）
