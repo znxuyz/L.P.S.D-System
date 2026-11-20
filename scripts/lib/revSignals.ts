@@ -20,7 +20,7 @@ export interface SigStock {
   turn: ArrayLike<number>; // 億元
   first: number;
 }
-export type SignalId = 'revYoy1' | 'revYoy3' | 'revAccel' | 'revHigh' | 'gmChg' | 'inst20' | 'mom';
+export type SignalId = 'revYoy1' | 'revYoy3' | 'revAccel' | 'revHigh' | 'gmChg' | 'inst20' | 'trust20' | 'foreign20' | 'mom';
 export const SIGNAL_NAMES: Record<SignalId, string> = {
   revYoy1: '最新月營收年增率',
   revYoy3: '近 3 個月營收年增率',
@@ -28,6 +28,8 @@ export const SIGNAL_NAMES: Record<SignalId, string> = {
   revHigh: '營收創新高程度（近 3 月 ÷ 過去 3 年最高的 3 個月）',
   gmChg: '毛利率改善（最新一季 − 去年同季）',
   inst20: '法人近 20 日買超 ÷ 成交量',
+  trust20: '投信近 20 日買超 ÷ 成交量',
+  foreign20: '外資近 20 日買超 ÷ 成交量',
   mom: '（對照）近 6 個月股價動能（不含最近 1 個月）',
 };
 /** 綜合分數：這幾個訊號在當期全部股票裡的排名平均（至少要有 3 個）。成分是看結果之前就定好的。 */
@@ -69,6 +71,30 @@ export function makeSignals(dir: string, cal: string[]) {
     if (i == null) continue;
     for (const [code, v] of Object.entries(read<Record<string, number>>(join(dir, 'inst', f), {}))) (inst.get(code) ?? inst.set(code, new Float64Array(T)).get(code)!)[i] = v / 1000;
   }
+
+  // 法人分開（inst2/：[外資, 投信] 股數；2026-11 起往回補，沒有的日子是 NaN）
+  const split = new Map<string, [Float64Array, Float64Array]>();
+  const splitHas = new Uint8Array(T);
+  for (const f of existsSync(join(dir, 'inst2')) ? readdirSync(join(dir, 'inst2')).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)) : []) {
+    const i = calIdx.get(f.slice(0, 10));
+    if (i == null) continue;
+    splitHas[i] = 1;
+    for (const [code, [fo, tr]] of Object.entries(read<Record<string, [number, number]>>(join(dir, 'inst2', f), {}))) {
+      let a = split.get(code);
+      if (!a) split.set(code, (a = [new Float64Array(T), new Float64Array(T)]));
+      a[0][i] = fo / 1000;
+      a[1][i] = tr / 1000;
+    }
+  }
+  const splitFlow = (s: SigStock, i: number, which: 0 | 1) => {
+    for (let j = i - 20; j < i; j++) if (!splitHas[j]) return NaN; // 20 天都要有資料
+    const a = split.get(s.code);
+    if (!a) return 0;
+    let b = 0;
+    let v = 0;
+    for (let j = i - 20; j < i; j++) (b += a[which][j]), (v += s.vol[j] ?? 0);
+    return v > 0 ? b / v : NaN;
+  };
 
   /** i：交易日的位置（可以等於 cal.length＝下一個交易日）；date：交易日日期。只用 i 之前的價量。 */
   const f: Record<SignalId, (s: SigStock, i: number, date: string) => number> = {
@@ -118,6 +144,8 @@ export function makeSignals(dir: string, cal: string[]) {
       for (let j = i - 20; j < i; j++) (b += a[j] ?? 0), (v += s.vol[j] ?? 0);
       return v > 0 ? b / v : NaN;
     },
+    trust20: (s, i) => splitFlow(s, i, 1),
+    foreign20: (s, i) => splitFlow(s, i, 0),
     mom: (s, i) => (s.close[i - 21] > 0 && s.close[i - 126] > 0 ? s.close[i - 21] / s.close[i - 126] - 1 : NaN),
   };
 
