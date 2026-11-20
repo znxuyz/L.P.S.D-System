@@ -14,6 +14,7 @@
  *     這是公開文獻的經典規則（槓桿 ETF＋200 日均線），不是用我們的資料調出來的；2020～2026 每一年都贏加權指數。
  *   營收選股 50%：每月 12 日後第一個交易日開盤，換成存檔裡「營收成長加速＋營收創新高＋毛利率改善＋法人買超」綜合分數最高的 20 檔
  *     （留在名單裡的不動，掉出名單的賣、新進的買）；換股前一天加權指數在 200 日均線之下就全部持有現金。
+ *     （分兩批輪流換的版本只當對照，見 TRANCHES。）
  * - 舊的個股排名（逆勢撿便宜）、00631L 開盤當沖、區間進出場：2022～2026 回測都沒有贏大盤，不放錢（成績在各自的區塊）。
  * - 成本：手續費 0.1425% 不打折（保守；實際券商多有折扣，買賣各一次）、證交稅（個股 0.3%、ETF 0.1%）。
  *
@@ -90,7 +91,16 @@ interface Trade {
 const trades: Trade[] = [];
 const equityRows: Array<[string, number, number, number, number, number]> = [];
 
-let stockCash = CAPITAL * W.stocks;
+/**
+ * 營收選股分 REV_TRANCHES 批：每批各抱 N 個月，每個換股日只換其中一批（輪流）。預設 1＝每月全換（正式帳戶）。
+ * 研究（2021-01～2026-11）：選股後第 1、2 個月都多賺約 1.8%（t≈3.5），第 3 個月才變弱，所以試了分兩批（換手 63% → 38%）。
+ * 模擬帳戶回測（2022 起，含 200 日均線）：開發期（～2025-10）+105% vs +81% 比較好，但保留期（2025-11～）+30% vs +47% 比較差，
+ * 整段 +166% vs +165% 打平 → 沒通過保留期檢驗，不採用；部署時另外輸出 paper-backtest-2t.json 繼續對照。
+ */
+const TRANCHES = Math.max(1, Number(process.env.REV_TRANCHES ?? 1));
+type Pos = { code: string; shares: number; cost: number };
+const tranches: Array<{ cash: number; pos: Pos[]; since: number | null }> = Array.from({ length: TRANCHES }, () => ({ cash: (CAPITAL * W.stocks) / TRANCHES, pos: [], since: null }));
+let rebCount = 0;
 let dtCash = CAPITAL * W.dayTrade;
 let trCash = CAPITAL * W.trend;
 let trShares = 0;
@@ -130,7 +140,6 @@ const trendWeight = (i: number) => {
   return Number.isFinite(w) ? Math.max(0, Math.min(1, w)) : 1;
 };
 const maOf = (i: number) => (i < MA_N - 1 ? NaN : taiex.slice(i - MA_N + 1, i + 1).reduce((t, r) => t + r[4], 0) / MA_N);
-let held: { buyIdx: number; pos: Array<{ code: string; shares: number; cost: number }> } | null = null;
 
 const FROM = process.env.PAPER_FROM ?? '0000';
 const TO = process.env.PAPER_TO ?? '9999';
@@ -141,7 +150,7 @@ if (startIdx > 0) {
     const D = cal[i];
     const prev = cal[i - 1];
     // 現金的利息（每個交易日）
-    stockCash *= 1 + CASH_RATE / 252;
+    for (const t of tranches) t.cash *= 1 + CASH_RATE / 252;
     trCash *= 1 + CASH_RATE / 252;
     const dArch = daily.get(prev);
 
@@ -150,29 +159,36 @@ if (startIdx > 0) {
     if (rs && isRebalanceDate(D, prev)) {
       const target = rs.trendOk ? rs.top.filter((c) => kOf(c).get(D)?.[0]).slice(0, REV_N) : [];
       const keep = new Set(target);
-      for (const p of held?.pos ?? []) {
-        if (keep.has(p.code)) continue;
-        const px = kOf(p.code).get(D)?.[0] ?? [...kOf(p.code).entries()].filter(([d]) => d < D).at(-1)?.[1][3] ?? p.cost;
-        const value = p.shares * px * (1 - FEE - STOCK_TAX);
-        stockCash += value;
-        trades.push({ date: D, book: 'stocks', code: p.code, name: names[p.code] ?? '', side: 'sell', price: r2(px), pnl: r2(value - p.shares * p.cost * (1 + FEE)), note: rs.trendOk ? '掉出營收選股名單，開盤賣' : '大盤在 200 日均線之下，換現金' });
-      }
-      const kept = (held?.pos ?? []).filter((p) => keep.has(p.code));
-      const have = new Set(kept.map((p) => p.code));
-      const fresh = target.filter((c) => !have.has(c));
-      const pos = [...kept];
-      if (fresh.length) {
-        const each = stockCash / fresh.length;
-        for (const code of fresh) {
-          const px = kOf(code).get(D)![0];
-          const shares = Math.floor(each / (px * (1 + FEE)));
-          if (!shares) continue;
-          stockCash -= shares * px * (1 + FEE);
-          trades.push({ date: D, book: 'stocks', code, name: names[code] ?? '', side: 'buy', price: r2(px), pnl: null, note: '新進營收選股名單，開盤買' });
-          pos.push({ code, shares, cost: px });
+      const turn = rebCount++ % TRANCHES;
+      tranches.forEach((t, ti) => {
+        // 大盤在 200 日均線之下：每一批都換現金；否則只換輪到的那一批（還是現金的批次也一起買進）
+        if (rs.trendOk && ti !== turn && t.pos.length) return;
+        const tag = TRANCHES > 1 ? `（第 ${ti + 1} 批）` : '';
+        for (const p of t.pos) {
+          if (keep.has(p.code)) continue;
+          const px = kOf(p.code).get(D)?.[0] ?? [...kOf(p.code).entries()].filter(([d]) => d < D).at(-1)?.[1][3] ?? p.cost;
+          const value = p.shares * px * (1 - FEE - STOCK_TAX);
+          t.cash += value;
+          trades.push({ date: D, book: 'stocks', code: p.code, name: names[p.code] ?? '', side: 'sell', price: r2(px), pnl: r2(value - p.shares * p.cost * (1 + FEE)), note: (rs.trendOk ? '掉出營收選股名單，開盤賣' : '大盤在 200 日均線之下，換現金') + tag });
         }
-      }
-      held = pos.length ? { buyIdx: i, pos } : null;
+        const kept = t.pos.filter((p) => keep.has(p.code));
+        const have = new Set(kept.map((p) => p.code));
+        const fresh = target.filter((c) => !have.has(c));
+        const pos = [...kept];
+        if (fresh.length) {
+          const each = t.cash / fresh.length;
+          for (const code of fresh) {
+            const px = kOf(code).get(D)![0];
+            const shares = Math.floor(each / (px * (1 + FEE)));
+            if (!shares) continue;
+            t.cash -= shares * px * (1 + FEE);
+            trades.push({ date: D, book: 'stocks', code, name: names[code] ?? '', side: 'buy', price: r2(px), pnl: null, note: '新進營收選股名單，開盤買' + tag });
+            pos.push({ code, shares, cost: px });
+          }
+        }
+        t.pos = pos;
+        t.since = pos.length ? i : null;
+      });
     }
 
     const L = kOf('00631L').get(D);
@@ -208,8 +224,9 @@ if (startIdx > 0) {
     }
 
     // ---- 每天收盤的帳戶價值
-    let stockVal = stockCash;
-    for (const p of held?.pos ?? []) stockVal += p.shares * (kOf(p.code).get(D)?.[3] ?? [...kOf(p.code).entries()].filter(([d]) => d <= D).at(-1)?.[1][3] ?? p.cost);
+    let stockVal = 0;
+    for (const t of tranches) stockVal += t.cash;
+    for (const p of tranches.flatMap((t) => t.pos)) stockVal += p.shares * (kOf(p.code).get(D)?.[3] ?? [...kOf(p.code).entries()].filter(([d]) => d <= D).at(-1)?.[1][3] ?? p.cost);
     const trVal = trCash + trShares * (L?.[3] ?? [...kOf('00631L').entries()].filter(([d]) => d <= D).at(-1)?.[1][3] ?? 0);
     equityRows.push([D, r2(stockVal + dtCash + trVal), r2(stockVal), r2(dtCash), r2(trVal), r2(CAPITAL * (taiex[i][4] / ix0))]);
   }
@@ -261,12 +278,21 @@ const out = {
   })(),
   monthly,
   curve: equityRows,
-  positions: (held?.pos ?? []).map((p) => {
+  positions: [...tranches.flatMap((t) => t.pos).reduce((m, p) => {
+    const o = m.get(p.code);
+    if (o) (o.cost = (o.cost * o.shares + p.cost * p.shares) / (o.shares + p.shares)), (o.shares += p.shares);
+    else m.set(p.code, { ...p });
+    return m;
+  }, new Map<string, Pos>()).values()].map((p) => {
     const k = [...kOf(p.code).entries()].filter(([d]) => d <= lastDay).at(-1)?.[1];
     return { code: p.code, name: names[p.code] ?? '', shares: p.shares, cost: r2(p.cost), price: k ? r2(k[3]) : null, ret: k ? r5(k[3] / p.cost - 1) : null };
   }),
-  heldSince: held ? cal[held.buyIdx] : null,
-  sellOn: '每月 12 日後第一個交易日換股',
+  heldSince: (() => {
+    const xs = tranches.map((t) => t.since).filter((x): x is number => x != null);
+    return xs.length ? cal[Math.min(...xs)] : null;
+  })(),
+  tranches: TRANCHES,
+  sellOn: TRANCHES > 1 ? `每月 12 日後第一個交易日換其中一批（共 ${TRANCHES} 批輪流，每批抱 ${TRANCHES} 個月）` : '每月 12 日後第一個交易日換股',
   trades: trades.slice(-60).reverse(),
   tradeCount: trades.length,
 };
