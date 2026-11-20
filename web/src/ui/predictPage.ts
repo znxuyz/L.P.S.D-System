@@ -137,15 +137,16 @@ function yearly(p: PaperData): Array<[string, number, number]> {
   return [...y].map(([k, [a, b]]) => [k, a - 1, b - 1]);
 }
 
-function paperHtml(p: PaperData | null, bt: PaperData | null): string {
+function paperHtml(p: PaperData | null, bt: PaperData | null, alt: PaperData | null = null): string {
   const pct = (v: number | null | undefined) => pctTxt(v ?? 0);
   const tr = p?.trend ?? bt?.trend;
   const head = `<header class="pd-head"><div><p class="eyebrow">Paper trading · 100 萬</p><h2>模型模擬帳戶</h2></div></header>
     <p class="pd-lead">完全照規則與「開盤前就存檔」的預測自動交易，用之後實際的開盤價、收盤價成交，扣手續費 6 折與證交稅。<b>這是判斷模型能不能賺錢的依據</b>，每週檢查時也依它來修正。</p>
-    <ul class="pd-rules"><li><b>趨勢 50%</b>：前一天加權指數收盤在 200 日均線之上 → 持有 00631L（2 倍槓桿），跌破 → 全部換現金，隔天開盤換。這是公開研究的經典規則（槓桿 ETF＋200 日均線），不是用我們的資料調出來的。</li>
+    <ul class="pd-rules"><li><b>趨勢 50%</b>：前一天加權指數收盤在 200 日均線之上 → 持有 00631L（2 倍槓桿），跌破 → 全部換現金，隔天開盤換。這是公開研究的經典規則（槓桿 ETF＋200 日均線），不是用我們的資料調出來的。<b>持有比例依波動調整</b>：比例＝長期一般波動 ÷ 近 20 日波動（最多 100%），市場很亂時少放一點，壓低最大回落。</li>
+      <li><b>現金</b>（趨勢不持有、營收選股持有現金時）以年息 1.5% 計（定存或貨幣基金）。</li>
       <li><b>營收選股 50%</b>：每月 12 日後第一個交易日開盤，換成下面「營收選股」的 20 檔（留在名單的不動）；大盤在 200 日均線之下就全部持有現金。</li></ul>
     <p class="muted pd-small">舊的逆勢個股排名、00631L 開盤當沖、區間進出場，2022～2026 回測都沒有贏大盤，不放錢（成績在各自的區塊）。</p>
-    ${tr ? `<p class="pd-advice">下一個交易日：<b class="${tr.nextHold ? 'up' : 'down'}">${tr.nextHold ? '持有 00631L' : '持有現金（不持有 00631L）'}</b>　<span class="muted">加權指數 ${esc(tr.asOf)} 收盤 ${num(tr.close, 0)}，200 日均線 ${num(tr.ma, 0)}（${tr.dist >= 0 ? '高於' : '低於'}均線 ${num(Math.abs(tr.dist) * 100, 1)}%）</span></p>` : ''}`;
+    ${tr ? `<p class="pd-advice">下一個交易日：<b class="${tr.nextHold ? 'up' : 'down'}">${tr.nextHold ? `持有 00631L ${num((tr.nextWeight ?? 1) * 100, 0)}%` : '持有現金（不持有 00631L）'}</b>　<span class="muted">加權指數 ${esc(tr.asOf)} 收盤 ${num(tr.close, 0)}，200 日均線 ${num(tr.ma, 0)}（${tr.dist >= 0 ? '高於' : '低於'}均線 ${num(Math.abs(tr.dist) * 100, 1)}%）${tr.vol20 != null && tr.volMed != null ? `；近 20 日波動 ${num(tr.vol20 * 100, 0)}%（一般 ${num(tr.volMed * 100, 0)}%）` : ''}</span></p>` : ''}`;
   const book: Record<string, string> = { stocks: '個股', dayTrade: '開盤當沖', trend: '趨勢', range: '區間進出場' };
   const live = !p || !p.days
     ? '<p class="pd-advice">第一份事前存檔今晚產生，<b>下一個交易日開盤開始自動交易</b>；之後每天收盤後更新帳戶。</p>'
@@ -172,6 +173,7 @@ function paperHtml(p: PaperData | null, bt: PaperData | null): string {
     </dl>
     ${lineChart(bt.curve.filter((_, i) => i % 5 === 0 || i === bt.curve.length - 1).map((c) => [c[0], c[1] / bt.capital, c[5] / bt.capital] as [string, number, number]), [{ name: '模擬帳戶（回測）', cls: 's1' }, { name: '同額買大盤', cls: 's3' }], { log: true })}
     <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>年度</th><th class="num">帳戶</th><th class="num">大盤</th><th class="num">差距</th></tr></thead><tbody>${yearly(bt).map(([y, a, b]) => `<tr><td>${esc(y)}</td><td class="num ${cls(a)}">${pct(a)}</td><td class="num ${cls(b)}">${pct(b)}</td><td class="num ${cls(a - b)}">${pct(a - b)}</td></tr>`).join('')}</tbody></table></div>
+    ${alt?.days ? `<p class="pd-note">對照：<b>不依波動調整</b>（趨勢部位一律 100%）同期間總報酬 ${pct(alt.ret)}、最大回落 ${pct(alt.maxDD)}。波動調整少賺一些，換來最大回落從 ${pct(alt.maxDD)} 降到 ${pct(bt.maxDD)}；真錢的話，回落太深最容易撐不住而在低點認賠。</p>` : ''}
     <p class="pd-note is-warn">回測的個股與當沖預測都是逐段往前滾（每天只用那天以前的資料）。但要誠實說：這套配置是看過 2022～2026 的回測後才決定的（個股改用營收選股、拿掉當沖）；趨勢規則本身是公開文獻的標準設定（200 日均線），沒有用這段資料調參數。槓桿 ETF 的回落比大盤大，而且盤整來回震盪時會被巴（2020～2026 共換手約 18 次）。真正公正的成績看上面的「實盤」。</p>`
     : '';
   return `<section class="pd-card glass" id="pd-paper">${head}${live}${hist}</section>`;
@@ -370,6 +372,7 @@ const intraState: IntradayState = { mode: '', k: -1, tf: 5, showActual: true, sh
 let analogLib: AnalogDay[] | null = null;
 let paper: PaperData | null = null;
 let paperBt: PaperData | null = null;
+let paperAlt: PaperData | null = null;
 /** 即時的加權指數（只有富果／證交所即時行情才有；收盤回放是模擬走勢，不能用）。 */
 export type LiveIndex = () => IndexPoint[] | null;
 let liveIndex: LiveIndex = () => null;
@@ -379,12 +382,13 @@ export function renderPredictPage(root: HTMLElement, onStock: (code: string) => 
   if (getLive) liveIndex = getLive;
   if (!loading) {
     loading = true;
-    void Promise.all([loadPredict(), loadPredictIntraday(), loadAnalogs(), loadPaper(), loadPaperBacktest()]).then(([d, i, a, pp, pb]) => {
+    void Promise.all([loadPredict(), loadPredictIntraday(), loadAnalogs(), loadPaper(), loadPaperBacktest(), loadPaperBacktest('paper-backtest-novt.json')]).then(([d, i, a, pp, pb, pa]) => {
       data = d;
       intra = i;
       analogLib = a;
       paper = pp;
       paperBt = pb;
+      paperAlt = pa;
       loading = false;
       draw(root, onStock);
     });
@@ -489,7 +493,7 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
     ${intra?.ready ? `<a href="#pd-intra" class="pd-sum glass"><span>00631L 整天 5 分 K</span>${badge(intra.rangeVerdict ?? intra.verdict)}</a>` : ''}
   </div>`;
   root.innerHTML = `<div class="pd-main">${head}${summary}
-    ${paperHtml(paper, paperBt)}
+    ${paperHtml(paper, paperBt, paperAlt)}
     ${d.revStocks ? revStocksHtml(d.revStocks) : ''}
     ${stockForecastShell()}
     ${marketHtml(d.market, d.horizon, d.forward)}

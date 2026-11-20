@@ -67,13 +67,15 @@ jobs:
           if [ -d .forecasts ]; then FORECASTS_DIR=.forecasts node scripts/paper-trade.ts .data; fi
           # 模擬帳戶歷史回測（2022 起；同一套規則，用逐段往前滾的預測）
           if [ -d .backfill ]; then FORECASTS_DIR=.backfill PAPER_FROM=2022-01-01 PAPER_OUT=paper-backtest.json node scripts/paper-trade.ts .data; fi
+          # 對照：不依波動調整（趨勢部位一律 100%）
+          if [ -d .backfill ]; then VOL_TARGET=0 FORECASTS_DIR=.backfill PAPER_FROM=2022-01-01 PAPER_OUT=paper-backtest-novt.json node scripts/paper-trade.ts .data; fi
           # 沒有即時行情金鑰時首頁用的最近一個交易日收盤資料
           node scripts/close-snapshot.ts .data
 
       - name: 放進網站
         run: |
           mkdir -p web/public/data
-          for f in active-etf.json stocks.json chips.json fundamentals.json pe5y.json pattern-stats.json close.json etf-info.json market-risk.json predict.json predict-intraday.json predict-analogs.json predict-intraday-3m.json predict-analogs-3m.json predict-intraday-1m.json predict-analogs-1m.json paper.json paper-backtest.json; do
+          for f in active-etf.json stocks.json chips.json fundamentals.json pe5y.json pattern-stats.json close.json etf-info.json market-risk.json predict.json predict-intraday.json predict-analogs.json predict-intraday-3m.json predict-analogs-3m.json predict-intraday-1m.json predict-analogs-1m.json paper.json paper-backtest.json paper-backtest-novt.json; do
             if [ -f ".data/$f" ]; then cp ".data/$f" web/public/data/; fi
           done
           if [ -d .data/candles ]; then cp -r .data/candles web/public/data/; fi
