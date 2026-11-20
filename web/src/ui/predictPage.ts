@@ -137,6 +137,31 @@ function yearly(p: PaperData): Array<[string, number, number]> {
   return [...y].map(([k, [a, b]]) => [k, a - 1, b - 1]);
 }
 
+/**
+ * 走向真錢的階段與停止條件（事先定好，不因結果放寬）：
+ * 1. 模擬實盤：滿 60 個交易日（約 3 個月），而且沒有觸發停止條件 → 2.
+ * 2. 小錢實戰：總資金的 10%，再 60 個交易日 → 3.
+ * 3. 逐步加碼：每 60 個交易日最多加 20%。
+ * 停止條件（任何一個成立就停下檢討、不加碼）：落後同期加權指數超過 15 個百分點；從最高點回落超過 35%（比回測最大回落 −32% 還深，代表跟回測不一樣）。
+ */
+function stageHtml(p: PaperData | null): string {
+  const days = p?.days ?? 0;
+  const gap = (p?.ret ?? 0) - (p?.benchmark ?? 0);
+  const dd = p?.maxDD ?? 0;
+  const stop = days > 0 && (gap < -0.15 || dd < -0.35);
+  const stage = stop ? 0 : days >= 120 ? 3 : days >= 60 ? 2 : 1;
+  const step = (n: number, t: string, d: string) => `<li class="${stage === n ? 'is-now' : stage > n ? 'is-done' : ''}"><b>${t}</b>　<span class="muted">${d}</span></li>`;
+  return `<details class="pd-more pd-stage" open><summary>走向真錢的流程（事先定好的條件）</summary>
+    ${stop ? `<p class="pd-note is-warn"><b>⚠ 觸發停止條件：</b>${gap < -0.15 ? `模擬帳戶落後加權指數 ${num(-gap * 100, 1)} 個百分點（上限 15）` : `最大回落 ${num(dd * 100, 1)}%（上限 −35%）`}。先停下檢討、不要用真錢加碼。</p>` : ''}
+    <ol class="pd-steps">
+      ${step(1, '① 模擬實盤', `完全照事前存檔自動交易，滿 60 個交易日（約 3 個月）。目前 ${num(days)} 天${days ? `，報酬 ${pctTxt(p!.ret)} vs 加權指數 ${pctTxt(p!.benchmark)}` : ''}。`)}
+      ${step(2, '② 小錢實戰', '總資金的 10% 照同樣規則下單 60 個交易日，比對實際成交價與模擬帳戶的差距（滑價、手續費、自己有沒有照規則做）。')}
+      ${step(3, '③ 逐步加碼', '每 60 個交易日最多加 20%；任何時候觸發停止條件就停。')}
+    </ol>
+    <p class="muted pd-small">停止條件（任何一個成立就停下檢討、不加碼）：落後同期加權指數超過 15 個百分點；從最高點回落超過 35%（比回測最大回落 −32% 還深，代表實際跟回測不一樣）。這些條件現在就寫死，之後不因為結果放寬。</p>
+  </details>`;
+}
+
 function paperHtml(p: PaperData | null, bt: PaperData | null, alt: PaperData | null = null): string {
   const pct = (v: number | null | undefined) => pctTxt(v ?? 0);
   const tr = p?.trend ?? bt?.trend;
@@ -176,7 +201,7 @@ function paperHtml(p: PaperData | null, bt: PaperData | null, alt: PaperData | n
     ${alt?.days ? `<p class="pd-note">對照：<b>不依波動調整</b>（趨勢部位一律 100%）同期間總報酬 ${pct(alt.ret)}、最大回落 ${pct(alt.maxDD)}。波動調整少賺一些，換來最大回落從 ${pct(alt.maxDD)} 降到 ${pct(bt.maxDD)}；真錢的話，回落太深最容易撐不住而在低點認賠。</p>` : ''}
     <p class="pd-note is-warn">回測的個股與當沖預測都是逐段往前滾（每天只用那天以前的資料）。但要誠實說：這套配置是看過 2022～2026 的回測後才決定的（個股改用營收選股、拿掉當沖）；趨勢規則本身是公開文獻的標準設定（200 日均線），沒有用這段資料調參數。槓桿 ETF 的回落比大盤大，而且盤整來回震盪時會被巴（2020～2026 共換手約 18 次）。真正公正的成績看上面的「實盤」。</p>`
     : '';
-  return `<section class="pd-card glass" id="pd-paper">${head}${live}${hist}</section>`;
+  return `<section class="pd-card glass" id="pd-paper">${head}${stageHtml(p)}${live}${hist}</section>`;
 }
 
 function marketHtml(m: PredictData['market'], h: number, f?: PredictData['forward']): string {

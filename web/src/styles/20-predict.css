@@ -207,3 +207,9 @@
 .pd-an-avg { stroke: #fbbf24; stroke-width: 2.5; }
 .pd-sw.an-avg { height: 3px; background: #fbbf24; }
 .pd-sw.an { height: 2px; background: var(--accent-2, #c4b5fd); opacity: 0.7; }
+
+/* 走向真錢的流程 */
+.pd-steps { margin: 6px 0; padding-left: 0; list-style: none; display: grid; gap: 6px; }
+.pd-steps li { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--glass-line); opacity: 0.6; }
+.pd-steps li.is-now { opacity: 1; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.pd-steps li.is-done { opacity: 0.85; }
