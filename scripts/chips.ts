@@ -58,6 +58,10 @@ async function get(url: string): Promise<Response> {
   throw new Error(`${url} → ${last}`);
 }
 
+/** 上市、上櫃：每檔 [外資（不含外資自營商）, 投信] 買賣超股數，分開存在 inst2/（給選股模型分開看）。 */
+type Split = Record<string, [number, number]>;
+const splitOf: { twse: Split | null; tpex: Split | null } = { twse: null, tpex: null };
+
 /** 上市：外陸資（不含外資自營商）＋投信買賣超股數。null = 沒有資料。 */
 async function twseInst(date: string): Promise<Record<string, number> | null> {
   const j: any = await (await get(`https://www.twse.com.tw/rwd/zh/fund/T86?date=${date.replace(/-/g, '')}&selectType=ALLBUT0999&response=json`)).json();
@@ -67,10 +71,12 @@ async function twseInst(date: string): Promise<Record<string, number> | null> {
   const trust = f.findIndex((x) => x.startsWith('投信買賣超股數'));
   if (foreign < 0 || trust < 0) throw new Error(`T86 欄位不符：${f.join(',')}`);
   const out: Record<string, number> = {};
+  const sp: Split = {};
   for (const r of j.data) {
     const code = String(r[0]).trim();
-    if (wanted(code)) out[code] = num(r[foreign]) + num(r[trust]);
+    if (wanted(code)) (out[code] = num(r[foreign]) + num(r[trust])), (sp[code] = [num(r[foreign]), num(r[trust])]);
   }
+  splitOf.twse = sp;
   return out;
 }
 
@@ -82,10 +88,12 @@ async function tpexInst(date: string): Promise<Record<string, number> | null> {
   if (!table) return null;
   if (table.fields.length < 14 || table.fields[4] !== '買賣超股數' || table.fields[13] !== '買賣超股數') throw new Error(`櫃買法人欄位不符：${table.fields.join(',')}`);
   const out: Record<string, number> = {};
+  const sp: Split = {};
   for (const r of table.data) {
     const code = String(r[0]).trim();
-    if (wanted(code)) out[code] = num(r[4]) + num(r[13]);
+    if (wanted(code)) (out[code] = num(r[4]) + num(r[13])), (sp[code] = [num(r[4]), num(r[13])]);
   }
+  splitOf.tpex = sp;
   return out;
 }
 
@@ -103,9 +111,14 @@ export function streakOf(nets: number[]): number {
 
 async function updateInst(dir: string, tradingDays: string[]): Promise<void> {
   const instDir = join(dir, 'inst');
+  const splitDir = join(dir, 'inst2');
   mkdirSync(instDir, { recursive: true });
+  mkdirSync(splitDir, { recursive: true });
+  // inst（外資＋投信合計）或 inst2（分開）缺任何一個都重抓（2026-11 起分開存，舊的日子往回補）
   const have = new Set(readdirSync(instDir).map((f) => f.replace(/\.json$/, '')));
-  const todo = tradingDays.filter((d) => !have.has(d));
+  const have2 = new Set(readdirSync(splitDir).map((f) => f.replace(/\.json$/, '')));
+  // 從最新往回補（最近的資料最先用得到）
+  const todo = tradingDays.filter((d) => !have.has(d) || !have2.has(d)).sort().reverse();
   console.log(`法人：${tradingDays.length} 個交易日，缺 ${todo.length} 天，這次最多 ${INST_MAX} 天`);
   for (const date of todo.slice(0, INST_MAX)) {
     if (timeUp()) break;
@@ -114,6 +127,7 @@ async function updateInst(dir: string, tradingDays: string[]): Promise<void> {
       // 檔案以日期為單位，上市、上櫃都成功才存，否則下次整天重抓
       if (b.status === 'fulfilled' && b.value) {
         writeFileSync(join(instDir, `${date}.json`), JSON.stringify({ ...a.value, ...b.value }));
+        writeFileSync(join(splitDir, `${date}.json`), JSON.stringify({ ...splitOf.twse, ...splitOf.tpex }));
         console.log(`  ${date}：上市 ${Object.keys(a.value).length} 檔、上櫃 ${Object.keys(b.value).length} 檔`);
       } else console.log(`  ${date}：上櫃 ✗ ${b.status === 'rejected' ? b.reason : '無資料'}`);
     } else console.log(`  ${date}：上市 ✗ ${a.status === 'rejected' ? a.reason : '無資料'}`);
