@@ -122,7 +122,7 @@ function entryExitHtml(e: PredictData['stocks']['entryExit']): string {
       想控制風險可以用表格裡的<b>參考停損</b>（收盤 − 2.5×ATR）：代價是平均報酬變低，好處是最慘的虧損變小（見下表）。</p>
     <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>方式（樣本外 ${num(b.periods)} 期、每期最看好 30 檔）</th><th class="num">每個訊號平均</th><th class="num">買得到</th><th class="num">勝率</th><th class="num">平均持有天數</th><th class="num">最慘一筆</th><th class="num">最差 10%</th></tr></thead>
     <tbody>${row('逐段往前滾自動挑的方式', b.strategy, true)}${row('隔天開盤買、20 天後賣', b.baseline)}${b.reference.map((r) => row(r.name, r)).join('')}</tbody></table></div>
-    <p class="muted pd-small">全部扣成本（手續費 6 折來回＋證交稅）。「每個訊號平均」把沒買到的算 0（錢沒在賺）。模擬保守：跳空直接用開盤價成交；同一天碰到停利與停損當作先停損。</p>`;
+    <p class="muted pd-small">全部扣成本（手續費不打折來回（保守）＋證交稅）。「每個訊號平均」把沒買到的算 0（錢沒在賺）。模擬保守：跳空直接用開盤價成交；同一天碰到停利與停損當作先停損。</p>`;
 }
 
 /** 模型模擬帳戶：完全照事前存檔的預測自動下單（紙上交易）。 */
@@ -166,7 +166,7 @@ function paperHtml(p: PaperData | null, bt: PaperData | null, alt: PaperData | n
   const pct = (v: number | null | undefined) => pctTxt(v ?? 0);
   const tr = p?.trend ?? bt?.trend;
   const head = `<header class="pd-head"><div><p class="eyebrow">Paper trading · 100 萬</p><h2>模型模擬帳戶</h2></div></header>
-    <p class="pd-lead">完全照規則與「開盤前就存檔」的預測自動交易，用之後實際的開盤價、收盤價成交，扣手續費 6 折與證交稅。<b>這是判斷模型能不能賺錢的依據</b>，每週檢查時也依它來修正。</p>
+    <p class="pd-lead">完全照規則與「開盤前就存檔」的預測自動交易，用之後實際的開盤價、收盤價成交，扣手續費（不打折，保守）與證交稅。<b>這是判斷模型能不能賺錢的依據</b>，每週檢查時也依它來修正。</p>
     <ul class="pd-rules"><li><b>趨勢 50%</b>：前一天加權指數收盤在 200 日均線之上 → 持有 00631L（2 倍槓桿），跌破 → 全部換現金，隔天開盤換。這是公開研究的經典規則（槓桿 ETF＋200 日均線），不是用我們的資料調出來的。<b>持有比例依波動調整</b>：比例＝長期一般波動 ÷ 近 20 日波動（最多 100%），市場很亂時少放一點，壓低最大回落。</li>
       <li><b>現金</b>（趨勢不持有、營收選股持有現金時）以年息 1.5% 計（定存或貨幣基金）。</li>
       <li><b>營收選股 50%</b>：每月 12 日後第一個交易日開盤，換成下面「營收選股」的 20 檔（留在名單的不動）；大盤在 200 日均線之下就全部持有現金。</li></ul>
@@ -331,7 +331,7 @@ function stocksHtml(s: PredictData['stocks'], h: number, f?: PredictData['forwar
     ${lineChart(b.curve, [{ name: '前 10%（扣成本）', cls: 's1' }, { name: '全部股票平均', cls: 's2' }, { name: '加權指數', cls: 's3' }], { log: true })}
     <p class="pd-note">IC（預測排名和實際排名的相關係數）長期為正，代表<b>排序有統計上的意義</b>，主要是能挑出<b>表現較差、該避開</b>的股票；
       前段班平均只略好於全體。近幾年大盤主要由權值股（台積電等）拉動，多數股票跑輸指數，所以「前 10%」等權組合也沒贏過加權指數。
-      成本以手續費 6 折來回＋證交稅 ${pctTxt(b.cost, 2, false)} 計算。</p>
+      成本以手續費不打折來回（保守）＋證交稅 ${pctTxt(b.cost, 2, false)} 計算。</p>
     <details class="pd-more"><summary>模型權重（每個因子排名每高一級，預測排名的變化）</summary>
       <ul class="pd-weights">${[...s.weights]
         .sort((a, c) => Math.abs(c.w) - Math.abs(a.w))

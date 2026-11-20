@@ -351,7 +351,7 @@ for (let si = 0; si < sections.length; si++) {
 }
 
 // 回測：每個截面的 IC；每 20 天換一次的「前 10%」組合
-const COST = 0.001425 * 2 * 0.6 + 0.003; // 手續費 6 折來回＋證交稅
+const COST = 0.001425 * 2 + 0.003; // 手續費不打折來回（保守）＋證交稅
 const ics: Array<[string, number]> = [];
 const curve: Array<[string, number, number, number]> = []; // [日期, 前 10% 淨值, 全部平均, 大盤]
 let eqTop = 1;
@@ -779,8 +779,8 @@ if (dt) {
     ];
   };
   const y = (i: number) => (dt.has[i] && dt.open[i] > 0 ? dt.close[i] / dt.open[i] - 1 : NaN);
-  // 當沖成本：手續費 6 折來回＋ETF 證交稅 0.1%
-  const DCOST = 0.001425 * 2 * 0.6 + 0.001;
+  // 當沖成本：手續費不打折來回（保守）＋ETF 證交稅 0.1%
+  const DCOST = 0.001425 * 2 + 0.001;
   const start = Math.max(dt.first + 260, 300);
   let fit: { st: ReturnType<typeof standardizer>; b: number[] } | null = null;
   let fLast = -Infinity;
@@ -945,7 +945,7 @@ function vol60(st: Stock, i: number): number {
 const revOut = (() => {
   const t0r = Date.now();
   // 回測：跟 factor-lab.ts 一樣（換股日開盤買、下一個換股日開盤賣、扣成本），每期記錄報酬與加權指數
-  const COSTR = 0.001425 * 0.6 * 2 + 0.003;
+  const COSTR = 0.001425 * 2 + 0.003;
   const rbs = rebalanceDays(cal).filter((i) => cal[i] >= '2021-01-01');
   const periods: Array<[string, number, number, number]> = []; // [換股日, 選股報酬, 加權指數, 是否持有現金]
   let prev = new Set<string>();
