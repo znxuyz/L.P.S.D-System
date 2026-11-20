@@ -12,6 +12,10 @@
  * - 00631L 沒有公開的歷史盤中資料，用「β × 加權指數報酬」換算（β 用近一年日 K 估）。
  *
  * 輸出 predict-intraday.json：模型、回測、最近 10 天（回放用）。
+ *
+ * TF＝3 或 1：改用 3 分 K（ix3，90 根）或 1 分 K（ix1，270 根），輸出 predict-intraday-3m.json／-1m.json。
+ * 預測長度、特徵的回看長度都以分鐘定義（見 setTimeframe），訓練時每 5 分鐘取一個時間點（速度跟 5 分 K 差不多）。
+ * 事前存檔、實盤成績、區間進出場只做 5 分 K。
  */
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -51,6 +55,8 @@ import {
   discValue,
   rawBlocks,
   discName,
+  nb,
+  setTimeframe,
   type DiscSpec,
 } from '../web/src/domain/intradayModel.ts';
 import { adjustForSplits, detectSplits } from '../web/src/domain/splits.ts';
@@ -60,6 +66,12 @@ import { loadTx, nightBar, nightMove } from './lib/txNight.ts';
 import { mean, ridge, standardizer, std } from './lib/ml.ts';
 
 const dir = process.argv[2] ?? 'data';
+const TF = Number(process.env.TF ?? 5) as 1 | 3 | 5;
+if (TF !== 5) setTimeframe(TF);
+const IXKEY = TF === 5 ? 'ix' : TF === 3 ? 'ix3' : 'ix1';
+const SUF = TF === 5 ? '' : `-${TF}m`;
+/** 訓練時每隔幾根取一個時間點（約每 5 分鐘一個）。 */
+const KS = nb(5);
 const read = <T>(p: string, fb: T): T => {
   try {
     return JSON.parse(readFileSync(p, 'utf8')) as T;
@@ -124,15 +136,16 @@ for (const f of existsSync(idir) ? readdirSync(idir).filter((f) => /^\d{4}-\d{2}
   const date = f.slice(0, 10);
   const i = dIdx.get(date);
   if (i == null || i < 6) continue;
-  const j = read<{ ix?: Bar[] }>(join(idir, f), {});
-  if (!j.ix || j.ix.length !== BARS) continue;
-  days.push({ date, P0: taiex[i - 1][4], ix: j.ix, c: [j.ix[0][0], ...j.ix.map((b) => b[3])], ctx: dailyCtx(i)! });
+  const j = read<Record<string, Bar[] | undefined>>(join(idir, f), {});
+  const ix = j[IXKEY];
+  if (!ix || ix.length !== BARS) continue;
+  days.push({ date, P0: taiex[i - 1][4], ix, c: [ix[0][0], ...ix.map((b) => b[3])], ctx: dailyCtx(i)! });
 }
 const analogOf = (d: Day): AnalogDay => ({ date: d.date, gap: Math.log(d.c[0] / d.P0), r: d.c.map((v) => Math.log(v / d.c[0])), ctx: d.ctx });
 const lib: AnalogDay[] = days.map(analogOf);
-console.log(`5 分 K：${days.length} 天（${days[0]?.date ?? '—'} ～ ${days.at(-1)?.date ?? '—'}）`);
+console.log(`${TF} 分 K：${days.length} 天（${days[0]?.date ?? '—'} ～ ${days.at(-1)?.date ?? '—'}）`);
 if (days.length < 60) {
-  writeFileSync(join(dir, 'predict-intraday.json'), JSON.stringify({ generatedAt: new Date().toISOString(), ready: false, days: days.length }));
+  writeFileSync(join(dir, `predict-intraday${SUF}.json`), JSON.stringify({ generatedAt: new Date().toISOString(), ready: false, days: days.length, tf: TF }));
   console.log('資料還不夠（少於 60 天），先輸出空的結果');
   process.exit(0);
 }
@@ -177,8 +190,8 @@ function fitLin(byDay: Samples, groups: Record<string, readonly number[]> = {}):
   const drop = dropOf(best.use);
   return { mean: st.mean, sd: st.sd, coef: ridge(all.X.map((x) => zap(st.apply(x), drop)), all.y, best.lambda), lambda: best.lambda, use: best.use };
 }
-const target = (d: Day, k: number, h: number) => Math.log(d.c[h === 54 ? BARS : Math.min(BARS, k + h)] / d.c[k]);
-const validK = (k: number, h: number) => (h === 54 ? k < BARS : k + h <= BARS);
+const target = (d: Day, k: number, h: number) => Math.log(d.c[h === BARS ? BARS : Math.min(BARS, k + h)] / d.c[k]);
+const validK = (k: number, h: number) => (h === BARS ? k < BARS : k + h <= BARS);
 
 // ---------------------------------------------------------------- 自創指標
 /**
@@ -197,12 +210,12 @@ function discover(train: Day[]): { disc: DiscSpec[]; t: number[] } {
   const ys: number[][] = [[], []];
   const dayOf: number[] = [];
   for (const [di, d] of train.entries())
-    for (let k = 0; k < BARS; k += 3) {
+    for (let k = 0; k < BARS; k += nb(15)) {
       dayOf.push(di);
       X.push(features(d.c, k, d.P0, d.ctx));
       R.push(rawBlocks(d.c, k, d.P0, d.ctx));
-      ys[0].push(target(d, k, 54) / horizonScale(54, k));
-      ys[1].push(validK(k, 6) ? target(d, k, 6) : NaN);
+      ys[0].push(target(d, k, BARS) / horizonScale(BARS, k));
+      ys[1].push(validK(k, nb(30)) ? target(d, k, nb(30)) : NaN);
     }
   const st = standardizer(X);
   const Z = X.map(st.apply);
@@ -290,7 +303,7 @@ function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: 
     const fit = fitLin(train.map((d) => {
       const X: number[][] = [];
       const y: number[] = [];
-      for (let k = 0; k < BARS; k++) if (validK(k, h)) X.push(features(d.c, k, d.P0, d.ctx, disc)), y.push(target(d, k, h) / horizonScale(h, k));
+      for (let k = 0; k < BARS; k += KS) if (validK(k, h)) X.push(features(d.c, k, d.P0, d.ctx, disc)), y.push(target(d, k, h) / horizonScale(h, k));
       return { X, y };
     }), disc.length ? PATH_GROUPS : { us: PATH_GROUPS.us, night: PATH_GROUPS.night });
     used[`path${h}`] = fit.use;
@@ -317,7 +330,7 @@ function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: 
   const rng = fitLin(train.map((d) => {
     const X: number[][] = [];
     const y: number[] = [];
-    for (let k = 0; k < BARS; k += 3) for (let j = k; j < BARS; j++) X.push(rangeFeatures(d.ix, k, j, d.c[0], d.P0, d.ctx, base)), y.push(Math.log(barRange(d.ix[j])) - base[j]);
+    for (let k = 0; k < BARS; k += nb(15)) for (let j = k; j < BARS; j += KS) X.push(rangeFeatures(d.ix, k, j, d.c[0], d.P0, d.ctx, base)), y.push(Math.log(barRange(d.ix[j])) - base[j]);
     return { X, y };
   }));
   // 剩下時間的最高、最低
@@ -325,7 +338,7 @@ function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: 
     fitLin(train.map((d) => {
       const X: number[][] = [];
       const y: number[] = [];
-      for (let k = 0; k < BARS; k++) {
+      for (let k = 0; k < BARS; k += KS) {
         let e = 0;
         for (let b = k; b < BARS; b++) e = Math.max(e, dirn > 0 ? Math.log(d.ix[b][1] / d.c[k]) : Math.log(d.c[k] / d.ix[b][2]));
         X.push(excursionFeatures(d.ix, d.c, k, d.P0, d.ctx, base));
@@ -345,13 +358,13 @@ function fitAll(train: Day[]): { m: IntradayModel & { inRes?: number[][] }; dm: 
   const dmTmp = { base, rng: strip(rng), up: strip(up), down: strip(down), gap: strip(gap), gapSd };
   const rb = HORIZONS.map(() => Array.from({ length: TIME_BUCKETS }, () => [] as number[]));
   for (const d of train.filter((_, i) => i % 3 === 0))
-    for (let k = 0; k < BARS; k++) {
+    for (let k = 0; k < BARS; k += KS) {
       const z = features(d.c, k, d.P0, d.ctx, m.disc).map((v, j) => (Number.isFinite(v) ? Math.max(-4, Math.min(4, (v - m.mean[j]) / (m.sd[j] || 1))) : 0));
       const sc = volScale(dmTmp, d.ix, k, d.c[0], d.P0, d.ctx);
       HORIZONS.forEach((h, hi) => {
         if (!validK(k, h)) return;
         const p = (m.coef[hi][0] + z.reduce((s, v, j) => s + m.coef[hi][j + 1] * v, 0)) * horizonScale(h, k);
-        rb[hi][timeBucket(k)].push((target(d, k, h) - p) / sc / windowVol(base, k, h === 54 ? BARS - k : h));
+        rb[hi][timeBucket(k)].push((target(d, k, h) - p) / sc / windowVol(base, k, h === BARS ? BARS - k : h));
       });
     }
   m.resid = rb.map((row) => row.map((e) => (e.length > 10 ? std(e) : 0.5)));
@@ -386,8 +399,8 @@ const beta = betaBefore(taiex.length);
 // ---------------------------------------------------------------- 逐段往前滾回測
 const FIRST = Math.min(250, Math.floor(days.length / 2));
 const REFIT = 20;
-const ORIGINS = [-1, 0, 12, 24, 36, 48]; // 開盤前、開盤、10:00、11:00、12:00、13:00
-const ORIGIN_LABEL: Record<number, string> = { [-1]: '開盤前', 0: '09:00 開盤', 12: '10:00', 24: '11:00', 36: '12:00', 48: '13:00' };
+const ORIGINS = [-1, 0, nb(60), nb(120), nb(180), nb(240)]; // 開盤前、開盤、10:00、11:00、12:00、13:00
+const ORIGIN_LABEL: Record<number, string> = { [-1]: '開盤前', 0: '09:00 開盤', [nb(60)]: '10:00', [nb(120)]: '11:00', [nb(180)]: '12:00', [nb(240)]: '13:00' };
 type Acc = { pe: number[]; pn: number[]; cov: number; covN: number; re: number[]; rn: number[]; rl: number[]; rlb: number[]; he: number[]; hn: number[] };
 /**
  * 成績分期間記：開發期間（我調整模型時看過的回測，從 DEV_START 起）與「從沒看過的期間」（之前回補的歷史）。
@@ -447,10 +460,10 @@ let replaySnap: { m: IntradayModel; dm: DayModel; choice: Array<{ origin: number
 const record: Array<{ date: string; origin: number; ref: number; blend: number; model: number; avg: number; actual: number }> = [];
 // 00631L 當天進出場（區間來回）：每一組設定每天的淨損益，挑「到昨天為止」賺最多的那組來用
 const RANGE_PLANS: RangePlan[] = [];
-for (const k of [6, 12]) for (const e of [0.4, 0.6, 0.8, 1]) for (const tp of [0.5, 1, 1.5]) for (const sl of [0.5, 1]) for (const m of [0, 1, 2]) RANGE_PLANS.push({ k, e, tp, sl, m });
+for (const k of TF === 5 ? [6, 12] : []) for (const e of [0.4, 0.6, 0.8, 1]) for (const tp of [0.5, 1, 1.5]) for (const sl of [0.5, 1]) for (const m of [0, 1, 2]) RANGE_PLANS.push({ k, e, tp, sl, m });
 // 「今天不交易」也是選項：過去怎麼做都虧時，模型應該選擇不交易
 RANGE_PLANS.push({ k: 6, e: 1, tp: 1, sl: 1, m: Infinity });
-const RANGE_DEFAULT = RANGE_PLANS.findIndex((p) => p.k === 6 && p.e === 0.8 && p.tp === 1 && p.sl === 1 && p.m === 1);
+const RANGE_DEFAULT = Math.max(0, RANGE_PLANS.findIndex((p) => p.k === 6 && p.e === 0.8 && p.tp === 1 && p.sl === 1 && p.m === 1));
 const rangeCum = new Array(RANGE_PLANS.length).fill(0);
 const rangeSq = new Array(RANGE_PLANS.length).fill(0);
 let rangeDays = 0;
@@ -476,10 +489,20 @@ for (let n = FIRST; n < days.length; n++) {
     fitted = fitAll(train);
     for (const [k, v] of Object.entries(fitted.lambdas)) (lambdaLog[k] ??= []).push(v);
     avgEx = { up: [], down: [] };
-    for (let k = 0; k < BARS; k++) {
-      avgEx.up.push(mean(train.map((d) => Math.max(...d.ix.slice(k).map((b) => Math.log(b[1] / d.c[k]))))));
-      avgEx.down.push(mean(train.map((d) => Math.max(...d.ix.slice(k).map((b) => Math.log(d.c[k] / b[2]))))));
+    // 每個時間點之後的最高、最低（從後面往前算，1 分 K 也快）
+    const su = new Array(BARS).fill(0);
+    const sd = new Array(BARS).fill(0);
+    for (const d of train) {
+      let hi = -Infinity;
+      let lo = Infinity;
+      for (let k = BARS - 1; k >= 0; k--) {
+        hi = Math.max(hi, d.ix[k][1]);
+        lo = Math.min(lo, d.ix[k][2]);
+        su[k] += Math.log(hi / d.c[k]);
+        sd[k] += Math.log(d.c[k] / lo);
+      }
     }
+    for (let k = 0; k < BARS; k++) avgEx.up.push(su[k] / train.length), avgEx.down.push(sd[k] / train.length);
   }
   const { m, dm } = fitted;
   const d = days[n];
@@ -581,18 +604,18 @@ for (let n = FIRST; n < days.length; n++) {
     rangeDays++;
     // 歷史模擬存檔（給模擬帳戶回測）：前一個交易日收盤後「會存下來」的區間進出場設定
     const asOf = taiex[dIdx.get(d.date)! - 1][0];
-    if (process.env.BACKFILL_DIR && asOf >= (process.env.BACKFILL_FROM ?? '0000') && asOf <= (process.env.BACKFILL_TO ?? '9999')) {
+    if (TF === 5 && process.env.BACKFILL_DIR && asOf >= (process.env.BACKFILL_FROM ?? '0000') && asOf <= (process.env.BACKFILL_TO ?? '9999')) {
       const pl = RANGE_PLANS[pick];
       writeArchive(process.env.BACKFILL_DIR, 'intraday', asOf, { P0: d.P0, ctx: d.ctx, range: { plan: { ...pl, m: Number.isFinite(pl.m ?? 0) ? pl.m : 1e9 }, dm, beta: bL } });
     }
   }
   // 這一天收盤走勢的樣本外殘差（給之後的日子畫區間）
-  for (let k = 0; k < BARS; k++) {
+  for (let k = 0; k < BARS; k += KS) {
     const z = features(d.c, k, d.P0, d.ctx, m.disc).map((v, j) => (Number.isFinite(v) ? Math.max(-4, Math.min(4, (v - m.mean[j]) / (m.sd[j] || 1))) : 0));
     HORIZONS.forEach((h, hi) => {
       if (!validK(k, h)) return;
       const p = (m.coef[hi][0] + z.reduce((s, v, j) => s + m.coef[hi][j + 1] * v, 0)) * horizonScale(h, k);
-      residBy[hi][timeBucket(k)].push((target(d, k, h) - p) / volScale(dm, d.ix, k, d.c[0], d.P0, d.ctx) / windowVol(dm.base, k, h === 54 ? BARS - k : h));
+      residBy[hi][timeBucket(k)].push((target(d, k, h) - p) / volScale(dm, d.ix, k, d.c[0], d.P0, d.ctx) / windowVol(dm.base, k, h === BARS ? BARS - k : h));
     });
   }
 }
@@ -717,7 +740,7 @@ function nextDayForecast() {
   const r = (xs: number[]) => xs.map((v) => r5(v));
   return { P0, model: r(model), avg: r(avg), blend: r(blendLine(model, avg, ch.w)), analogs: an.lines.slice(0, 3).map((l) => ({ date: l.date, closes: r(l.closes) })), dayHigh: r5(f.dayHigh), dayLow: r5(f.dayLow), choice: ch, ctx, range: { plan: { ...RANGE_PLANS[bestRange()], m: Number.isFinite(RANGE_PLANS[bestRange()].m ?? 0) ? RANGE_PLANS[bestRange()].m : 1e9 }, dm: final.dm, beta } };
 }
-const ARCHIVE_DIR = process.env.ARCHIVE_DIR;
+const ARCHIVE_DIR = TF === 5 ? process.env.ARCHIVE_DIR : undefined;
 if (ARCHIVE_DIR) {
   if (canArchive(lastDate, Date.now(), !!process.env.ARCHIVE_KIND_SUFFIX)) console.log(writeArchive(ARCHIVE_DIR, 'intraday' + (process.env.ARCHIVE_KIND_SUFFIX ?? ''), lastDate, nextDayForecast()) ? `事前存檔：${lastDate} 收盤後 → 下一個交易日` : `事前存檔：${lastDate} 已經存過`);
   else console.log(`事前存檔：現在不是 ${lastDate} 收盤後到下一個交易日開盤前，不存`);
@@ -725,7 +748,7 @@ if (ARCHIVE_DIR) {
 // 實盤成績：存檔裡的預測 vs 之後實際的走勢（只用存檔的數字）
 type Arch = { P0: number; model: number[]; avg: number[]; blend: number[]; dayHigh: number; dayLow: number };
 const fwRows: Array<{ asOf: string; date: string; P0: number; actual: number; blend: number; model: number; avg: number; rmse: Record<string, number>; hiErr: number; loErr: number }> = [];
-for (const a of readPreOpen<Arch>(process.env.FORECASTS_DIR, 'intraday')) {
+for (const a of readPreOpen<Arch>(TF === 5 ? process.env.FORECASTS_DIR : undefined, 'intraday')) {
   const i = dIdx.get(a.asOf);
   const next = i == null ? undefined : taiex[i + 1]?.[0];
   const d = next ? days.find((x) => x.date === next) : undefined;
@@ -754,7 +777,7 @@ const forward = {
 // 進出場的實盤成績：用存檔的模型與規則，在實際走勢上算出當天的價位並模擬
 type RangeArch = { P0: number; ctx: DailyCtx; range?: { plan: RangePlan; dm: DayModel; beta: number } };
 const fwRange: Array<{ date: string; side: number; how: string; pnl: number }> = [];
-for (const a of readPreOpen<RangeArch>(process.env.FORECASTS_DIR, 'intraday')) {
+for (const a of readPreOpen<RangeArch>(TF === 5 ? process.env.FORECASTS_DIR : undefined, 'intraday')) {
   if (!a.range || !a.ctx) continue;
   const i = dIdx.get(a.asOf);
   const next = i == null ? undefined : taiex[i + 1]?.[0];
@@ -768,10 +791,11 @@ console.log(`實盤成績：${forward.days} 天（事前存檔）`);
 if (process.env.ARCHIVE_ONLY) process.exit(0);
 
 writeFileSync(
-  join(dir, 'predict-intraday.json'),
+  join(dir, `predict-intraday${SUF}.json`),
   JSON.stringify({
     generatedAt: new Date().toISOString(),
     ready: true,
+    tf: TF,
     beta: r5(beta),
     model: { mean: final.m.mean.map(r5), sd: final.m.sd.map(r5), coef: final.m.coef.map((b) => b.map(r5)), resid: final.m.resid, disc: final.m.disc, discT: final.m.discT },
     day: { base: final.dm.base.map(r5), rng: lin(final.dm.rng), up: lin(final.dm.up), down: lin(final.dm.down), gap: lin(final.dm.gap), gapSd: r5(final.dm.gapSd) },
@@ -807,6 +831,6 @@ writeFileSync(
 );
 // 相似日資料庫（網頁即時找相似日用）：[日期, 跳空, 走勢（×1e4 取整）, 開盤前資料]
 const i4 = (v: number) => (Number.isFinite(v) ? Math.round(v * 1e4) : null);
-writeFileSync(join(dir, 'predict-analogs.json'), JSON.stringify(lib.map((a) => [a.date, i4(a.gap), a.r.map((v) => i4(v)), [a.ctx.prevDay, a.ctx.prev5, a.ctx.prevIntra, a.ctx.futChg, a.ctx.prevRange, a.ctx.usSox ?? NaN, a.ctx.usTsm ?? NaN, a.ctx.usSpx ?? NaN, a.ctx.night ?? NaN, a.ctx.usVix ?? NaN, a.ctx.nightRange ?? NaN, a.ctx.nightPos ?? NaN].map(i4)])));
+writeFileSync(join(dir, `predict-analogs${SUF}.json`), JSON.stringify(lib.map((a) => [a.date, i4(a.gap), a.r.map((v) => i4(v)), [a.ctx.prevDay, a.ctx.prev5, a.ctx.prevIntra, a.ctx.futChg, a.ctx.prevRange, a.ctx.usSox ?? NaN, a.ctx.usTsm ?? NaN, a.ctx.usSpx ?? NaN, a.ctx.night ?? NaN, a.ctx.usVix ?? NaN, a.ctx.nightRange ?? NaN, a.ctx.nightPos ?? NaN].map(i4)])));
 for (const o of ORIGINS) console.log(`  ${ORIGIN_LABEL[o]}（n=${bestChoice(o).n}、w=${bestChoice(o).w}）：` + LINES.map((l) => { const t = lineAcc[o][l]; return `${l} ${(Math.sqrt(t.se / (t.n || 1)) * 100).toFixed(2)}%/${((t.hit / (t.days || 1)) * 100).toFixed(0)}%/${((t.best / (t.days || 1)) * 100).toFixed(0)}%`; }).join('  '));
-console.log(`β ${beta.toFixed(3)}；predict-intraday.json 完成（${((Date.now() - t0) / 1000).toFixed(1)}s）`);
+console.log(`β ${beta.toFixed(3)}；predict-intraday${SUF}.json 完成（${((Date.now() - t0) / 1000).toFixed(1)}s）`);

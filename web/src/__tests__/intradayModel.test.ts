@@ -104,3 +104,20 @@ describe('自創指標', () => {
     expect(predictAt({ ...m, disc: [] }, c, 5, 99, ctx)[0]).toBe(0);
   });
 });
+
+import * as IM from '../domain/intradayModel';
+describe('切換 K 線時間單位', () => {
+  it('預測長度以分鐘換算成根數，切回 5 分 K 不變', () => {
+    IM.setTimeframe(1);
+    expect(IM.BARS).toBe(270);
+    expect(IM.HORIZONS).toEqual([5, 10, 15, 30, 60, 270]);
+    expect(IM.timeBucket(46)).toBe(2);
+    IM.setTimeframe(3);
+    expect(IM.BARS).toBe(90);
+    expect(IM.HORIZONS).toEqual([2, 3, 5, 10, 20, 90]);
+    IM.setTimeframe(5);
+    expect(IM.BARS).toBe(54);
+    expect(IM.HORIZONS).toEqual([1, 2, 3, 6, 12, 54]);
+    expect(IM.timeBucket(10)).toBe(2);
+  });
+});
