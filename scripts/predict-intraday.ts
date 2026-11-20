@@ -101,7 +101,7 @@ function dailyCtx(i: number): DailyCtx | null {
     usTsm: usMove(usData.TSM, taiex[i - 1][0], taiex[i]?.[0] ?? '9999-12-31'),
     usSpx: usMove(usData.GSPC, taiex[i - 1][0], taiex[i]?.[0] ?? '9999-12-31'),
     night: nightMove(txData, taiex[i - 1][0], taiex[i]?.[0] ?? null),
-    usVix: usMove(usData.VIX ?? [], taiex[i - 1][0], taiex[i]?.[0] ?? '9999-12-31'),
+    usVix: usMove(usData.VIX, taiex[i - 1][0], taiex[i]?.[0] ?? '9999-12-31'),
     ...nightShape(nightBar(txData, taiex[i - 1][0], taiex[i]?.[0] ?? null)),
   };
 }

@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 type Row = [string, number, number, number, number];
-export const US_SYMBOLS = ['SOX', 'TSM', 'GSPC'] as const;
+export const US_SYMBOLS = ['SOX', 'TSM', 'GSPC', 'VIX'] as const;
 export type UsSym = (typeof US_SYMBOLS)[number];
 
 export function loadUs(dir: string): Record<UsSym, Row[]> {
