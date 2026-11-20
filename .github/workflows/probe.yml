@@ -1,0 +1,25 @@
+name: Probe data sources
+
+# 手動執行：找新的資料來源（只印出來，不存任何東西）
+on:
+  workflow_dispatch:
+    inputs:
+      words:
+        description: '關鍵字（逗號分隔）'
+        default: '內部人,轉讓,持股'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/tools/probe-openapi.ts
+        env:
+          PROBE_WORDS: ${{ inputs.words }}
