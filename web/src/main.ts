@@ -1,4 +1,5 @@
 import './styles/index.css';
+import { initNav, syncNav } from './ui/navGroups';
 import { MockMarketProvider } from './data/mockProvider';
 import { LiveProvider, type LiveStatus } from './data/liveProvider';
 import { CloseReplayProvider, loadCloseFile } from './data/closeProvider';
@@ -332,6 +333,7 @@ class App {
   }
 
   private showPage(page: Page): void {
+    syncNav(page);
     const app = $('.app');
     for (const p of PAGES) {
       app.classList.toggle(`page-${p}`, p === page);
@@ -597,6 +599,7 @@ class App {
       tab.addEventListener('click', () => this.showPage(tab.dataset.page as Page));
     }
     window.addEventListener('hashchange', () => this.showPage(pageFromHash()));
+    initNav(() => $('#logo-btn').click());
     // 從背景叫回來時，市場情報的資料如果放太久了就重新載入（renderExtras 會檢查時間）
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && this.page === 'intel') this.renderPanels();

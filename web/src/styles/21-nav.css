@@ -1,0 +1,114 @@
+/* 導覽分組、設定面板、熱力圖說明、手機底部導覽（2026-11 改版：設定與說明收起來，主功能當焦點） */
+
+/* ---------------- 分頁分組（電腦版維持原本一排；手機版只顯示目前這組） ---------------- */
+.nav-group { display: contents; }
+.nav-sim { display: none; }
+
+/* ---------------- 熱力圖說明：收成一顆「怎麼看」 ---------------- */
+.legend { position: relative; }
+.legend > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  display: inline-flex; align-items: center; min-height: 30px; padding: 3px 12px; border-radius: 999px;
+  font-size: 12px; color: var(--ink-2); background: rgba(255, 255, 255, 0.04); border: 1px solid var(--glass-line);
+}
+.legend > summary::-webkit-details-marker { display: none; }
+.legend[open] > summary { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.legend[open] .hint-chips {
+  position: absolute; z-index: 20; top: calc(100% + 8px); left: 0; width: max-content; max-width: min(420px, calc(100vw - 48px));
+  padding: 10px; border-radius: 14px; border: 1px solid var(--glass-line);
+  background: rgba(12, 16, 32, 0.96); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* ---------------- 設定面板：電腦從右側滑出、手機從底部滑上來 ---------------- */
+.menu-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.menu-head b { font-size: 16px; font-weight: 600; }
+/* 打開時背景變暗（點暗處關閉：暗處是 summary 的延伸，點了就會收起 details） */
+.menu[open] > summary::after {
+  content: ''; position: fixed; inset: 0; z-index: 70; cursor: default;
+  background: rgba(2, 4, 12, 0.55); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.menu[open] .menu-body {
+  position: fixed; z-index: 71;
+  top: 12px; right: 12px; bottom: 12px; left: auto;
+  width: min(380px, calc(100vw - 24px)); max-height: none;
+  padding: 18px 20px 22px; gap: 10px; align-content: start;
+  border-radius: 20px; overflow-y: auto; overscroll-behavior: contain;
+  animation: sheet-in-right 0.22s var(--ease);
+}
+@keyframes sheet-in-right { from { transform: translateX(24px); opacity: 0; } }
+@keyframes sheet-in-up { from { transform: translateY(40px); opacity: 0; } }
+html.menu-open, html.menu-open body { overflow: hidden; }
+/* 頂部列的毛玻璃（backdrop-filter）會讓裡面 position: fixed 的面板改成相對頂部列定位：打開設定時關掉，並蓋過底部導覽 */
+.topbar:has(.menu[open]) { -webkit-backdrop-filter: none; backdrop-filter: none; z-index: 80; }
+
+/* ---------------- 手機（≤ 720px） ---------------- */
+.tabbar { display: none; }
+@media (max-width: 720px) {
+  /* 頂部只剩一條：Logo、名稱、資料來源、設定 */
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'brand menu' 'ticker ticker';
+    gap: 8px; padding: 8px 10px 10px;
+  }
+  .logo { width: 30px; height: 30px; }
+  .brand-text b { font-size: 12px; }
+
+  /* 分頁：只顯示目前這組的子頁，變成置中的左右切換；只有一頁的組不顯示 */
+  .pages { display: none; }
+  .app[data-group='market']:not(.page-sim) .pages,
+  .app[data-group='pick']:not(.page-sim) .pages,
+  .app[data-group='more']:not(.page-sim) .pages {
+    display: flex; grid-area: pages; justify-self: center; width: auto; max-width: 100%; overflow: visible;
+  }
+  .app[data-group='market']:not(.page-sim) .topbar,
+  .app[data-group='pick']:not(.page-sim) .topbar,
+  .app[data-group='more']:not(.page-sim) .topbar { grid-template-areas: 'brand menu' 'ticker ticker' 'pages pages'; }
+  .nav-group { display: none; }
+  .app[data-group='market'] .nav-group[data-group='market'],
+  .app[data-group='pick'] .nav-group[data-group='pick'],
+  .app[data-group='more'] .nav-group[data-group='more'] { display: contents; }
+  .app[data-group='more'] .nav-sim { display: inline-block; }
+  .pages button { flex: 0 0 auto; min-height: 38px; padding: 0 20px; font-size: 14px; }
+
+  /* 加權指數：一行（指數＋狀態），點了才展開成交額、漲跌家數、時間 */
+  .ticker { cursor: pointer; grid-template-columns: minmax(0, 1fr) auto; }
+  .ticker .kv-index { grid-column: 1; }
+  .ticker .kv-live { grid-column: 2; }
+  .ticker > .kv:not(.kv-index):not(.kv-live) { display: none; }
+  .ticker.is-open { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ticker.is-open .kv-index { grid-column: 1 / 3; }
+  .ticker.is-open .kv-live { grid-column: 3; }
+  .ticker.is-open > .kv:not(.kv-index):not(.kv-live) { display: grid; }
+  .kv-index b { font-size: 19px; }
+  .kv-index dt::after { content: ' ▾'; font-size: 9px; opacity: 0.6; }
+  .ticker.is-open .kv-index dt::after { content: ' ▴'; }
+
+  /* 底部導覽：拇指最容易按到的地方 */
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+    padding: 4px max(6px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+    background: rgba(7, 10, 22, 0.9); -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3);
+    border-top: 1px solid var(--glass-line);
+  }
+  .tabbar a {
+    display: grid; justify-items: center; align-content: center; gap: 3px; min-height: 52px;
+    font-size: 11px; color: var(--muted); text-decoration: none; -webkit-tap-highlight-color: transparent;
+  }
+  .tabbar svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .tabbar a[aria-current='page'] { color: var(--accent); }
+  .tabbar a[aria-current='page'] svg { filter: drop-shadow(0 0 8px rgba(143, 240, 255, 0.55)); }
+  .app.page-sim ~ .tabbar, .app.page-sim .tabbar { display: none; }
+  .app:not(.page-sim) { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+
+  /* 設定面板：從底部滑上來，頂端一條拉把 */
+  .menu[open] .menu-body {
+    top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 86dvh;
+    border-radius: 22px 22px 0 0; padding: 10px 18px calc(22px + env(safe-area-inset-bottom));
+    animation: sheet-in-up 0.24s var(--ease);
+  }
+  .menu-body .seg button, .menu-body .btn { min-height: 44px; }
+
+  .field-head { gap: 8px 10px; }
+}
