@@ -1,0 +1,37 @@
+/* 模擬盤介面整理（2026-11）：控制鈕分主次、手機帳戶數字一行、分頁全部看得到 */
+
+/* 「⋯」：盤前停留、結束這局（不常用，收起來） */
+.sim-more { position: relative; }
+.sim-more > summary { list-style: none; display: inline-flex; align-items: center; min-width: 44px; height: 100%; justify-content: center; font-size: 18px; line-height: 1; }
+.sim-more > summary::-webkit-details-marker { display: none; }
+.sim-more[open] > summary { color: var(--ink); background: rgba(255, 255, 255, 0.1); }
+.sim-more-body {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 30;
+  display: grid; gap: 8px; min-width: 180px; padding: 10px;
+  background: rgba(12, 16, 32, 0.97);
+}
+.sim-more-body .btn { width: 100%; justify-content: center; }
+
+@media (max-width: 720px) {
+  /* 狀態卡：日期一列、帳戶數字一列四格、控制鈕一列 */
+  .sim-head { gap: 10px 12px; padding: 14px 14px 12px !important; }
+  .sim-date .eyebrow { margin-bottom: 2px; }
+  .sim-head .sim-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 8px; width: 100%; }
+  .sim-kpis dt { font-size: 10px; white-space: nowrap; }
+  .sim-kpis dd { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sim-steps { width: 100%; flex-wrap: nowrap; gap: 6px; }
+  .sim-steps > .btn, .sim-steps .seg button, .sim-more > summary { min-height: 40px; padding-left: 10px; padding-right: 10px; }
+  .sim-steps > .btn:first-child { flex: 1 1 auto; }
+  .sim-long { display: none; }
+  .sim-more { margin-left: auto; }
+  /* 模擬盤頂端列：只留圖示和右邊的按鈕，排成一行 */
+  .app.page-sim .brand-text { display: none; }
+  .app.page-sim .topbar { flex-wrap: nowrap; padding: 8px 10px; }
+  .app.page-sim .sim-bar { gap: 6px; }
+  .app.page-sim .sim-bar .btn { min-height: 40px; }
+
+  /* 分頁：8 個一次看完（4 × 2），不用左右滑 */
+  .sim-tabs { display: grid !important; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; overflow: visible; }
+  .sim-tabs button { flex-direction: column; gap: 1px; padding: 5px 2px; font-size: 12px; border-radius: 10px; }
+  .sim-tabs button > span { font-size: 16px; line-height: 1.1; }
+}

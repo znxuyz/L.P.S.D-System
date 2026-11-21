@@ -178,7 +178,10 @@ export class SimPage implements SimCtx {
   private unit: 'lot' | 'share' = 'lot';
   private msg = '';
   private bankMsg = '';
-  private hints = true;
+  /** 型態提示：手機預設收起（下單區才會緊接在 K 線後面），電腦預設打開。 */
+  private hints = !(typeof matchMedia === 'function' && matchMedia('(max-width: 720px)').matches);
+  /** 「⋯」選單（盤前停留、結束這局）是否打開：每秒重畫時保持原狀。 */
+  private moreOpen = false;
   /** 新手指引進行中（期間時鐘暫停）。 */
   private guiding = false;
   /** 每天先停在盤前。 */
@@ -1441,6 +1444,11 @@ export class SimPage implements SimCtx {
     if (!el.dataset.ready) {
       el.dataset.ready = '1';
       el.innerHTML = `<div class="sim-date" id="sim-date"></div><dl class="sim-kpis" id="sim-kpis"></dl><div class="sim-steps" id="sim-steps"></div><div class="sim-endbox" id="sim-endbox"></div>`;
+      // toggle 事件不會冒泡：用捕獲階段記住「⋯」有沒有打開
+      el.addEventListener('toggle', (e) => {
+        const d = e.target as HTMLDetailsElement;
+        if (d.classList?.contains('sim-more')) this.moreOpen = d.open;
+      }, true);
     }
     const q = (id: string) => el.querySelector<HTMLElement>(`#${id}`)!;
     const m = this.market;
@@ -1478,9 +1486,14 @@ export class SimPage implements SimCtx {
         <div class="seg sim-speed" role="group" aria-label="時間流速">${([1, 3, 5] as const)
           .map((v) => `<button type="button" data-sim="speed${v}" aria-pressed="${this.speed === v}">${v}×</button>`)
           .join('')}</div>
-        <button type="button" class="btn" data-sim="nextday" ${end ? 'disabled' : ''} title="快捷鍵：→">⏭ 直接到隔天</button>
-        <button type="button" class="btn" data-sim="prestop" aria-pressed="${this.preStop}" title="開啟時每天先停在盤前（08:30），可以先掛單，按「開盤」才開始">盤前停留：${this.preStop ? '開' : '關'}</button>
-        <button type="button" class="btn sim-step-end" data-sim="reset" title="結束後揭曉真實日期，看結束報告">結束這局</button>`,
+        <button type="button" class="btn" data-sim="nextday" ${end ? 'disabled' : ''} title="快捷鍵：→">⏭ <span class="sim-long">直接到</span>隔天</button>
+        <details class="sim-more"${this.moreOpen ? ' open' : ''}>
+          <summary class="btn" aria-label="更多：盤前停留、結束這局" title="盤前停留、結束這局">⋯</summary>
+          <div class="sim-more-body glass">
+            <button type="button" class="btn" data-sim="prestop" aria-pressed="${this.preStop}" title="開啟時每天先停在盤前（08:30），可以先掛單，按「開盤」才開始">盤前停留：${this.preStop ? '開' : '關'}</button>
+            <button type="button" class="btn sim-step-end" data-sim="reset" title="結束後揭曉真實日期，看結束報告">結束這局</button>
+          </div>
+        </details>`,
     );
     setHtml(
       q('sim-endbox'),
