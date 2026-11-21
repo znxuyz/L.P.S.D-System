@@ -9,8 +9,8 @@ import type { MarketSnapshot, Quote, TurnoverBar, Universe } from './types';
  *
  * - 每檔股票、ETF 與加權指數的開、高、低、收、成交量、成交額、昨收、20 日均額都是最近一個交易日的真實資料
  *   （部署時由 scripts/close-snapshot.ts 產生 data/close.json）。
- * - 一打開就停在收盤；按「重新開盤」可以從 09:00 回放這一天。回放時每分鐘的價格是依開高低收推算的模擬走勢
- *   （domain/intraday.ts，和模擬盤同一套），收盤的數字一定和真實收盤相同。
+ * - 一打開就停在收盤；按「重新開盤」可以從 09:00 回放這一天。個股每分鐘的價格是依開高低收推算的模擬走勢
+ *   （domain/intraday.ts，和模擬盤同一套），收盤的數字一定和真實收盤相同；加權指數有真實 1 分 K（indexMin）就用真實走勢。
  * - 股票池、產業分類沿用內建清單；沒有這一天資料的股票（例如暫停交易）不放進熱力圖。
  */
 
@@ -19,6 +19,8 @@ export interface CloseFile {
   prevDate: string;
   /** [開, 高, 低, 收, 昨收] */
   index: [number, number, number, number, number] | null;
+  /** 加權指數當天第 0～270 分鐘的真實價格（證交所 1 分 K）；沒有時用開高低收推算。 */
+  indexMin?: number[];
   /** 上市成交額（億元）。 */
   total: number;
   /** 代號 → [開, 高, 低, 收, 張, 昨收, 成交額（億元）, 近 20 日平均成交額（億元）] */
@@ -114,7 +116,12 @@ export class CloseReplayProvider implements MarketDataProvider, PlaybackControl 
       this.tracks.set(code, { path, turnover, volume, hi, lo });
     }
     const ix = file.index;
-    this.indexPath = ix ? intradayPath('TAIEX', file.date, { open: ix[0], high: ix[1], low: ix[2], close: ix[3], volume: 0 }) : null;
+    this.indexPath =
+      file.indexMin?.length === SESSION_MINUTES + 1
+        ? { price: Float64Array.from(file.indexMin), cumVolume: new Float64Array(SESSION_MINUTES + 1) }
+        : ix
+          ? intradayPath('TAIEX', file.date, { open: ix[0], high: ix[1], low: ix[2], close: ix[3], volume: 0 })
+          : null;
     // 每分鐘的累計成交額與股價（資金輪動、熱力圖走勢線用）
     for (let m = 0; m <= SESSION_MINUTES; m++) {
       const byStock: Record<string, number> = {};
