@@ -35,7 +35,10 @@
   .app.page-intel .dock { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
   .app.page-intel .dock .card { min-height: 260px; }
   .app.page-intel .dock .card-mrank, .app.page-intel .dock .card-mnews { height: 460px; }
-  .app.page-intel .side { grid-template-rows: auto 260px; }
+  .app.page-intel .side { grid-template-rows: auto auto; }
+  /* 盤中事件：依內容長高，最多 300px（事件少時不留一大片空白） */
+  .app.page-intel .log { max-height: 300px; }
+  .app.page-intel .log-list { min-height: 0; }
   .sectors { overflow-x: auto; overflow-y: hidden; padding: 10px; }
   .sectors .panel-title { display: none; }
   .sector-list { display: flex; gap: 6px; width: max-content; }

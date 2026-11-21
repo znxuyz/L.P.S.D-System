@@ -114,3 +114,12 @@ html.menu-open .topbar, .topbar:has(.menu[open]) { -webkit-backdrop-filter: none
 
   .field-head { gap: 8px 10px; }
 }
+
+/* 五大選股、ETF 分類：手機上排成兩欄的精簡卡（只留名稱與檔數），結果清單才不會被推到很下面 */
+@media (max-width: 720px) {
+  .strategies .strat-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .strategies .strat { padding: 10px 12px; gap: 2px; }
+  .strategies .strat-en, .strategies .strat-idea { display: none; }
+  .strategies .strat-name { font-size: 14px; }
+  .strategies .strat-count { margin-top: 0; }
+}
