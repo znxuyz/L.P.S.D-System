@@ -1,0 +1,2091 @@
+{
+ "generatedAt": "2026-11-21T10:11:36.150Z",
+ "etfs": {
+  "00980A": {
+   "issuer": "野村投信",
+   "fetchedAt": "2026-11-20T23:59:13.920Z",
+   "asOf": "2026-11-20",
+   "snapshots": 10,
+   "holdings": [
+    {
+     "code": "2330",
+     "name": "台灣積體電路製造",
+     "shares": 753000,
+     "weight": 11.3
+    },
+    {
+     "code": "2454",
+     "name": "聯發科技",
+     "shares": 265000,
+     "weight": 6.66
+    },
+    {
+     "code": "2317",
+     "name": "鴻海精密工業",
+     "shares": 2608000,
+     "weight": 4.11
+    },
+    {
+     "code": "1303",
+     "name": "南亞塑膠工業",
+     "shares": 2251000,
+     "weight": 3.48
+    },
+    {
+     "code": "2059",
+     "name": "川湖科技",
+     "shares": 84000,
+     "weight": 3.37
+    },
+    {
+     "code": "2383",
+     "name": "台光電子材料",
+     "shares": 153000,
+     "weight": 3.23
+    },
+    {
+     "code": "2308",
+     "name": "台達電子工業",
+     "shares": 404000,
+     "weight": 2.73
+    },
+    {
+     "code": "3653",
+     "name": "健策精密工業",
+     "shares": 96000,
+     "weight": 2.67
+    },
+    {
+     "code": "3037",
+     "name": "欣興電子",
+     "shares": 625000,
+     "weight": 2.52
+    },
+    {
+     "code": "3017",
+     "name": "奇鋐科技",
+     "shares": 142000,
+     "weight": 2.35
+    },
+    {
+     "code": "3711",
+     "name": "日月光投資控股",
+     "shares": 660000,
+     "weight": 2.26
+    },
+    {
+     "code": "2382",
+     "name": "廣達電腦",
+     "shares": 1169000,
+     "weight": 2.21
+    },
+    {
+     "code": "2891",
+     "name": "中國信託金融控股",
+     "shares": 4151000,
+     "weight": 2.12
+    },
+    {
+     "code": "2408",
+     "name": "南亞科技",
+     "shares": 1028000,
+     "weight": 2.04
+    },
+    {
+     "code": "6669",
+     "name": "緯穎科技服務",
+     "shares": 197105,
+     "weight": 1.96
+    },
+    {
+     "code": "3231",
+     "name": "緯創資通",
+     "shares": 1763000,
+     "weight": 1.94
+    },
+    {
+     "code": "3443",
+     "name": "創意電子",
+     "shares": 48000,
+     "weight": 1.94
+    },
+    {
+     "code": "3008",
+     "name": "大立光電",
+     "shares": 69000,
+     "weight": 1.9
+    },
+    {
+     "code": "2368",
+     "name": "金像電子（股）公司",
+     "shares": 337000,
+     "weight": 1.8
+    },
+    {
+     "code": "2376",
+     "name": "技嘉科技",
+     "shares": 932000,
+     "weight": 1.73
+    },
+    {
+     "code": "7769",
+     "name": "鴻勁精密",
+     "shares": 75000,
+     "weight": 1.63
+    },
+    {
+     "code": "2884",
+     "name": "玉山金融控股",
+     "shares": 5156622,
+     "weight": 1.53
+    },
+    {
+     "code": "3665",
+     "name": "貿聯控股（BizLink Holding In",
+     "shares": 152336,
+     "weight": 1.49
+    },
+    {
+     "code": "3044",
+     "name": "健鼎科技",
+     "shares": 479000,
+     "weight": 1.45
+    },
+    {
+     "code": "2344",
+     "name": "華邦電子",
+     "shares": 2057000,
+     "weight": 1.38
+    },
+    {
+     "code": "2303",
+     "name": "聯華電子",
+     "shares": 2279000,
+     "weight": 1.37
+    },
+    {
+     "code": "6515",
+     "name": "穎崴科技",
+     "shares": 61000,
+     "weight": 1.32
+    },
+    {
+     "code": "6223",
+     "name": "旺矽科技",
+     "shares": 49000,
+     "weight": 1.31
+    },
+    {
+     "code": "5274",
+     "name": "信驊科技",
+     "shares": 21300,
+     "weight": 1.26
+    },
+    {
+     "code": "3081",
+     "name": "聯亞光電工業",
+     "shares": 119600,
+     "weight": 1.22
+    },
+    {
+     "code": "8046",
+     "name": "南亞電路板",
+     "shares": 251000,
+     "weight": 1.18
+    },
+    {
+     "code": "8299",
+     "name": "群聯電子",
+     "shares": 111000,
+     "weight": 1.1
+    },
+    {
+     "code": "3036",
+     "name": "文曄科技",
+     "shares": 906000,
+     "weight": 1.1
+    },
+    {
+     "code": "6213",
+     "name": "聯茂電子",
+     "shares": 356000,
+     "weight": 0.95
+    },
+    {
+     "code": "3189",
+     "name": "景碩科技",
+     "shares": 266000,
+     "weight": 0.94
+    },
+    {
+     "code": "2345",
+     "name": "智邦科技",
+     "shares": 100000,
+     "weight": 0.92
+    },
+    {
+     "code": "5904",
+     "name": "寶雅國際",
+     "shares": 1708500,
+     "weight": 0.87
+    },
+    {
+     "code": "6274",
+     "name": "台燿科技",
+     "shares": 187000,
+     "weight": 0.87
+    },
+    {
+     "code": "2360",
+     "name": "致茂電子",
+     "shares": 110000,
+     "weight": 0.76
+    },
+    {
+     "code": "2327",
+     "name": "國巨",
+     "shares": 320000,
+     "weight": 0.71
+    },
+    {
+     "code": "3026",
+     "name": "禾伸堂企業",
+     "shares": 286000,
+     "weight": 0.7
+    },
+    {
+     "code": "3264",
+     "name": "欣銓科技",
+     "shares": 650000,
+     "weight": 0.66
+    },
+    {
+     "code": "3293",
+     "name": "鈊象電子",
+     "shares": 110000,
+     "weight": 0.62
+    },
+    {
+     "code": "6805",
+     "name": "富世達",
+     "shares": 54000,
+     "weight": 0.58
+    },
+    {
+     "code": "7751",
+     "name": "竑騰科技",
+     "shares": 91000,
+     "weight": 0.56
+    },
+    {
+     "code": "8996",
+     "name": "高力熱處理工業",
+     "shares": 58000,
+     "weight": 0.4
+    },
+    {
+     "code": "8210",
+     "name": "勤誠興業",
+     "shares": 95000,
+     "weight": 0.3
+    },
+    {
+     "code": "6442",
+     "name": "光紅建聖",
+     "shares": 38000,
+     "weight": 0.25
+    },
+    {
+     "code": "6831",
+     "name": "邁科科技",
+     "shares": 129000,
+     "weight": 0.22
+    },
+    {
+     "code": "3529",
+     "name": "力旺電子",
+     "shares": 12000,
+     "weight": 0.16
+    }
+   ],
+   "changes": [],
+   "error": "TypeError: fetch failed"
+  },
+  "00981A": {
+   "issuer": "統一投信",
+   "fetchedAt": "2026-11-21T10:11:35.382Z",
+   "asOf": "2026-11-20",
+   "snapshots": 10,
+   "holdings": [
+    {
+     "code": "2330",
+     "name": "台積電",
+     "shares": 19303000,
+     "weight": 18.22
+    },
+    {
+     "code": "2454",
+     "name": "聯發科",
+     "shares": 5861000,
+     "weight": 9.27
+    },
+    {
+     "code": "3017",
+     "name": "奇鋐",
+     "shares": 7078000,
+     "weight": 7.37
+    },
+    {
+     "code": "2383",
+     "name": "台光電",
+     "shares": 4058000,
+     "weight": 5.38
+    },
+    {
+     "code": "3037",
+     "name": "欣興",
+     "shares": 19739000,
+     "weight": 5
+    },
+    {
+     "code": "6223",
+     "name": "旺矽",
+     "shares": 2683000,
+     "weight": 4.51
+    },
+    {
+     "code": "3653",
+     "name": "健策",
+     "shares": 2552000,
+     "weight": 4.46
+    },
+    {
+     "code": "2345",
+     "name": "智邦",
+     "shares": 7213000,
+     "weight": 4.19
+    },
+    {
+     "code": "3711",
+     "name": "日月光投控",
+     "shares": 17940000,
+     "weight": 3.87
+    },
+    {
+     "code": "2327",
+     "name": "國巨*",
+     "shares": 23519000,
+     "weight": 3.29
+    },
+    {
+     "code": "2308",
+     "name": "台達電",
+     "shares": 7582000,
+     "weight": 3.22
+    },
+    {
+     "code": "2368",
+     "name": "金像電",
+     "shares": 8053000,
+     "weight": 2.7
+    },
+    {
+     "code": "3443",
+     "name": "創意",
+     "shares": 1052000,
+     "weight": 2.68
+    },
+    {
+     "code": "2303",
+     "name": "聯電",
+     "shares": 60392000,
+     "weight": 2.29
+    },
+    {
+     "code": "6274",
+     "name": "台燿",
+     "shares": 7342000,
+     "weight": 2.16
+    },
+    {
+     "code": "8046",
+     "name": "南電",
+     "shares": 6993000,
+     "weight": 2.08
+    },
+    {
+     "code": "3665",
+     "name": "貿聯-KY",
+     "shares": 3223848,
+     "weight": 1.98
+    },
+    {
+     "code": "6669",
+     "name": "緯穎",
+     "shares": 2361561,
+     "weight": 1.48
+    },
+    {
+     "code": "6805",
+     "name": "富世達",
+     "shares": 1676000,
+     "weight": 1.13
+    },
+    {
+     "code": "3231",
+     "name": "緯創",
+     "shares": 11967000,
+     "weight": 0.83
+    },
+    {
+     "code": "5274",
+     "name": "信驊",
+     "shares": 206900,
+     "weight": 0.77
+    },
+    {
+     "code": "2449",
+     "name": "京元電子",
+     "shares": 7506450,
+     "weight": 0.56
+    },
+    {
+     "code": "6510",
+     "name": "精測",
+     "shares": 470000,
+     "weight": 0.52
+    },
+    {
+     "code": "2317",
+     "name": "鴻海",
+     "shares": 4637000,
+     "weight": 0.46
+    },
+    {
+     "code": "8996",
+     "name": "高力",
+     "shares": 981000,
+     "weight": 0.43
+    },
+    {
+     "code": "3264",
+     "name": "欣銓",
+     "shares": 5027000,
+     "weight": 0.32
+    },
+    {
+     "code": "2891",
+     "name": "中信金",
+     "shares": 9355000,
+     "weight": 0.3
+    },
+    {
+     "code": "6271",
+     "name": "同欣電",
+     "shares": 2940000,
+     "weight": 0.22
+    },
+    {
+     "code": "4979",
+     "name": "華星光",
+     "shares": 957000,
+     "weight": 0.12
+    },
+    {
+     "code": "6191",
+     "name": "精成科",
+     "shares": 3921000,
+     "weight": 0.12
+    },
+    {
+     "code": "6515",
+     "name": "穎崴",
+     "shares": 69000,
+     "weight": 0.09
+    },
+    {
+     "code": "8358",
+     "name": "金居",
+     "shares": 654000,
+     "weight": 0.08
+    },
+    {
+     "code": "6187",
+     "name": "萬潤",
+     "shares": 121000,
+     "weight": 0.04
+    },
+    {
+     "code": "2002",
+     "name": "中鋼",
+     "shares": 5163000,
+     "weight": 0.04
+    },
+    {
+     "code": "2313",
+     "name": "華通",
+     "shares": 501000,
+     "weight": 0.04
+    }
+   ],
+   "changes": [
+    {
+     "date": "2026-11-20",
+     "code": "2303",
+     "name": "聯電",
+     "kind": "decrease",
+     "before": 2.61,
+     "after": 2.29
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2449",
+     "name": "京元電子",
+     "kind": "decrease",
+     "before": 0.58,
+     "after": 0.56
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2383",
+     "name": "台光電",
+     "kind": "decrease",
+     "before": 6.03,
+     "after": 5.46
+    },
+    {
+     "date": "2026-11-19",
+     "code": "8046",
+     "name": "南電",
+     "kind": "decrease",
+     "before": 2.37,
+     "after": 2.1
+    },
+    {
+     "date": "2026-11-19",
+     "code": "5274",
+     "name": "信驊",
+     "kind": "decrease",
+     "before": 0.93,
+     "after": 0.78
+    },
+    {
+     "date": "2026-11-18",
+     "code": "3665",
+     "name": "貿聯-KY",
+     "kind": "increase",
+     "before": 1.8,
+     "after": 2.01
+    },
+    {
+     "date": "2026-11-18",
+     "code": "3443",
+     "name": "創意",
+     "kind": "increase",
+     "before": 2.95,
+     "after": 2.82
+    },
+    {
+     "date": "2026-11-17",
+     "code": "2454",
+     "name": "聯發科",
+     "kind": "increase",
+     "before": 8.56,
+     "after": 9.33
+    },
+    {
+     "date": "2026-11-17",
+     "code": "8046",
+     "name": "南電",
+     "kind": "decrease",
+     "before": 3.12,
+     "after": 2.51
+    },
+    {
+     "date": "2026-11-16",
+     "code": "1802",
+     "name": "台玻",
+     "kind": "remove",
+     "before": 0.3,
+     "after": 0
+    }
+   ]
+  },
+  "00982A": {
+   "issuer": "群益投信",
+   "fetchedAt": "2026-11-21T10:11:36.150Z",
+   "asOf": "2026-11-20",
+   "snapshots": 10,
+   "holdings": [
+    {
+     "code": "2330",
+     "name": "台積電",
+     "shares": 1609000,
+     "weight": 9.5064
+    },
+    {
+     "code": "2454",
+     "name": "聯發科",
+     "shares": 957000,
+     "weight": 9.4708
+    },
+    {
+     "code": "3105",
+     "name": "穩懋",
+     "shares": 7059000,
+     "weight": 7.9451
+    },
+    {
+     "code": "6531",
+     "name": "愛普*",
+     "shares": 4637000,
+     "weight": 6.6094
+    },
+    {
+     "code": "6139",
+     "name": "亞翔",
+     "shares": 4018000,
+     "weight": 5.9467
+    },
+    {
+     "code": "3491",
+     "name": "昇達科",
+     "shares": 1330000,
+     "weight": 4.813
+    },
+    {
+     "code": "6223",
+     "name": "旺矽",
+     "shares": 301000,
+     "weight": 3.1655
+    },
+    {
+     "code": "2383",
+     "name": "台光電",
+     "shares": 369000,
+     "weight": 3.0631
+    },
+    {
+     "code": "3017",
+     "name": "奇鋐",
+     "shares": 470000,
+     "weight": 3.0615
+    },
+    {
+     "code": "3008",
+     "name": "大立光",
+     "shares": 270000,
+     "weight": 2.9272
+    },
+    {
+     "code": "4958",
+     "name": "臻鼎-KY",
+     "shares": 2852000,
+     "weight": 2.6118
+    },
+    {
+     "code": "3711",
+     "name": "日月光投控",
+     "shares": 1888000,
+     "weight": 2.5488
+    },
+    {
+     "code": "6672",
+     "name": "騰輝電子-KY",
+     "shares": 2484000,
+     "weight": 2.5279
+    },
+    {
+     "code": "2059",
+     "name": "川湖",
+     "shares": 151000,
+     "weight": 2.3865
+    },
+    {
+     "code": "3231",
+     "name": "緯創",
+     "shares": 5096000,
+     "weight": 2.2129
+    },
+    {
+     "code": "6239",
+     "name": "力成",
+     "shares": 4120000,
+     "weight": 2.209
+    },
+    {
+     "code": "2368",
+     "name": "金像電",
+     "shares": 972000,
+     "weight": 2.0415
+    },
+    {
+     "code": "3044",
+     "name": "健鼎",
+     "shares": 1673000,
+     "weight": 1.9892
+    },
+    {
+     "code": "2360",
+     "name": "致茂",
+     "shares": 670000,
+     "weight": 1.8347
+    },
+    {
+     "code": "7828",
+     "name": "創新服務",
+     "shares": 418000,
+     "weight": 1.5991
+    },
+    {
+     "code": "6213",
+     "name": "聯茂",
+     "shares": 1453000,
+     "weight": 1.5259
+    },
+    {
+     "code": "7788",
+     "name": "松川精密",
+     "shares": 2810000,
+     "weight": 1.4983
+    },
+    {
+     "code": "2395",
+     "name": "研華",
+     "shares": 919000,
+     "weight": 1.4117
+    },
+    {
+     "code": "6669",
+     "name": "緯穎",
+     "shares": 354225,
+     "weight": 1.3865
+    },
+    {
+     "code": "8016",
+     "name": "矽創",
+     "shares": 1972000,
+     "weight": 1.3835
+    },
+    {
+     "code": "2455",
+     "name": "全新",
+     "shares": 1734000,
+     "weight": 1.3574
+    },
+    {
+     "code": "6285",
+     "name": "啟碁",
+     "shares": 2589000,
+     "weight": 1.3155
+    },
+    {
+     "code": "2376",
+     "name": "技嘉",
+     "shares": 1794000,
+     "weight": 1.3143
+    },
+    {
+     "code": "6510",
+     "name": "精測",
+     "shares": 150000,
+     "weight": 1.0479
+    },
+    {
+     "code": "8996",
+     "name": "高力",
+     "shares": 382000,
+     "weight": 1.0415
+    },
+    {
+     "code": "5536",
+     "name": "聖暉*",
+     "shares": 560000,
+     "weight": 0.9777
+    },
+    {
+     "code": "2441",
+     "name": "超豐",
+     "shares": 3391000,
+     "weight": 0.8695
+    },
+    {
+     "code": "6472",
+     "name": "保瑞",
+     "shares": 1046000,
+     "weight": 0.8652
+    },
+    {
+     "code": "3702",
+     "name": "大聯大",
+     "shares": 3534000,
+     "weight": 0.809
+    },
+    {
+     "code": "2377",
+     "name": "微星",
+     "shares": 2284000,
+     "weight": 0.7826
+    },
+    {
+     "code": "3028",
+     "name": "增你強",
+     "shares": 4982000,
+     "weight": 0.7447
+    },
+    {
+     "code": "3265",
+     "name": "台星科",
+     "shares": 2245000,
+     "weight": 0.7195
+    },
+    {
+     "code": "2467",
+     "name": "志聖",
+     "shares": 791000,
+     "weight": 0.5094
+    },
+    {
+     "code": "1785",
+     "name": "光洋科",
+     "shares": 2429000,
+     "weight": 0.5022
+    },
+    {
+     "code": "2885",
+     "name": "元大金",
+     "shares": 2209556,
+     "weight": 0.387
+    },
+    {
+     "code": "2451",
+     "name": "創見",
+     "shares": 584000,
+     "weight": 0.364
+    },
+    {
+     "code": "2351",
+     "name": "順德",
+     "shares": 1152000,
+     "weight": 0.3573
+    },
+    {
+     "code": "6691",
+     "name": "洋基工程",
+     "shares": 248000,
+     "weight": 0.3417
+    },
+    {
+     "code": "2478",
+     "name": "大毅",
+     "shares": 1588000,
+     "weight": 0.3372
+    },
+    {
+     "code": "6274",
+     "name": "台燿",
+     "shares": 183000,
+     "weight": 0.3367
+    },
+    {
+     "code": "4749",
+     "name": "新應材",
+     "shares": 189000,
+     "weight": 0.3294
+    },
+    {
+     "code": "2327",
+     "name": "國巨*",
+     "shares": 366000,
+     "weight": 0.32
+    },
+    {
+     "code": "3661",
+     "name": "世芯-KY",
+     "shares": 33000,
+     "weight": 0.3158
+    },
+    {
+     "code": "3037",
+     "name": "欣興",
+     "shares": 146000,
+     "weight": 0.2316
+    },
+    {
+     "code": "5425",
+     "name": "台半",
+     "shares": 1181000,
+     "weight": 0.2044
+    },
+    {
+     "code": "6446",
+     "name": "藥華藥",
+     "shares": 42000,
+     "weight": 0.1364
+    },
+    {
+     "code": "2476",
+     "name": "鉅祥",
+     "shares": 448000,
+     "weight": 0.1042
+    },
+    {
+     "code": "6640",
+     "name": "均華",
+     "shares": 57000,
+     "weight": 0.0968
+    },
+    {
+     "code": "7722",
+     "name": "LINEPAY",
+     "shares": 100000,
+     "weight": 0.0664
+    },
+    {
+     "code": "5274",
+     "name": "信驊",
+     "shares": 1900,
+     "weight": 0.0441
+    },
+    {
+     "code": "6177",
+     "name": "達麗",
+     "shares": 191350,
+     "weight": 0.0231
+    },
+    {
+     "code": "3443",
+     "name": "創意",
+     "shares": 1000,
+     "weight": 0.0159
+    },
+    {
+     "code": "2486",
+     "name": "一詮",
+     "shares": 35000,
+     "weight": 0.0118
+    },
+    {
+     "code": "3529",
+     "name": "力旺",
+     "shares": 1000,
+     "weight": 0.0053
+    },
+    {
+     "code": "4441",
+     "name": "振大環球",
+     "shares": 2000,
+     "weight": 0.0009
+    },
+    {
+     "code": "8358",
+     "name": "金居",
+     "shares": 1000,
+     "weight": 0.0007
+    },
+    {
+     "code": "2881",
+     "name": "富邦金",
+     "shares": 250,
+     "weight": 0.0001
+    },
+    {
+     "code": "2886",
+     "name": "兆豐金",
+     "shares": 1000,
+     "weight": 0.0001
+    }
+   ],
+   "changes": [
+    {
+     "date": "2026-11-20",
+     "code": "2881",
+     "name": "富邦金",
+     "kind": "add",
+     "before": 0,
+     "after": 0.0001
+    },
+    {
+     "date": "2026-11-20",
+     "code": "7828",
+     "name": "創新服務",
+     "kind": "increase",
+     "before": 0.1239,
+     "after": 1.5991
+    },
+    {
+     "date": "2026-11-20",
+     "code": "3044",
+     "name": "健鼎",
+     "kind": "increase",
+     "before": 0.6419,
+     "after": 1.9892
+    },
+    {
+     "date": "2026-11-20",
+     "code": "7788",
+     "name": "松川精密",
+     "kind": "increase",
+     "before": 0.4956,
+     "after": 1.4983
+    },
+    {
+     "date": "2026-11-20",
+     "code": "8016",
+     "name": "矽創",
+     "kind": "increase",
+     "before": 0.8658,
+     "after": 1.3835
+    },
+    {
+     "date": "2026-11-20",
+     "code": "6285",
+     "name": "啟碁",
+     "kind": "increase",
+     "before": 0.8587,
+     "after": 1.3155
+    },
+    {
+     "date": "2026-11-20",
+     "code": "3017",
+     "name": "奇鋐",
+     "kind": "increase",
+     "before": 2.6528,
+     "after": 3.0615
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2377",
+     "name": "微星",
+     "kind": "increase",
+     "before": 0.4062,
+     "after": 0.7826
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2467",
+     "name": "志聖",
+     "kind": "increase",
+     "before": 0.2006,
+     "after": 0.5094
+    },
+    {
+     "date": "2026-11-20",
+     "code": "1785",
+     "name": "光洋科",
+     "kind": "increase",
+     "before": 0.197,
+     "after": 0.5022
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2383",
+     "name": "台光電",
+     "kind": "increase",
+     "before": 2.8392,
+     "after": 3.0631
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2368",
+     "name": "金像電",
+     "kind": "increase",
+     "before": 1.8291,
+     "after": 2.0415
+    },
+    {
+     "date": "2026-11-20",
+     "code": "6672",
+     "name": "騰輝電子-KY",
+     "kind": "increase",
+     "before": 2.3356,
+     "after": 2.5279
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2351",
+     "name": "順德",
+     "kind": "increase",
+     "before": 0.1969,
+     "after": 0.3573
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2451",
+     "name": "創見",
+     "kind": "increase",
+     "before": 0.2101,
+     "after": 0.364
+    },
+    {
+     "date": "2026-11-20",
+     "code": "6691",
+     "name": "洋基工程",
+     "kind": "increase",
+     "before": 0.1998,
+     "after": 0.3417
+    },
+    {
+     "date": "2026-11-20",
+     "code": "4749",
+     "name": "新應材",
+     "kind": "increase",
+     "before": 0.208,
+     "after": 0.3294
+    },
+    {
+     "date": "2026-11-20",
+     "code": "3661",
+     "name": "世芯-KY",
+     "kind": "increase",
+     "before": 0.2132,
+     "after": 0.3158
+    },
+    {
+     "date": "2026-11-20",
+     "code": "3028",
+     "name": "增你強",
+     "kind": "increase",
+     "before": 0.6451,
+     "after": 0.7447
+    },
+    {
+     "date": "2026-11-20",
+     "code": "6274",
+     "name": "台燿",
+     "kind": "increase",
+     "before": 0.272,
+     "after": 0.3367
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2455",
+     "name": "全新",
+     "kind": "increase",
+     "before": 1.3013,
+     "after": 1.3574
+    },
+    {
+     "date": "2026-11-20",
+     "code": "6213",
+     "name": "聯茂",
+     "kind": "increase",
+     "before": 1.4708,
+     "after": 1.5259
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2059",
+     "name": "川湖",
+     "kind": "increase",
+     "before": 2.3349,
+     "after": 2.3865
+    },
+    {
+     "date": "2026-11-20",
+     "code": "7722",
+     "name": "LINEPAY",
+     "kind": "increase",
+     "before": 0.0466,
+     "after": 0.0664
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2478",
+     "name": "大毅",
+     "kind": "increase",
+     "before": 0.3205,
+     "after": 0.3372
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2441",
+     "name": "超豐",
+     "kind": "increase",
+     "before": 0.8539,
+     "after": 0.8695
+    },
+    {
+     "date": "2026-11-20",
+     "code": "5274",
+     "name": "信驊",
+     "kind": "decrease",
+     "before": 0.7732,
+     "after": 0.0441
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2327",
+     "name": "國巨*",
+     "kind": "decrease",
+     "before": 0.771,
+     "after": 0.32
+    },
+    {
+     "date": "2026-11-20",
+     "code": "5425",
+     "name": "台半",
+     "kind": "decrease",
+     "before": 0.4641,
+     "after": 0.2044
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2476",
+     "name": "鉅祥",
+     "kind": "decrease",
+     "before": 0.2843,
+     "after": 0.1042
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2395",
+     "name": "研華",
+     "kind": "decrease",
+     "before": 1.4751,
+     "after": 1.4117
+    },
+    {
+     "date": "2026-11-20",
+     "code": "3702",
+     "name": "大聯大",
+     "kind": "decrease",
+     "before": 0.8485,
+     "after": 0.809
+    },
+    {
+     "date": "2026-11-20",
+     "code": "6640",
+     "name": "均華",
+     "kind": "decrease",
+     "before": 0.1013,
+     "after": 0.0968
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2376",
+     "name": "技嘉",
+     "kind": "decrease",
+     "before": 1.3174,
+     "after": 1.3143
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2486",
+     "name": "一詮",
+     "kind": "decrease",
+     "before": 0.0123,
+     "after": 0.0118
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2301",
+     "name": "光寶科",
+     "kind": "remove",
+     "before": 0.7147,
+     "after": 0
+    },
+    {
+     "date": "2026-11-20",
+     "code": "6488",
+     "name": "環球晶",
+     "kind": "remove",
+     "before": 0.6279,
+     "after": 0
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2303",
+     "name": "聯電",
+     "kind": "remove",
+     "before": 0.5293,
+     "after": 0
+    },
+    {
+     "date": "2026-11-20",
+     "code": "5483",
+     "name": "中美晶",
+     "kind": "remove",
+     "before": 0.516,
+     "after": 0
+    },
+    {
+     "date": "2026-11-20",
+     "code": "2428",
+     "name": "興勤",
+     "kind": "remove",
+     "before": 0.4003,
+     "after": 0
+    },
+    {
+     "date": "2026-11-20",
+     "code": "8070",
+     "name": "長華*",
+     "kind": "remove",
+     "before": 0.344,
+     "after": 0
+    },
+    {
+     "date": "2026-11-20",
+     "code": "3617",
+     "name": "碩天",
+     "kind": "remove",
+     "before": 0.2533,
+     "after": 0
+    },
+    {
+     "date": "2026-11-20",
+     "code": "3090",
+     "name": "日電貿",
+     "kind": "remove",
+     "before": 0.1337,
+     "after": 0
+    },
+    {
+     "date": "2026-11-20",
+     "code": "6196",
+     "name": "帆宣",
+     "kind": "remove",
+     "before": 0.1133,
+     "after": 0
+    },
+    {
+     "date": "2026-11-20",
+     "code": "3045",
+     "name": "台灣大",
+     "kind": "remove",
+     "before": 0.0326,
+     "after": 0
+    },
+    {
+     "date": "2026-11-20",
+     "code": "6214",
+     "name": "精誠",
+     "kind": "remove",
+     "before": 0.019,
+     "after": 0
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2368",
+     "name": "金像電",
+     "kind": "increase",
+     "before": 0.9355,
+     "after": 1.8291
+    },
+    {
+     "date": "2026-11-19",
+     "code": "8016",
+     "name": "矽創",
+     "kind": "increase",
+     "before": 0.4138,
+     "after": 0.8658
+    },
+    {
+     "date": "2026-11-19",
+     "code": "3702",
+     "name": "大聯大",
+     "kind": "increase",
+     "before": 0.3972,
+     "after": 0.8485
+    },
+    {
+     "date": "2026-11-19",
+     "code": "3028",
+     "name": "增你強",
+     "kind": "increase",
+     "before": 0.1959,
+     "after": 0.6451
+    },
+    {
+     "date": "2026-11-19",
+     "code": "6285",
+     "name": "啟碁",
+     "kind": "increase",
+     "before": 0.4184,
+     "after": 0.8587
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2441",
+     "name": "超豐",
+     "kind": "increase",
+     "before": 0.4142,
+     "after": 0.8539
+    },
+    {
+     "date": "2026-11-19",
+     "code": "7788",
+     "name": "松川精密",
+     "kind": "increase",
+     "before": 0.0585,
+     "after": 0.4956
+    },
+    {
+     "date": "2026-11-19",
+     "code": "3044",
+     "name": "健鼎",
+     "kind": "increase",
+     "before": 0.2281,
+     "after": 0.6419
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2327",
+     "name": "國巨*",
+     "kind": "increase",
+     "before": 0.3877,
+     "after": 0.771
+    },
+    {
+     "date": "2026-11-19",
+     "code": "6239",
+     "name": "力成",
+     "kind": "increase",
+     "before": 1.9612,
+     "after": 2.2297
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2451",
+     "name": "創見",
+     "kind": "increase",
+     "before": 0.1002,
+     "after": 0.2101
+    },
+    {
+     "date": "2026-11-19",
+     "code": "4749",
+     "name": "新應材",
+     "kind": "increase",
+     "before": 0.0985,
+     "after": 0.208
+    },
+    {
+     "date": "2026-11-19",
+     "code": "3661",
+     "name": "世芯-KY",
+     "kind": "increase",
+     "before": 0.1077,
+     "after": 0.2132
+    },
+    {
+     "date": "2026-11-19",
+     "code": "7828",
+     "name": "創新服務",
+     "kind": "increase",
+     "before": 0.0194,
+     "after": 0.1239
+    },
+    {
+     "date": "2026-11-19",
+     "code": "6691",
+     "name": "洋基工程",
+     "kind": "increase",
+     "before": 0.0987,
+     "after": 0.1998
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2467",
+     "name": "志聖",
+     "kind": "increase",
+     "before": 0.101,
+     "after": 0.2006
+    },
+    {
+     "date": "2026-11-19",
+     "code": "1785",
+     "name": "光洋科",
+     "kind": "increase",
+     "before": 0.0992,
+     "after": 0.197
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2351",
+     "name": "順德",
+     "kind": "increase",
+     "before": 0.1004,
+     "after": 0.1969
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2301",
+     "name": "光寶科",
+     "kind": "decrease",
+     "before": 1.2383,
+     "after": 0.7147
+    },
+    {
+     "date": "2026-11-19",
+     "code": "6488",
+     "name": "環球晶",
+     "kind": "decrease",
+     "before": 1.1227,
+     "after": 0.6279
+    },
+    {
+     "date": "2026-11-19",
+     "code": "5483",
+     "name": "中美晶",
+     "kind": "decrease",
+     "before": 0.912,
+     "after": 0.516
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2303",
+     "name": "聯電",
+     "kind": "decrease",
+     "before": 0.9002,
+     "after": 0.5293
+    },
+    {
+     "date": "2026-11-19",
+     "code": "5425",
+     "name": "台半",
+     "kind": "decrease",
+     "before": 0.824,
+     "after": 0.4641
+    },
+    {
+     "date": "2026-11-19",
+     "code": "3045",
+     "name": "台灣大",
+     "kind": "decrease",
+     "before": 0.3311,
+     "after": 0.0326
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2428",
+     "name": "興勤",
+     "kind": "decrease",
+     "before": 0.6973,
+     "after": 0.4003
+    },
+    {
+     "date": "2026-11-19",
+     "code": "8070",
+     "name": "長華*",
+     "kind": "decrease",
+     "before": 0.5928,
+     "after": 0.344
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2476",
+     "name": "鉅祥",
+     "kind": "decrease",
+     "before": 0.4972,
+     "after": 0.2843
+    },
+    {
+     "date": "2026-11-19",
+     "code": "4958",
+     "name": "臻鼎-KY",
+     "kind": "decrease",
+     "before": 2.8476,
+     "after": 2.6414
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2360",
+     "name": "致茂",
+     "kind": "decrease",
+     "before": 2.0418,
+     "after": 1.858
+    },
+    {
+     "date": "2026-11-19",
+     "code": "3617",
+     "name": "碩天",
+     "kind": "decrease",
+     "before": 0.4341,
+     "after": 0.2533
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2486",
+     "name": "一詮",
+     "kind": "decrease",
+     "before": 0.1374,
+     "after": 0.0123
+    },
+    {
+     "date": "2026-11-19",
+     "code": "3265",
+     "name": "台星科",
+     "kind": "decrease",
+     "before": 0.8415,
+     "after": 0.7283
+    },
+    {
+     "date": "2026-11-19",
+     "code": "3090",
+     "name": "日電貿",
+     "kind": "decrease",
+     "before": 0.2374,
+     "after": 0.1337
+    },
+    {
+     "date": "2026-11-19",
+     "code": "5274",
+     "name": "信驊",
+     "kind": "decrease",
+     "before": 0.8638,
+     "after": 0.7732
+    },
+    {
+     "date": "2026-11-19",
+     "code": "6196",
+     "name": "帆宣",
+     "kind": "decrease",
+     "before": 0.1997,
+     "after": 0.1133
+    },
+    {
+     "date": "2026-11-19",
+     "code": "6640",
+     "name": "均華",
+     "kind": "decrease",
+     "before": 0.1369,
+     "after": 0.1013
+    },
+    {
+     "date": "2026-11-19",
+     "code": "6214",
+     "name": "精誠",
+     "kind": "decrease",
+     "before": 0.0321,
+     "after": 0.019
+    },
+    {
+     "date": "2026-11-19",
+     "code": "2395",
+     "name": "研華",
+     "kind": "decrease",
+     "before": 1.4786,
+     "after": 1.4751
+    },
+    {
+     "date": "2026-11-19",
+     "code": "4441",
+     "name": "振大環球",
+     "kind": "decrease",
+     "before": 0.0012,
+     "after": 0.0009
+    },
+    {
+     "date": "2026-11-19",
+     "code": "3583",
+     "name": "辛耘",
+     "kind": "remove",
+     "before": 0.0662,
+     "after": 0
+    },
+    {
+     "date": "2026-11-18",
+     "code": "2368",
+     "name": "金像電",
+     "kind": "add",
+     "before": 0,
+     "after": 0.9355
+    },
+    {
+     "date": "2026-11-18",
+     "code": "6285",
+     "name": "啟碁",
+     "kind": "add",
+     "before": 0,
+     "after": 0.4184
+    },
+    {
+     "date": "2026-11-18",
+     "code": "2441",
+     "name": "超豐",
+     "kind": "add",
+     "before": 0,
+     "after": 0.4142
+    },
+    {
+     "date": "2026-11-18",
+     "code": "8016",
+     "name": "矽創",
+     "kind": "add",
+     "before": 0,
+     "after": 0.4138
+    },
+    {
+     "date": "2026-11-18",
+     "code": "3702",
+     "name": "大聯大",
+     "kind": "add",
+     "before": 0,
+     "after": 0.3972
+    },
+    {
+     "date": "2026-11-18",
+     "code": "2327",
+     "name": "國巨*",
+     "kind": "add",
+     "before": 0,
+     "after": 0.3877
+    },
+    {
+     "date": "2026-11-18",
+     "code": "3044",
+     "name": "健鼎",
+     "kind": "add",
+     "before": 0,
+     "after": 0.2281
+    },
+    {
+     "date": "2026-11-18",
+     "code": "3028",
+     "name": "增你強",
+     "kind": "add",
+     "before": 0,
+     "after": 0.1959
+    },
+    {
+     "date": "2026-11-18",
+     "code": "3661",
+     "name": "世芯-KY",
+     "kind": "add",
+     "before": 0,
+     "after": 0.1077
+    },
+    {
+     "date": "2026-11-18",
+     "code": "2467",
+     "name": "志聖",
+     "kind": "add",
+     "before": 0,
+     "after": 0.101
+    },
+    {
+     "date": "2026-11-18",
+     "code": "2351",
+     "name": "順德",
+     "kind": "add",
+     "before": 0,
+     "after": 0.1004
+    },
+    {
+     "date": "2026-11-18",
+     "code": "2451",
+     "name": "創見",
+     "kind": "add",
+     "before": 0,
+     "after": 0.1002
+    },
+    {
+     "date": "2026-11-18",
+     "code": "1785",
+     "name": "光洋科",
+     "kind": "add",
+     "before": 0,
+     "after": 0.0992
+    },
+    {
+     "date": "2026-11-18",
+     "code": "6691",
+     "name": "洋基工程",
+     "kind": "add",
+     "before": 0,
+     "after": 0.0987
+    },
+    {
+     "date": "2026-11-18",
+     "code": "4749",
+     "name": "新應材",
+     "kind": "add",
+     "before": 0,
+     "after": 0.0985
+    },
+    {
+     "date": "2026-11-18",
+     "code": "7788",
+     "name": "松川精密",
+     "kind": "add",
+     "before": 0,
+     "after": 0.0585
+    },
+    {
+     "date": "2026-11-18",
+     "code": "7828",
+     "name": "創新服務",
+     "kind": "add",
+     "before": 0,
+     "after": 0.0194
+    },
+    {
+     "date": "2026-11-18",
+     "code": "7722",
+     "name": "LINEPAY",
+     "kind": "increase",
+     "before": 0.0361,
+     "after": 0.0477
+    },
+    {
+     "date": "2026-11-18",
+     "code": "2360",
+     "name": "致茂",
+     "kind": "decrease",
+     "before": 2.9435,
+     "after": 2.0418
+    },
+    {
+     "date": "2026-11-18",
+     "code": "3045",
+     "name": "台灣大",
+     "kind": "decrease",
+     "before": 0.915,
+     "after": 0.3311
+    },
+    {
+     "date": "2026-11-18",
+     "code": "6669",
+     "name": "緯穎",
+     "kind": "decrease",
+     "before": 1.8446,
+     "after": 1.2961
+    },
+    {
+     "date": "2026-11-18",
+     "code": "2301",
+     "name": "光寶科",
+     "kind": "decrease",
+     "before": 1.7832,
+     "after": 1.2383
+    },
+    {
+     "date": "2026-11-18",
+     "code": "6488",
+     "name": "環球晶",
+     "kind": "decrease",
+     "before": 1.63,
+     "after": 1.1227
+    },
+    {
+     "date": "2026-11-18",
+     "code": "5483",
+     "name": "中美晶",
+     "kind": "decrease",
+     "before": 1.3382,
+     "after": 0.912
+    },
+    {
+     "date": "2026-11-18",
+     "code": "3037",
+     "name": "欣興",
+     "kind": "decrease",
+     "before": 0.6403,
+     "after": 0.2397
+    },
+    {
+     "date": "2026-11-18",
+     "code": "5274",
+     "name": "信驊",
+     "kind": "decrease",
+     "before": 1.2631,
+     "after": 0.8638
+    },
+    {
+     "date": "2026-11-18",
+     "code": "2303",
+     "name": "聯電",
+     "kind": "decrease",
+     "before": 1.2945,
+     "after": 0.9002
+    },
+    {
+     "date": "2026-11-18",
+     "code": "3265",
+     "name": "台星科",
+     "kind": "decrease",
+     "before": 1.2315,
+     "after": 0.8415
+    },
+    {
+     "date": "2026-11-18",
+     "code": "5425",
+     "name": "台半",
+     "kind": "decrease",
+     "before": 1.2007,
+     "after": 0.824
+    },
+    {
+     "date": "2026-11-18",
+     "code": "2428",
+     "name": "興勤",
+     "kind": "decrease",
+     "before": 1.0121,
+     "after": 0.6973
+    },
+    {
+     "date": "2026-11-18",
+     "code": "8070",
+     "name": "長華*",
+     "kind": "decrease",
+     "before": 0.8541,
+     "after": 0.5928
+    },
+    {
+     "date": "2026-11-18",
+     "code": "2476",
+     "name": "鉅祥",
+     "kind": "decrease",
+     "before": 0.7483,
+     "after": 0.4972
+    },
+    {
+     "date": "2026-11-18",
+     "code": "2486",
+     "name": "一詮",
+     "kind": "decrease",
+     "before": 0.3848,
+     "after": 0.1374
+    },
+    {
+     "date": "2026-11-18",
+     "code": "3617",
+     "name": "碩天",
+     "kind": "decrease",
+     "before": 0.6119,
+     "after": 0.4341
+    },
+    {
+     "date": "2026-11-18",
+     "code": "3090",
+     "name": "日電貿",
+     "kind": "decrease",
+     "before": 0.351,
+     "after": 0.2374
+    },
+    {
+     "date": "2026-11-18",
+     "code": "4958",
+     "name": "臻鼎-KY",
+     "kind": "decrease",
+     "before": 2.9403,
+     "after": 2.8476
+    },
+    {
+     "date": "2026-11-18",
+     "code": "6196",
+     "name": "帆宣",
+     "kind": "decrease",
+     "before": 0.2882,
+     "after": 0.1997
+    },
+    {
+     "date": "2026-11-18",
+     "code": "3583",
+     "name": "辛耘",
+     "kind": "decrease",
+     "before": 0.1296,
+     "after": 0.0662
+    },
+    {
+     "date": "2026-11-18",
+     "code": "6640",
+     "name": "均華",
+     "kind": "decrease",
+     "before": 0.1963,
+     "after": 0.1369
+    },
+    {
+     "date": "2026-11-18",
+     "code": "6214",
+     "name": "精誠",
+     "kind": "decrease",
+     "before": 0.0476,
+     "after": 0.0321
+    },
+    {
+     "date": "2026-11-18",
+     "code": "2395",
+     "name": "研華",
+     "kind": "decrease",
+     "before": 1.4669,
+     "after": 1.4786
+    },
+    {
+     "date": "2026-11-18",
+     "code": "4441",
+     "name": "振大環球",
+     "kind": "decrease",
+     "before": 0.0018,
+     "after": 0.0012
+    },
+    {
+     "date": "2026-11-17",
+     "code": "7722",
+     "name": "LINEPAY",
+     "kind": "add",
+     "before": 0,
+     "after": 0.0361
+    },
+    {
+     "date": "2026-11-17",
+     "code": "3583",
+     "name": "辛耘",
+     "kind": "decrease",
+     "before": 0.1907,
+     "after": 0.1296
+    },
+    {
+     "date": "2026-11-17",
+     "code": "2467",
+     "name": "志聖",
+     "kind": "remove",
+     "before": 0.0702,
+     "after": 0
+    },
+    {
+     "date": "2026-11-16",
+     "code": "3491",
+     "name": "昇達科",
+     "kind": "increase",
+     "before": 3.5881,
+     "after": 4.2514
+    },
+    {
+     "date": "2026-11-16",
+     "code": "2476",
+     "name": "鉅祥",
+     "kind": "increase",
+     "before": 0.4567,
+     "after": 0.6942
+    },
+    {
+     "date": "2026-11-16",
+     "code": "6213",
+     "name": "聯茂",
+     "kind": "increase",
+     "before": 1.4246,
+     "after": 1.5209
+    },
+    {
+     "date": "2026-11-16",
+     "code": "3617",
+     "name": "碩天",
+     "kind": "increase",
+     "before": 0.5072,
+     "after": 0.5856
+    },
+    {
+     "date": "2026-11-16",
+     "code": "2467",
+     "name": "志聖",
+     "kind": "decrease",
+     "before": 0.1442,
+     "after": 0.0702
+    }
+   ]
+  }
+ }
+}
