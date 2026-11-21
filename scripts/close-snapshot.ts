@@ -7,6 +7,7 @@
  *   {
  *     date, prevDate,
  *     index: [開, 高, 低, 收, 昨收],
+ *     indexMin: 加權指數當天第 0～270 分鐘的真實價格（有 intraday/<日期>.json 才有）,
  *     total: 上市成交額（億元）,
  *     rows: { 代號: [開, 高, 低, 收, 張, 昨收, 成交額（億元）, 近 20 日平均成交額（億元）] }
  *   }
@@ -71,5 +72,13 @@ for (const f of readdirSync(candleDir).filter((x) => x.endsWith('.json'))) {
 
 const t = taiex.findIndex((r) => r[0] === date);
 const index = t > 0 ? [taiex[t][1], taiex[t][2], taiex[t][3], taiex[t][4], taiex[t - 1][4]] : null;
-writeFileSync(join(dir, 'close.json'), JSON.stringify({ date, prevDate, index, total: round(total, 1), rows }));
+// 加權指數當天真實的 1 分 K（證交所公開資料，intraday/<日期>.json 的 ix1）：第 0～270 分鐘的價格，
+// 收盤回放時畫真實走勢，不用推算；沒有就不放（網站退回推算）。
+const intra = readJson<{ ix1?: number[][] }>(join(dir, 'intraday', `${date}.json`), {});
+const indexMin =
+  intra.ix1?.length === 270 && intra.ix1.every((b) => b.length >= 4 && b.every((v) => v > 0))
+    ? [intra.ix1[0][0], ...intra.ix1.map((b) => b[3])].map((v) => round(v, 2))
+    : undefined;
+writeFileSync(join(dir, 'close.json'), JSON.stringify({ date, prevDate, index, ...(indexMin ? { indexMin } : {}), total: round(total, 1), rows }));
+console.log(`  加權指數 1 分 K：${indexMin ? '有（真實走勢）' : '沒有（網站用推算）'}`);
 console.log(`close.json：${date}，${Object.keys(rows).length} 檔，上市成交額 ${round(total, 0)} 億`);

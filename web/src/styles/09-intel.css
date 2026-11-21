@@ -184,3 +184,4 @@ button.log-text:hover { color: var(--ink); }
 .risk-long { fill: color-mix(in srgb, var(--up) 70%, transparent); }
 .risk-axis { fill: var(--muted); font-size: 10px; }
 .risk-note { margin: 6px 0 0; font-size: 12px; line-height: 1.6; }
+.rotation-empty { margin: 8px 2px; font-size: 13px; line-height: 1.7; }

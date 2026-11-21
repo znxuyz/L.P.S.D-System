@@ -312,7 +312,16 @@ class App {
     floating.hidden = !this.focus || this.page !== 'map';
     if (!floating.hidden) renderDetail(floating, ctx);
     if (this.page === 'intel') {
-      renderDock($('#dock'), ctx, (el) => this.rotation && renderRotation(el, this.rotation, this.pal, this.openMs));
+      renderDock($('#dock'), ctx, (el) => {
+        // 收盤回放：個股盤中走勢是用開高低收推算的，算出來的資金輪動不是真的，不畫；連上即時行情才有
+        if (this.provider instanceof CloseReplayProvider) {
+          const note = '<p class="rotation-empty muted">資金輪動要用盤中每 5 分鐘的真實成交額計算。現在是「收盤資料」：個股的盤中走勢是依開高低收推算的，畫出來不是真的，所以不顯示。盤中在選單把資料來源設成富果或證交所，就會即時累積。</p>';
+          if (el.dataset.html !== note) (el.dataset.html = note), (el.innerHTML = note);
+          return;
+        }
+        delete el.dataset.html;
+        if (this.rotation) renderRotation(el, this.rotation, this.pal, this.openMs);
+      });
       this.renderExtras();
     }
     renderLog($('#log'), this.events, this.fresh);
