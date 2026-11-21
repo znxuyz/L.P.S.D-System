@@ -531,12 +531,17 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
     return;
   }
   const d = data;
-  const summary = `<div class="pd-summary">
-    <a href="#pd-stocks" class="pd-sum glass"><span>個股排名</span>${badge(d.stocks.verdict)}</a>
-    <a href="#pd-market" class="pd-sum glass"><span>大盤展望</span>${badge(d.market.verdict)}</a>
-    ${d.dayTrade ? `<a href="#pd-day" class="pd-sum glass"><span>${esc(d.dayTrade.code)} 當沖（開盤→收盤）</span>${badge(d.dayTrade.verdict)}</a>` : ''}
-    ${intra?.ready ? `<a href="#pd-intra" class="pd-sum glass"><span>00631L 整天 5 分 K</span>${badge(intra.rangeVerdict ?? intra.verdict)}</a>` : ''}
-  </div>`;
+  // 跳到區塊（黏在畫面上方）：最重要的放前面；舊的個股排名、當沖只是觀察用，放後面
+  const jumps: Array<[string, string]> = [
+    ...(paper ? [['#pd-paper', '模擬帳戶'] as [string, string]] : []),
+    ...(d.revStocks ? [['#pd-rev', '營收選股'] as [string, string]] : []),
+    ['#pd-stock', '個股預測'],
+    ['#pd-market', '大盤展望'],
+    ['#pd-intra', '盤中（00631L）'],
+    ['#pd-stocks', '個股排名・觀察'],
+    ...(d.dayTrade ? [['#pd-day', '當沖・觀察'] as [string, string]] : []),
+  ];
+  const summary = `<nav class="pd-jump glass" aria-label="跳到預測頁的區塊">${jumps.map(([h, t]) => `<a href="${h}" class="pd-sum">${t}</a>`).join('')}</nav>`;
   root.innerHTML = `<div class="pd-main">${head}${summary}
     ${paperHtml(paper, paperBt, paperAlt)}
     ${d.revStocks ? revStocksHtml(d.revStocks) : ''}
