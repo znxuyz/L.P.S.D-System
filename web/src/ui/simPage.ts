@@ -1447,7 +1447,10 @@ export class SimPage implements SimCtx {
       // toggle 事件不會冒泡：用捕獲階段記住「⋯」有沒有打開
       el.addEventListener('toggle', (e) => {
         const d = e.target as HTMLDetailsElement;
-        if (d.classList?.contains('sim-more')) this.moreOpen = d.open;
+        if (d.classList?.contains('sim-more')) {
+          this.moreOpen = d.open;
+          el.classList.toggle('is-more-open', d.open);
+        }
       }, true);
     }
     const q = (id: string) => el.querySelector<HTMLElement>(`#${id}`)!;

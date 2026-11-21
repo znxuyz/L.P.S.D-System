@@ -40,7 +40,7 @@
 @keyframes sheet-in-up { from { transform: translateY(40px); opacity: 0; } }
 html.menu-open, html.menu-open body { overflow: hidden; }
 /* 頂部列的毛玻璃（backdrop-filter）會讓裡面 position: fixed 的面板改成相對頂部列定位：打開設定時關掉，並蓋過底部導覽 */
-.topbar:has(.menu[open]) { -webkit-backdrop-filter: none; backdrop-filter: none; z-index: 80; }
+html.menu-open .topbar, .topbar:has(.menu[open]) { -webkit-backdrop-filter: none; backdrop-filter: none; z-index: 80; }
 
 /* ---------------- 手機（≤ 720px） ---------------- */
 .tabbar { display: none; }
@@ -101,6 +101,8 @@ html.menu-open, html.menu-open body { overflow: hidden; }
   .tabbar a[aria-current='page'] svg { filter: drop-shadow(0 0 8px rgba(143, 240, 255, 0.55)); }
   .app.page-sim ~ .tabbar, .app.page-sim .tabbar { display: none; }
   .app:not(.page-sim) { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  /* 「有新版本」提示不要壓在底部導覽上 */
+  body:has(.app:not(.page-sim)) .update-banner { bottom: calc(72px + env(safe-area-inset-bottom)); }
 
   /* 設定面板：從底部滑上來，頂端一條拉把 */
   .menu[open] .menu-body {
