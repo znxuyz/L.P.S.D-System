@@ -1,6 +1,6 @@
 /**
  * 導覽分組（只是外層的導覽，頁面網址 #map、#stock… 與切換頁面的程式都不變）：
- * 市場（熱力圖、市場情報）、選股（五大選股、ETF）、個股、預測、更多（股市入門、模擬盤、設定）。
+ * 市場（熱力圖、市場情報）、選股（五大選股、ETF）、個股、預測、入門（股市入門）。模擬盤只從左上角圖示進入（隱藏式）。
  * - 手機：底部 5 個按鈕；有兩個子頁的組在內容上方顯示左右切換。
  * - 每組記住上次看的子頁：在「選股」看過 ETF，下次按「選股」直接回到 ETF。
  */
@@ -35,8 +35,8 @@ export function syncNav(page: string): void {
   }
 }
 
-/** 一次性的介面行為：設定面板關閉、加權指數展開、熱力圖說明第一次自動打開、「模擬盤」入口。 */
-export function initNav(enterSim: () => void): void {
+/** 一次性的介面行為：設定面板關閉、加權指數展開、熱力圖說明第一次自動打開。模擬盤刻意只有左上角圖示一個入口（隱藏式）。 */
+export function initNav(): void {
   const menu = document.querySelector<HTMLDetailsElement>('details.menu');
   document.querySelector('#menu-close')?.addEventListener('click', () => menu && (menu.open = false));
   document.addEventListener('keydown', (e) => {
@@ -64,5 +64,4 @@ export function initNav(enterSim: () => void): void {
   document.addEventListener('click', (e) => {
     if (legend?.open && !legend.contains(e.target as Node)) legend.open = false;
   });
-  for (const b of document.querySelectorAll<HTMLElement>('[data-sim-entry]')) b.addEventListener('click', enterSim);
 }
