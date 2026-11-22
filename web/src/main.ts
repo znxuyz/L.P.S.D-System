@@ -364,8 +364,10 @@ class App {
       this.sim.hide();
     }
     const logo = $('#logo-btn');
-    const tip = page === 'sim' ? '回到原本的畫面' : '進入拉普拉斯模擬盤';
-    logo.title = tip;
+    // 模擬盤是隱藏式的：平常圖示不寫它是什麼（滑鼠移上去也不提示），進去之後才顯示「回到原本的畫面」
+    const tip = page === 'sim' ? '回到原本的畫面' : '拉普拉斯之眼';
+    if (page === 'sim') logo.title = tip;
+    else logo.removeAttribute('title');
     logo.setAttribute('aria-label', tip);
     this.renderPanels();
   }
@@ -608,7 +610,7 @@ class App {
       tab.addEventListener('click', () => this.showPage(tab.dataset.page as Page));
     }
     window.addEventListener('hashchange', () => this.showPage(pageFromHash()));
-    initNav(() => $('#logo-btn').click());
+    initNav();
     // 從背景叫回來時，市場情報的資料如果放太久了就重新載入（renderExtras 會檢查時間）
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && this.page === 'intel') this.renderPanels();

@@ -2,7 +2,6 @@
 
 /* ---------------- 分頁分組（電腦版維持原本一排；手機版只顯示目前這組） ---------------- */
 .nav-group { display: contents; }
-.nav-sim { display: none; }
 
 /* ---------------- 熱力圖說明：收成一顆「怎麼看」 ---------------- */
 .legend { position: relative; }
@@ -57,18 +56,14 @@ html.menu-open .topbar, .topbar:has(.menu[open]) { -webkit-backdrop-filter: none
   /* 分頁：只顯示目前這組的子頁，變成置中的左右切換；只有一頁的組不顯示 */
   .pages { display: none; }
   .app[data-group='market']:not(.page-sim) .pages,
-  .app[data-group='pick']:not(.page-sim) .pages,
-  .app[data-group='more']:not(.page-sim) .pages {
+  .app[data-group='pick']:not(.page-sim) .pages {
     display: flex; grid-area: pages; justify-self: center; width: auto; max-width: 100%; overflow: visible;
   }
   .app[data-group='market']:not(.page-sim) .topbar,
-  .app[data-group='pick']:not(.page-sim) .topbar,
-  .app[data-group='more']:not(.page-sim) .topbar { grid-template-areas: 'brand menu' 'ticker ticker' 'pages pages'; }
+  .app[data-group='pick']:not(.page-sim) .topbar { grid-template-areas: 'brand menu' 'ticker ticker' 'pages pages'; }
   .nav-group { display: none; }
   .app[data-group='market'] .nav-group[data-group='market'],
-  .app[data-group='pick'] .nav-group[data-group='pick'],
-  .app[data-group='more'] .nav-group[data-group='more'] { display: contents; }
-  .app[data-group='more'] .nav-sim { display: inline-block; }
+  .app[data-group='pick'] .nav-group[data-group='pick'] { display: contents; }
   .pages button { flex: 0 0 auto; min-height: 38px; padding: 0 20px; font-size: 14px; }
 
   /* 加權指數：一行（指數＋狀態），點了才展開成交額、漲跌家數、時間 */
