@@ -5,7 +5,7 @@
  * - 點個股可以跳到個股分析頁。
  */
 import { loadCloseFile } from '../data/closeProvider';
-import { dayTradeBands, dayTradeCall, loadAnalogs, loadPaper, loadPaperBacktest, loadPredict, loadPredictIntraday, type PaperData, type PredictData, type RevStocks, type StockPick, type Verdict } from '../data/predict';
+import { dayTradeBands, dayTradeCall, loadAnalogs, loadPaper, loadPaperBacktest, loadPredict, loadPredictIntraday, type PaperData, type PredictData, type RevStocks, type StockPick, type Verdict, loadHeatIndex, type HeatIndex } from '../data/predict';
 import { sessionAt, taipeiDate } from '../data/liveProvider';
 import { sessionOpenMs } from '../data/twse';
 import type { IndexPoint } from '../data/types';
@@ -235,6 +235,82 @@ function paperHtml(p: PaperData | null, bt: PaperData | null, alt: PaperData | n
   return `<section class="pd-card glass" id="pd-paper">${head}${stageHtml(p)}${live}${hist}</section>`;
 }
 
+/** 台美聯動籌碼熱度指數：上圖加權指數＋恐慌（▲）／狂熱（▼）標記，下圖熱度 0～100。 */
+function heatChart(h: HeatIndex): string {
+  const rows = h.series.filter((r) => r[2] != null) as Array<[string, number, number]>;
+  if (rows.length < 20) return '';
+  const W = 520;
+  const H1 = 230;
+  const H2 = 140;
+  const gap = 16;
+  const pad = { l: 44, r: 8, t: 10, b: 22 };
+  const n = rows.length;
+  const x = (i: number) => pad.l + (i / (n - 1)) * (W - pad.l - pad.r);
+  const cs = rows.map((r) => r[1]);
+  const lo = Math.min(...cs) * 0.97;
+  const hi = Math.max(...cs) * 1.03;
+  const y1 = (v: number) => pad.t + (1 - (v - lo) / (hi - lo)) * (H1 - pad.t);
+  const top2 = H1 + gap;
+  const y2 = (v: number) => top2 + (1 - v / 100) * H2;
+  const { buy, sell } = h.thresholds;
+  const line1 = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y1(r[1]).toFixed(1)}`).join('');
+  const line2 = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y2(r[2]).toFixed(1)}`).join('');
+  const marks = rows
+    .map((r, i) =>
+      r[2] < buy
+        ? `<path class="hx-buy" d="M${x(i).toFixed(1)},${(y1(r[1]) + 6).toFixed(1)}l-3.5,6h7z"/>`
+        : r[2] > sell
+          ? `<path class="hx-sell" d="M${x(i).toFixed(1)},${(y1(r[1]) - 6).toFixed(1)}l-3.5,-6h7z"/>`
+          : '',
+    )
+    .join('');
+  // 年份標在每年的第一天（太靠左邊的第一個不標，避免疊字）
+  const years = rows.map((r, i) => [r[0], i] as const).filter(([d], i) => i > n * 0.06 && d.slice(0, 4) !== rows[i - 1][0].slice(0, 4));
+  return `<svg class="pd-chart hx-chart" viewBox="0 0 ${W} ${top2 + H2 + pad.b}" role="img" aria-label="加權指數與熱度指數">
+    ${[lo, (lo + hi) / 2, hi].map((v) => `<text class="pd-tick" x="${pad.l - 4}" y="${(y1(v) + 4).toFixed(1)}" text-anchor="end">${num(v, 0)}</text>`).join('')}
+    <path class="hx-close" d="${line1}"/>${marks}
+    <rect class="hx-zone-buy" x="${pad.l}" y="${y2(buy).toFixed(1)}" width="${W - pad.l - pad.r}" height="${(y2(0) - y2(buy)).toFixed(1)}"/>
+    <rect class="hx-zone-sell" x="${pad.l}" y="${y2(100).toFixed(1)}" width="${W - pad.l - pad.r}" height="${(y2(sell) - y2(100)).toFixed(1)}"/>
+    ${[buy, sell].map((v) => `<line class="hx-th" x1="${pad.l}" x2="${W - pad.r}" y1="${y2(v).toFixed(1)}" y2="${y2(v).toFixed(1)}"/><text class="pd-tick" x="${pad.l - 4}" y="${(y2(v) + 4).toFixed(1)}" text-anchor="end">${v}</text>`).join('')}
+    <path class="hx-score" d="${line2}"/>
+    ${years.map(([d, i]) => `<text class="pd-tick" x="${x(i).toFixed(1)}" y="${top2 + H2 + 16}" text-anchor="middle">${d.slice(0, 4)}</text>`).join('')}
+  </svg>
+  <p class="pd-legend muted"><span class="hx-k-buy">▲</span> 熱度 &lt; ${buy}（恐慌，抄底區）　<span class="hx-k-sell">▼</span> 熱度 &gt; ${sell}（狂熱，頂部風險）　下圖：熱度 0～100，綠底＝恐慌區、紅底＝狂熱區</p>`;
+}
+
+function heatHtml(h: HeatIndex | null): string {
+  if (!h) return '';
+  const t = h.thresholds;
+  const zone = h.now < t.buy ? 'hx-k-buy' : h.now > t.sell ? 'hx-k-sell' : '';
+  const st = (x: HeatIndex['oos']['strategy']) => `${pctTxt(x.ret)} <small class="muted">年化 ${pctTxt(x.cagr)}・夏普 ${num(x.sharpe, 2)}・最大回落 ${pctTxt(x.mdd)}</small>`;
+  const beat = h.oos.strategy.sharpe > h.oos.buyHold.sharpe;
+  return `<section class="pd-card glass" id="pd-heat">
+    <header class="pd-head"><div><p class="eyebrow">Heat index · 台美聯動</p><h2>台美聯動籌碼熱度指數</h2></div>
+      <span class="pd-verdict ${beat ? 'is-ok' : 'is-warn'}">${beat ? '✅ 樣本外贏過一直持有' : '⚠️ 樣本外沒有贏過一直持有'}</span></header>
+    <p class="pd-lead">把美股的恐慌與流動性、台股的散戶籌碼與融資斷頭壓力，融合成 0～100 分：<b>0 分＝最恐慌</b>（歷史上最適合抄底），<b>100 分＝最狂熱</b>。每個指標先換成「過去一年的百分位數」，權重由回測自動挑。</p>
+    <dl class="pd-stats">
+      <div><dt>最新熱度（${esc(h.asOf)}）</dt><dd class="num ${zone}">${num(h.now, 1)} <small class="muted">前一天 ${num(h.prev, 1)}</small></dd></div>
+      <div><dt>交易建議</dt><dd>${esc(h.advice)}</dd></div>
+    </dl>
+    ${heatChart(h)}
+    <h3 class="pd-sub">預測：這個熱度之後 20 個交易日，加權指數通常怎麼走</h3>
+    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>熱度</th><th class="num">天數</th><th class="num">之後 20 日平均</th><th class="num">上漲機率</th></tr></thead><tbody>
+      ${h.buckets.filter((b) => b.n).map((b) => `<tr${b.name === '全部日子' ? ' class="pd-sum-row"' : ''}><td>${esc(b.name)}</td><td class="num">${num(b.n)}</td><td class="num ${cls(b.avg ?? 0)}">${pctTxt(b.avg ?? 0)}</td><td class="num">${num((b.up ?? 0) * 100, 0)}%</td></tr>`).join('')}
+    </tbody></table></div>
+    <h3 class="pd-sub">各指標的權重與今天的分數</h3>
+    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>指標</th><th class="num">權重</th><th class="num">今天</th></tr></thead><tbody>
+      ${[...h.indicators].sort((a, b) => b.weight - a.weight).map((x) => `<tr><td>${esc(x.name)}<br><small class="muted">${esc(x.group)}・${esc(x.source)}</small></td><td class="num">${num(x.weight * 100, 1)}%</td><td class="num">${num(x.score, 0)}</td></tr>`).join('')}
+    </tbody></table></div>
+    ${h.missing.length ? `<p class="muted pd-small">這次抓不到、沒有用的指標：${h.missing.map(esc).join('、')}。</p>` : ''}
+    <h3 class="pd-sub">策略回測（樣本外 ${esc(h.oos.from)}～${esc(h.oos.to)}：每一年只用那年以前的資料挑權重）</h3>
+    <dl class="pd-stats">
+      <div><dt>熱度策略（&lt; ${t.buy} 勾頭買、&gt; ${t.sell} 減半、&gt; ${t.exit} 出場）</dt><dd class="num">${st(h.oos.strategy)}</dd></div>
+      <div><dt>一直持有加權指數</dt><dd class="num">${st(h.oos.buyHold)}</dd></div>
+    </dl>
+    <p class="pd-note is-warn">照實說：「用全部歷史挑權重再回測同一段」夏普 ${num(h.inSample.sharpe, 2)}，看過答案、偏樂觀；上面的樣本外成績才是公正的。${beat ? '' : '熱度到 80 就減碼、要等跌到 25 以下才買回，在大多頭裡會錯過大段漲幅，所以樣本外輸給一直持有；'}熱度比較適合當「現在市場有多恐慌／多狂熱」的溫度計，配合上面模擬帳戶的 200 日均線規則看。</p>
+  </section>`;
+}
+
 function marketHtml(m: PredictData['market'], h: number, f?: PredictData['forward']): string {
   const b = m.backtest;
   const p = m.probUp;
@@ -434,13 +510,15 @@ export type LiveIndex = () => IndexPoint[] | null;
 let liveIndex: LiveIndex = () => null;
 /** 最新收盤資料的日期（close.json）：檢查預測檔是不是最新的。 */
 let lastTradeDate: string | null = null;
+let heat: HeatIndex | null = null;
 let liveTimer: ReturnType<typeof setInterval> | undefined;
 
 export function renderPredictPage(root: HTMLElement, onStock: (code: string) => void, getLive?: LiveIndex): void {
   if (getLive) liveIndex = getLive;
   if (!loading) {
     loading = true;
-    void Promise.all([loadPredict(), loadPredictIntraday(), loadAnalogs(), loadPaper(), loadPaperBacktest(), loadPaperBacktest('paper-backtest-novt.json'), loadCloseFile()]).then(([d, i, a, pp, pb, pa, cf]) => {
+    void Promise.all([loadPredict(), loadPredictIntraday(), loadAnalogs(), loadPaper(), loadPaperBacktest(), loadPaperBacktest('paper-backtest-novt.json'), loadCloseFile(), loadHeatIndex()]).then(([d, i, a, pp, pb, pa, cf, hx]) => {
+      heat = hx;
       lastTradeDate = cf?.date ?? null;
       data = d;
       intra = i;
@@ -576,6 +654,7 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
     ...(paper ? [['#pd-paper', '模擬帳戶'] as [string, string]] : []),
     ...(d.revStocks ? [['#pd-rev', '營收選股'] as [string, string]] : []),
     ['#pd-stock', '個股預測'],
+    ...(heat ? [['#pd-heat', '熱度指數'] as [string, string]] : []),
     ['#pd-market', '大盤展望'],
     ['#pd-intra', '盤中（00631L）'],
     ['#pd-stocks', '個股排名・觀察'],
@@ -586,6 +665,7 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
     ${paperHtml(paper, paperBt, paperAlt)}
     ${d.revStocks ? revStocksHtml(d.revStocks) : ''}
     ${stockForecastShell()}
+    ${heatHtml(heat)}
     ${marketHtml(d.market, d.horizon, d.forward)}
     ${stocksHtml(d.stocks, d.horizon, d.forward)}
     ${d.dayTrade ? dayTradeHtml(d.dayTrade, d.forward) : ''}

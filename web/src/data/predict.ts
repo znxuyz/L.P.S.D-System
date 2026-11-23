@@ -239,3 +239,28 @@ const getPaper = keyedRefresh<PaperData | null>(
 );
 export const loadPaper = (): Promise<PaperData | null> => getPaper('paper.json');
 export const loadPaperBacktest = (file = 'paper-backtest.json'): Promise<PaperData | null> => getPaper(file);
+
+/** 台美聯動籌碼熱度指數（scripts/heat_index.py）。 */
+export interface HeatIndex {
+  asOf: string;
+  thresholds: { buy: number; sell: number; exit: number };
+  now: number;
+  prev: number;
+  advice: string;
+  position: number;
+  indicators: Array<{ id: string; name: string; group: string; source: string; weight: number; score: number }>;
+  missing: string[];
+  oos: { from: string; to: string; strategy: HeatStats; buyHold: HeatStats };
+  inSample: HeatStats;
+  buckets: Array<{ name: string; n: number; avg: number | null; up: number | null }>;
+  series: Array<[string, number, number | null]>;
+}
+export interface HeatStats { ret: number; cagr: number; sharpe: number; mdd: number; days: number }
+export async function loadHeatIndex(): Promise<HeatIndex | null> {
+  try {
+    const r = await fetch('data/heat-index.json', { cache: 'no-cache' });
+    return r.ok ? ((await r.json()) as HeatIndex) : null;
+  } catch {
+    return null;
+  }
+}

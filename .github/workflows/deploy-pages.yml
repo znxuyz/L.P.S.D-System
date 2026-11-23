@@ -72,11 +72,14 @@ jobs:
           if [ -d .backfill ]; then REV_TRANCHES=2 FORECASTS_DIR=.backfill PAPER_FROM=2022-01-01 PAPER_OUT=paper-backtest-2t.json node scripts/paper-trade.ts .data; fi
           # 沒有即時行情金鑰時首頁用的最近一個交易日收盤資料
           node scripts/close-snapshot.ts .data
+          # 台美聯動籌碼熱度指數（Python；FRED、FinMind 抓不到時只用手上有的指標，失敗也不影響部署）
+          python3 -m pip install -q pandas numpy scipy matplotlib || true
+          python3 scripts/heat_index.py .data --png .data/heat-index.png || echo "熱度指數失敗，略過"
 
       - name: 放進網站
         run: |
           mkdir -p web/public/data
-          for f in active-etf.json stocks.json chips.json fundamentals.json pe5y.json pattern-stats.json close.json etf-info.json market-risk.json predict.json predict-intraday.json predict-analogs.json predict-intraday-3m.json predict-analogs-3m.json predict-intraday-1m.json predict-analogs-1m.json paper.json paper-backtest.json paper-backtest-novt.json paper-backtest-2t.json; do
+          for f in active-etf.json stocks.json chips.json fundamentals.json pe5y.json pattern-stats.json close.json etf-info.json market-risk.json predict.json predict-intraday.json predict-analogs.json predict-intraday-3m.json predict-analogs-3m.json predict-intraday-1m.json predict-analogs-1m.json paper.json paper-backtest.json paper-backtest-novt.json paper-backtest-2t.json heat-index.json heat-index.png; do
             if [ -f ".data/$f" ]; then cp ".data/$f" web/public/data/; fi
           done
           if [ -d .data/candles ]; then cp -r .data/candles web/public/data/; fi
