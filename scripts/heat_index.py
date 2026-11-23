@@ -22,7 +22,7 @@
 台股：美國 D 日的熱度，對到 D 日之後的第一個台股交易日（美股週五 → 台股週一）。
 
 台股組（五個）：融資維持率、融資餘額 20 日變化、外資台指期淨未平倉、散戶小台淨多單比（FinMind）、台股 FOMO（加權指數乖離、動能）。
-綜合：美股組、台股組各 50%，組內等權（不拿歷史調權重）。台股日期為準，美國 D 日的分數對到 D 日之後的第一個台股交易日。
+權重：十個元件的權重用最佳化挑——目標是「熱度越低、之後 60 個交易日加權指數漲越多」（等級相關係數），\n  再往等權拉回一半（降低過度配適）；成績用逐年往前滾（每年只用之前、答案已揭曉的資料挑權重）。台股日期為準，美國 D 日的分數對到 D 日之後的第一個台股交易日。
 
 驗證（事件研究）：熱度「跌破 30」那天之後 20、60 個交易日加權指數的報酬，跟「隨便哪一天」比。
 
@@ -343,6 +343,66 @@ def group_mean(df: pd.DataFrame) -> pd.Series:
     return df.mean(axis=1, skipna=True).where(df.notna().sum(axis=1) >= max(1, (df.shape[1] + 1) // 2))
 
 
+# ---------------------------------------------------------------- 加權最佳化
+H_FWD = 60  # 看「之後 60 個交易日」加權指數的報酬
+SHRINK = 0.5  # 最佳權重往等權拉回一半（降低「調到剛好符合過去」）
+
+
+def weighted(df: pd.DataFrame, w: np.ndarray) -> pd.Series:
+    """加權平均；某天缺的元件不算，權重分給其他元件（缺太多就不算）。"""
+    m = df.notna().values
+    v = np.nan_to_num(df.values)
+    den = (m * w).sum(1)
+    out = np.where(den > 0.4 * w.sum(), (v * w).sum(1) / np.where(den > 0, den, 1), np.nan)
+    return pd.Series(out, index=df.index)
+
+
+def ic(score: pd.Series, fwd: pd.Series) -> float:
+    """熱度越低、之後漲越多 → 回傳正值（等級相關係數，每 5 天取一次，減少重疊）。"""
+    x = pd.DataFrame({"s": score, "f": fwd}).dropna().iloc[::5]
+    if len(x) < 30:
+        return 0.0
+    return float(-x["s"].rank().corr(x["f"].rank()))
+
+
+def optimize(df: pd.DataFrame, fwd: pd.Series, n_random: int = 1500) -> np.ndarray:
+    """權重（加總 1）：Dirichlet 隨機搜尋＋Nelder-Mead 微調，目標＝熱度與之後 60 日報酬的負相關最大；再往等權拉回 SHRINK。"""
+    from scipy.optimize import minimize
+
+    k = df.shape[1]
+    rng = np.random.default_rng(20261123)
+    cands = [np.full(k, 1 / k)] + [rng.dirichlet(np.ones(k)) for _ in range(n_random)]
+    vals = [ic(weighted(df, w), fwd) for w in cands]
+    best = cands[int(np.argmax(vals))]
+    res = minimize(lambda z: -ic(weighted(df, np.exp(z) / np.exp(z).sum()), fwd), np.log(best + 1e-6), method="Nelder-Mead", options={"maxiter": 300})
+    w = np.exp(res.x) / np.exp(res.x).sum()
+    if -res.fun < max(vals):
+        w = best
+    return (1 - SHRINK) * w + SHRINK * np.full(k, 1 / k)
+
+
+def walk_forward(df: pd.DataFrame, fwd: pd.Series, close: pd.Series) -> tuple[pd.Series, dict]:
+    """每一年只用「之前、而且答案已經揭曉」的資料挑權重，再算那一年的熱度。回傳樣本外熱度與成績。"""
+    years = sorted({t.year for t in df.index})[2:]
+    parts, ic_opt, ic_eq = [], [], []
+    for y in years:
+        test = df.index[df.index.year == y]
+        start = test[0]
+        known = fwd.index[(fwd.index < start)]
+        known = known[: max(0, len(known) - H_FWD)]  # 60 日報酬要在測試開始前就揭曉
+        train = df.loc[df.index.isin(known)]
+        if len(train) < 300:
+            continue
+        w = optimize(train, fwd.loc[train.index], n_random=500)
+        sc = weighted(df, w).loc[test]
+        parts.append(sc)
+        ic_opt.append(ic(sc, fwd.loc[test]))
+        ic_eq.append(ic(weighted(df, np.full(df.shape[1], 1 / df.shape[1])).loc[test], fwd.loc[test]))
+        log(f"  {y}：用 {train.index[0].date()}～{train.index[-1].date()} 挑權重，樣本外相關 {ic_opt[-1]:+.3f}（等權 {ic_eq[-1]:+.3f}）")
+    oos = pd.concat(parts) if parts else pd.Series(dtype=float)
+    return oos, {"years": [str(y) for y in years[: len(ic_opt)]], "ic": ic_opt, "icEqual": ic_eq}
+
+
 def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     d = Path(args[0] if args else "data")
@@ -358,11 +418,20 @@ def main() -> None:
     us_tw = pd.DataFrame({k: us_to_tw(us_scores[k], days) for k in us_scores}, index=days)
     us_g = group_mean(us_tw)
     tw_g = group_mean(tw_scores)
-    # 美股組、台股組各 50%（某一組沒資料時用另一組）
-    score = pd.concat([us_g, tw_g], axis=1).mean(axis=1, skipna=True).dropna()
+    allc = pd.concat([us_tw, tw_scores], axis=1)
+    allc = allc.loc[allc.notna().any(axis=1)]
+    fwd = twii.shift(-H_FWD) / twii - 1
+    log("逐年往前滾挑權重（樣本外）：")
+    oos, wf = walk_forward(allc, fwd.reindex(allc.index), twii)
+    log("用全部歷史挑最新權重⋯")
+    known = allc.index[: max(0, len(allc) - H_FWD)]
+    w = optimize(allc.loc[known], fwd.loc[known])
+    weights = dict(zip(allc.columns, w))
+    score = weighted(allc, w).dropna()
     us_g, tw_g = us_g.reindex(score.index), tw_g.reindex(score.index)
 
-    ev = event_study(score, twii)
+    # 驗證用樣本外熱度（每年只用之前的資料挑權重），比較公正
+    ev = event_study(oos if len(oos) else score, twii)
     now, prev = float(score.iloc[-1]), float(score.iloc[-2])
     if now < BUY:
         advice = "籌碼極度乾淨（抄底區）" + ("：熱度開始回升" if now > prev else "：還在往下")
@@ -372,15 +441,15 @@ def main() -> None:
         advice = "中性"
     pct = lambda x: "—" if x is None else f"{x * 100:+.1f}%"
     comps = [("美股", k, COMPONENTS[k], src_us.get(k, ""), us_tw[k]) for k in us_scores] + [("台股", k, COMPONENTS_TW[k], src_tw.get(k, ""), tw_scores[k]) for k in tw_scores]
-    n_us, n_tw = us_scores.shape[1], tw_scores.shape[1]
-    w_of = lambda g: (0.5 if (n_us and n_tw) else 1.0) / (n_us if g == "美股" else n_tw)
 
     log("\n================ 結果 ================")
     log(f"最新熱度：{now:.1f}（前一天 {prev:.1f}），台股 {score.index[-1].date()}　→ {advice}")
     log(f"  美股組 {us_g.iloc[-1]:.1f}、台股組 {tw_g.iloc[-1]:.1f}")
     for g, k, name, src, ser in comps:
         v = ser.dropna()
-        log(f"  [{g}] {name:<30} 權重 {w_of(g) * 100:5.1f}%   今天 {v.iloc[-1] if len(v) else float('nan'):5.1f}   （{src}）")
+        log(f"  [{g}] {name:<30} 權重 {weights[k] * 100:5.1f}%   今天 {v.iloc[-1] if len(v) else float('nan'):5.1f}   （{src}）")
+    if wf["ic"]:
+        log(f"\n樣本外相關（熱度越低、之後 60 日漲越多＝正）：最佳權重平均 {np.mean(wf['ic']):+.3f}、等權平均 {np.mean(wf['icEqual']):+.3f}")
     log(f"\n跌破 {BUY:.0f} 之後的加權指數（共 {len(ev['events'])} 次：{'、'.join(ev['events'][-6:])}{'⋯' if len(ev['events']) > 6 else ''}）")
     for h in ("20", "60"):
         x = ev[h]
@@ -401,9 +470,10 @@ def main() -> None:
         "usNow": r1(us_g.iloc[-1]),
         "twNow": r1(tw_g.iloc[-1]),
         "advice": advice,
-        "components": [{"group": g, "id": k, "name": name, "source": src, "weight": round(w_of(g), 4), "score": r1(ser.dropna().iloc[-1]) if ser.notna().any() else None} for g, k, name, src, ser in comps],
+        "components": [{"group": g, "id": k, "name": name, "source": src, "weight": round(float(weights[k]), 4), "score": r1(ser.dropna().iloc[-1]) if ser.notna().any() else None} for g, k, name, src, ser in comps],
         "missing": [COMPONENTS[k] for k in COMPONENTS if k not in us_scores] + [COMPONENTS_TW[k] for k in COMPONENTS_TW if k not in tw_scores],
         "events": {"tw": ev},
+        "weighting": {"horizon": H_FWD, "shrink": SHRINK, **wf},
         # [台股日期, 加權指數, 綜合熱度, 美股組, 台股組]
         "series": [[str(t.date()), round(float(twii.loc[t]), 2), r1(score.loc[t]), r1(us_g.loc[t]), r1(tw_g.loc[t])] for t in tail],
     }
