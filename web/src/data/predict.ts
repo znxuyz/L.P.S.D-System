@@ -225,6 +225,7 @@ export interface PaperData {
   curve: Array<[string, number, number, number, number, number]>;
   positions: Array<{ code: string; name: string; shares: number; cost: number; price: number | null; ret: number | null }>;
   heldSince: string | null;
+  holdings?: { trend: { code: string; shares: number; price: number | null; value: number; cash: number; since: string | null }; stocksCash: number };
   trend?: { holding: boolean; since: string | null; nextHold: boolean; nextWeight?: number; vol20?: number; volMed?: number; close: number; ma: number; dist: number; asOf: string };
   trades: Array<{ date: string; book: 'stocks' | 'dayTrade' | 'trend' | 'range'; code: string; name: string; side: string; price: number | null; pnl: number | null; note: string }>;
   tradeCount: number;

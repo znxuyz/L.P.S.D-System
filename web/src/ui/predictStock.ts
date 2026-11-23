@@ -64,9 +64,9 @@ async function show(sec: HTMLElement, rev: RevStocks | undefined): Promise<void>
   const body = sec.querySelector<HTMLElement>('#pd-stock-body')!;
   const name = dir.find((x) => x.code === st.code)?.name ?? '';
   if (st.tf !== 'day') {
-    body.innerHTML = `<p class="pd-note is-warn"><b>${esc(st.code)} ${esc(name)}：個股的 ${st.tf === '5m' ? '5' : '3'} 分 K 預測目前做不到，不想亂畫一條線騙你。</b>
-      要預測又要能驗證準不準，需要這檔股票過去幾年的盤中 K 線來訓練和回測；但證交所、櫃買只公開<b>大盤指數</b>的盤中資料（所以 00631L 能做），個股的歷史盤中資料沒有公開來源。
-      富果的盤中 K 線只有當天、而且金鑰只存在你的瀏覽器，沒辦法拿來訓練。能做的是：個股看下面的「日 K」；大盤（00631L）看下面的 5 分 K${st.tf === '3m' ? '（3 分 K 的歷史資料正在回補，補齊後加上）' : ''}。</p>`;
+    body.innerHTML = `<p class="pd-note is-warn"><b>${esc(st.code)} ${esc(name)}：個股的 ${st.tf === '5m' ? '5' : '3'} 分 K 預測還在準備，先不畫線。</b>
+      系統每天收盤後用你放在 GitHub 的富果金鑰，收集約 50 檔（成交額最大的股票、00631L、0050、營收選股名單）的 1 分 K，存在私人儲存庫，目前約 140 天，還會往回補到富果提供的最早日期。
+      富果的資料不能公開，所以模型會在 GitHub 上私下訓練，網站只放<b>預測結果與回測成績</b>，不放原始 K 線。資料量夠、而且回測確認比「不會動」準之後才上線；在那之前個股請看「日 K」，大盤看下面的 00631L 5 分 K。</p>`;
     return;
   }
   if (!rev?.calib) {
