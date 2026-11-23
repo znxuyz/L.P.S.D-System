@@ -9,7 +9,9 @@ on:
     branches: [main]
     paths: ['scripts/**', 'web/src/data/mopsParse.ts', '.github/workflows/update-data.yml']
   schedule:
+    # 收盤後的每日更新排三次（GitHub 排程常延遲或跳過；11/23 的 18:37 那次就沒跑）
     - cron: '37 10 * * 1-5'
+    - cron: '11 12 * * 1-5'
     - cron: '7 14 * * 1-5'
     - cron: '23 * * * *'
   workflow_dispatch:
