@@ -4,19 +4,21 @@
  * - 網頁本身（index.html）：先連網拿最新版（略過瀏覽器快取），3 秒內沒回應或離線就用存好的。
  * - version.json（自動更新用）：不經過這裡，一定連網。
  * - 程式與樣式（assets/ 檔名帶雜湊，內容不會變）：存好就直接用。
- * - 資料（data/*.json、圖示等）：先用存好的立刻顯示，同時在背景更新，下次打開就是新的。
- * - 開通碼清單、同步設定，以及每天更新的資料（大盤風險、收盤、新聞、全市場行情、股票名稱）：
- *   先連網，失敗才用存好的（新增開通碼要馬上生效；資料不能停在好幾天前）。
+ * - 資料（data/ 底下的檔案與所有 .json：預測、模擬帳戶、行情、日 K、開通碼清單…）：
+ *   先連網拿最新的，4 秒內沒回應或離線才用存好的（資料不能停在前幾天）。
+ * - 圖示等其他靜態檔：先用存好的立刻顯示，同時在背景更新。
  * - 影片（media/*.mp4）：不經過這裡（瀏覽器分段下載，存進快取會失敗也太占空間）。
  * - 其他網站（證交所、富果、Firebase、字型）：不經過這裡。
  */
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL = `lplc-shell-${VERSION}`;
 const ASSETS = `lplc-assets-${VERSION}`;
 const DATA = `lplc-data-${VERSION}`;
 const KEEP = [SHELL, ASSETS, DATA];
 const LIMITS = { [ASSETS]: 60, [DATA]: 400 };
-const NETWORK_FIRST = /\/(sim-codes|sync-config|market-risk|close|names)\.json$|\/data\/(news|simday)\//;
+// 所有 .json 資料（預測、模擬帳戶、行情、日 K…每天都會更新）：一律先連網，連不上才用存好的。
+// 以前預測檔是「先用存好的」，打開時會顯示前幾天的舊預測（例如昨收還是前一天的價格），所以改掉。
+const NETWORK_FIRST = /\.json$|\/data\//;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
