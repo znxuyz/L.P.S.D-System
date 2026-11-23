@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-美股融資熱度指數（每日推估）——對照台股、美股的抄底點
+台美融資熱度指數（每日推估）——美股原始五元件＋台股籌碼，看台股的抄底點
 
     python3 scripts/heat_index.py <資料資料夾> [--png 輸出圖檔]
 
@@ -21,7 +21,10 @@
 權重：五個元件等權平均（不拿歷史去調權重，避免「調到剛好符合過去」）。
 台股：美國 D 日的熱度，對到 D 日之後的第一個台股交易日（美股週五 → 台股週一）。
 
-驗證（事件研究）：熱度「跌破 30」那天之後 20、60 個交易日 S&P 500 與加權指數的報酬，跟「隨便哪一天」比。
+台股組（五個）：融資維持率、融資餘額 20 日變化、外資台指期淨未平倉、散戶小台淨多單比（FinMind）、台股 FOMO（加權指數乖離、動能）。
+綜合：美股組、台股組各 50%，組內等權（不拿歷史調權重）。台股日期為準，美國 D 日的分數對到 D 日之後的第一個台股交易日。
+
+驗證（事件研究）：熱度「跌破 30」那天之後 20、60 個交易日加權指數的報酬，跟「隨便哪一天」比。
 
 輸出：<資料資料夾>/heat-index.json（網站預測頁）、圖檔（--png，預設 <資料資料夾>/heat-index.png）。
 """
@@ -214,7 +217,93 @@ def event_study(score: pd.Series, close: pd.Series, hs=(20, 60)) -> dict:
     return out
 
 
-def plot(spx: pd.Series, twii: pd.Series | None, score: pd.Series, path: Path, title: str) -> None:
+# ---------------------------------------------------------------- 台股組
+COMPONENTS_TW = {
+    "twMargin": "融資維持率（越低＝斷頭壓力越大）",
+    "twMarginChg": "融資餘額 20 日變化（散戶加槓桿）",
+    "twForeign": "外資台指期淨未平倉",
+    "twRetail": "散戶小台淨多單比（散戶越看多越熱）",
+    "twFomo": "台股 FOMO／恐慌（加權指數乖離、動能）",
+}
+
+
+def finmind(dataset: str, data_id: str, start: str) -> pd.DataFrame | None:
+    import os
+
+    token = os.environ.get("FINMIND_TOKEN", "")
+    raw = http_get(f"https://api.finmindtrade.com/api/v4/data?dataset={dataset}&data_id={data_id}&start_date={start}" + (f"&token={token}" if token else ""), timeout=120)
+    if not raw:
+        return None
+    try:
+        j = json.loads(raw)
+        if not j.get("data"):
+            log(f"  FinMind {dataset} 沒有資料：{str(j.get('msg', ''))[:80]}")
+            return None
+        return pd.DataFrame(j["data"])
+    except Exception as e:
+        log(f"  FinMind {dataset} 格式不符：{e}")
+        return None
+
+
+def retail_mtx(start: str) -> pd.Series | None:
+    """散戶小台淨部位比＝−（三大法人小台淨未平倉）÷ 全市場小台未平倉。"""
+    inst = finmind("TaiwanFuturesInstitutionalInvestors", "MTX", start)
+    if inst is None:
+        return None
+    try:
+        inst["net"] = pd.to_numeric(inst["long_open_interest_balance_volume"]) - pd.to_numeric(inst["short_open_interest_balance_volume"])
+        retail = -inst.groupby("date")["net"].sum()
+        daily = finmind("TaiwanFuturesDaily", "MTX", start)
+        if daily is not None and "open_interest" in daily:
+            if "trading_session" in daily:
+                daily = daily[daily["trading_session"] == "position"]
+            oi = daily.groupby("date")["open_interest"].apply(lambda x: pd.to_numeric(x, errors="coerce").sum())
+            retail = (retail / oi.reindex(retail.index)).replace([np.inf, -np.inf], np.nan)
+        retail.index = pd.to_datetime(retail.index)
+        log(f"  FinMind 小台：{retail.notna().sum()} 天")
+        return retail.dropna()
+    except Exception as e:
+        log(f"  散戶小台計算失敗：{e}")
+        return None
+
+
+def build_tw(d: Path, twii: pd.Series) -> tuple[pd.DataFrame, dict[str, str]]:
+    days = twii.index
+    comp: dict[str, pd.Series] = {}
+    src: dict[str, str] = {}
+    j = read_json(d / "market-risk.json")
+    if j and j.get("rows"):
+        df = pd.DataFrame(j["rows"], columns=["date", "ratio", "finAmt", "finLots", "shortLots", "foreignNet"])
+        df.index = pd.to_datetime(df.pop("date"))
+        df = df.apply(pd.to_numeric, errors="coerce")
+        df.loc[df["finAmt"] <= 0, ["finAmt"]] = np.nan
+        df = df.reindex(days).ffill(limit=5)
+        comp["twMargin"] = pct_rank(df["ratio"])
+        comp["twMarginChg"] = pct_rank(df["finAmt"].pct_change(20))
+        if df["foreignNet"].notna().sum() > WINDOW:
+            comp["twForeign"] = pct_rank(df["foreignNet"])
+        src.update(twMargin="market-risk.json", twMarginChg="market-risk.json", twForeign="market-risk.json")
+    rt = retail_mtx(str(days[0].date()))
+    if rt is not None and len(rt) > WINDOW:
+        comp["twRetail"] = pct_rank(rt.reindex(days).ffill(limit=5))
+        src["twRetail"] = "FinMind 小台 MTX"
+    comp["twFomo"] = pd.concat([pct_rank(twii / twii.rolling(50).mean() - 1), pct_rank(twii.pct_change(20))], axis=1).mean(axis=1, skipna=True)
+    src["twFomo"] = "index/TAIEX.json"
+    out = pd.DataFrame(comp, index=days)
+    for k in COMPONENTS_TW:
+        if k not in out:
+            log(f"  不用：{COMPONENTS_TW[k]}（沒有資料）")
+    return out, src
+
+
+def us_to_tw(s: pd.Series, tw: pd.DatetimeIndex) -> pd.Series:
+    """美國 D 日的數字 → D 日之後的第一個台股交易日（美股週五 → 台股週一）。"""
+    s = s.dropna()
+    m = pd.merge_asof(pd.DataFrame({"tw": tw}), pd.DataFrame({"us": s.index, "v": s.values}), left_on="tw", right_on="us", direction="backward", allow_exact_matches=False)
+    return pd.Series(m["v"].values, index=tw)
+
+
+def plot(twii: pd.Series, score: pd.Series, us_g: pd.Series, tw_g: pd.Series, path: Path, title: str) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -226,52 +315,54 @@ def plot(spx: pd.Series, twii: pd.Series | None, score: pd.Series, path: Path, t
             plt.rcParams["font.sans-serif"] = [f]
             break
     plt.rcParams["axes.unicode_minus"] = False
-    panels = [("S&P 500", spx)] + ([("台灣加權指數", twii)] if twii is not None else [])
-    fig, axes = plt.subplots(len(panels) + 1, 1, figsize=(14, 3.6 * (len(panels) + 1)), sharex=True)
-    for ax, (name, c) in zip(axes, panels):
-        df = pd.DataFrame({"c": c, "s": score.reindex(c.index)}).dropna()
-        ax.plot(df.index, df.c, color="#333", lw=1.1, label=name)
-        lo, hi = df[df.s < BUY], df[df.s > HOT]
-        ax.scatter(lo.index, lo.c * 0.975, marker="^", color="#16a34a", s=22, label=f"熱度 < {BUY:.0f}（籌碼乾淨，抄底區）", zorder=3)
-        ax.scatter(hi.index, hi.c * 1.025, marker="v", color="#dc2626", s=22, label=f"熱度 > {HOT:.0f}（散戶瘋狂）", zorder=3)
-        ax.legend(loc="upper left")
-        ax.grid(alpha=0.25)
-    axes[0].set_title(title)
-    a = axes[-1]
-    a.plot(score.index, score, color="#2563eb", lw=1.1, label="美股融資熱度")
-    a.axhline(BUY, color="gray", ls="--", lw=1)
-    a.axhline(HOT, color="gray", ls="--", lw=1)
-    a.axhspan(0, BUY, color="#bbf7d0", alpha=0.5, label="籌碼乾淨（抄底區）")
-    a.axhspan(HOT, 100, color="#fecaca", alpha=0.5, label="過熱區")
-    a.set_ylim(0, 100)
-    a.legend(loc="upper left")
-    a.grid(alpha=0.25)
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(14, 8), sharex=True, gridspec_kw={"height_ratios": [3, 2]})
+    df = pd.DataFrame({"c": twii, "s": score}).dropna()
+    a1.plot(df.index, df.c, color="#333", lw=1.1, label="台灣加權指數")
+    lo, hi = df[df.s < BUY], df[df.s > HOT]
+    a1.scatter(lo.index, lo.c * 0.975, marker="^", color="#16a34a", s=22, label=f"熱度 < {BUY:.0f}（籌碼乾淨，抄底區）", zorder=3)
+    a1.scatter(hi.index, hi.c * 1.025, marker="v", color="#dc2626", s=22, label=f"熱度 > {HOT:.0f}（散戶瘋狂）", zorder=3)
+    a1.set_title(title)
+    a1.legend(loc="upper left")
+    a1.grid(alpha=0.25)
+    a2.plot(us_g.index, us_g, color="#94a3b8", lw=0.8, alpha=0.8, label="美股組")
+    a2.plot(tw_g.index, tw_g, color="#f59e0b", lw=0.8, alpha=0.8, label="台股組")
+    a2.plot(score.index, score, color="#2563eb", lw=1.6, label="台美融資熱度（綜合）")
+    a2.axhline(BUY, color="gray", ls="--", lw=1)
+    a2.axhline(HOT, color="gray", ls="--", lw=1)
+    a2.axhspan(0, BUY, color="#bbf7d0", alpha=0.5)
+    a2.axhspan(HOT, 100, color="#fecaca", alpha=0.5)
+    a2.set_ylim(0, 100)
+    a2.legend(loc="upper left", ncol=3)
+    a2.grid(alpha=0.25)
     fig.tight_layout()
     fig.savefig(path, dpi=120)
     plt.close(fig)
+
+
+def group_mean(df: pd.DataFrame) -> pd.Series:
+    return df.mean(axis=1, skipna=True).where(df.notna().sum(axis=1) >= max(1, (df.shape[1] + 1) // 2))
 
 
 def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     d = Path(args[0] if args else "data")
     png = Path(sys.argv[sys.argv.index("--png") + 1]) if "--png" in sys.argv else d / "heat-index.png"
-    log("美股融資熱度指數：讀資料⋯")
-    spx, scores, src = build(d)
-    used = list(scores.columns)
-    score = scores.mean(axis=1, skipna=True).where(scores.notna().sum(axis=1) >= max(1, (len(used) + 1) // 2))
-    score = score.dropna()
-    log(f"  用到 {len(used)} 個元件：{'、'.join(COMPONENTS[k] for k in used)}")
-
-    # 台股：美國 D 日 → D 日之後的第一個台股交易日
     twii = ohlc(d, "index/TAIEX.json")
-    tw_score = None
-    if twii is not None:
-        m = pd.merge_asof(pd.DataFrame({"tw": twii.index}), pd.DataFrame({"us": score.index, "s": score.values}), left_on="tw", right_on="us", direction="backward", allow_exact_matches=False)
-        tw_score = pd.Series(m["s"].values, index=twii.index)
+    if twii is None:
+        sys.exit("沒有加權指數資料（index/TAIEX.json）")
+    log("美股組（原始五元件）：")
+    spx, us_scores, src_us = build(d)
+    log("台股組：")
+    tw_scores, src_tw = build_tw(d, twii)
+    days = twii.index
+    us_tw = pd.DataFrame({k: us_to_tw(us_scores[k], days) for k in us_scores}, index=days)
+    us_g = group_mean(us_tw)
+    tw_g = group_mean(tw_scores)
+    # 美股組、台股組各 50%（某一組沒資料時用另一組）
+    score = pd.concat([us_g, tw_g], axis=1).mean(axis=1, skipna=True).dropna()
+    us_g, tw_g = us_g.reindex(score.index), tw_g.reindex(score.index)
 
-    ev_us = event_study(score, spx)
-    ev_tw = event_study(tw_score, twii) if tw_score is not None else None
-
+    ev = event_study(score, twii)
     now, prev = float(score.iloc[-1]), float(score.iloc[-2])
     if now < BUY:
         advice = "籌碼極度乾淨（抄底區）" + ("：熱度開始回升" if now > prev else "：還在往下")
@@ -280,42 +371,41 @@ def main() -> None:
     else:
         advice = "中性"
     pct = lambda x: "—" if x is None else f"{x * 100:+.1f}%"
+    comps = [("美股", k, COMPONENTS[k], src_us.get(k, ""), us_tw[k]) for k in us_scores] + [("台股", k, COMPONENTS_TW[k], src_tw.get(k, ""), tw_scores[k]) for k in tw_scores]
+    n_us, n_tw = us_scores.shape[1], tw_scores.shape[1]
+    w_of = lambda g: (0.5 if (n_us and n_tw) else 1.0) / (n_us if g == "美股" else n_tw)
+
     log("\n================ 結果 ================")
-    log(f"最新熱度：{now:.1f}（前一天 {prev:.1f}），美國 {score.index[-1].date()}　→ {advice}")
-    for k in used:
-        v = scores[k].dropna()
-        log(f"  {COMPONENTS[k]:<30} 權重 {100 / len(used):5.1f}%   今天 {v.iloc[-1]:5.1f}   （{src.get(k, '')}）")
-    for name, ev in [("S&P 500", ev_us), ("加權指數", ev_tw)]:
-        if not ev:
-            continue
-        log(f"\n跌破 {BUY:.0f} 之後（{name}，共 {len(ev['events'])} 次：{'、'.join(ev['events'][-6:])}{'⋯' if len(ev['events']) > 6 else ''}）")
-        for h in ("20", "60"):
-            x = ev[h]
-            upt = "—" if x["up"] is None else f"{x['up'] * 100:.0f}%"
-            log(f"  {h} 日後  平均 {pct(x['avg'])}  上漲機率 {upt}　｜ 隨便哪一天 {pct(x['allAvg'])}、{x['allUp'] * 100:.0f}%")
+    log(f"最新熱度：{now:.1f}（前一天 {prev:.1f}），台股 {score.index[-1].date()}　→ {advice}")
+    log(f"  美股組 {us_g.iloc[-1]:.1f}、台股組 {tw_g.iloc[-1]:.1f}")
+    for g, k, name, src, ser in comps:
+        v = ser.dropna()
+        log(f"  [{g}] {name:<30} 權重 {w_of(g) * 100:5.1f}%   今天 {v.iloc[-1] if len(v) else float('nan'):5.1f}   （{src}）")
+    log(f"\n跌破 {BUY:.0f} 之後的加權指數（共 {len(ev['events'])} 次：{'、'.join(ev['events'][-6:])}{'⋯' if len(ev['events']) > 6 else ''}）")
+    for h in ("20", "60"):
+        x = ev[h]
+        upt = "—" if x["up"] is None else f"{x['up'] * 100:.0f}%"
+        log(f"  {h} 日後  平均 {pct(x['avg'])}  上漲機率 {upt}　｜ 隨便哪一天 {pct(x['allAvg'])}、{x['allUp'] * 100:.0f}%")
 
-    plot(spx, twii, score, png, f"美股融資熱度（每日推估）　最新 {now:.0f}（美國 {score.index[-1].date()}）")
+    plot(twii, score, us_g, tw_g, png, f"台美融資熱度（美股原始五元件＋台股籌碼）　最新 {now:.0f}（{score.index[-1].date()}）")
     log(f"\n圖：{png}")
-
-    start = score.index[-1] - pd.Timedelta(days=365 * 3)
-    us_dates = score.index[score.index >= start]
-    tw_map = {}
-    if twii is not None:
-        nxt = pd.merge_asof(pd.DataFrame({"us": us_dates}), pd.DataFrame({"tw": twii.index, "c": twii.values}), left_on="us", right_on="tw", direction="forward", allow_exact_matches=False)
-        tw_map = {u: (None if pd.isna(c) else round(float(c), 2)) for u, c in zip(us_dates, nxt["c"])}
+    tail = score.index[score.index >= score.index[-1] - pd.Timedelta(days=365 * 3)]
+    r1 = lambda x: None if not np.isfinite(x) else round(float(x), 1)
     out = {
         "generatedAt": pd.Timestamp.now(tz="UTC").isoformat(),
-        "kind": "us-margin",
+        "kind": "tw-us-margin",
         "asOf": str(score.index[-1].date()),
         "thresholds": {"buy": BUY, "hot": HOT},
         "now": round(now, 1),
         "prev": round(prev, 1),
+        "usNow": r1(us_g.iloc[-1]),
+        "twNow": r1(tw_g.iloc[-1]),
         "advice": advice,
-        "components": [{"id": k, "name": COMPONENTS[k], "source": src.get(k, ""), "weight": round(1 / len(used), 4), "score": round(float(scores[k].dropna().iloc[-1]), 1)} for k in used],
-        "missing": [COMPONENTS[k] for k in COMPONENTS if k not in used],
-        "events": {"us": ev_us, "tw": ev_tw},
-        # [美國日期, S&P 500, 之後第一個台股交易日的加權指數, 熱度]
-        "series": [[str(u.date()), round(float(spx.loc[u]), 2), tw_map.get(u), round(float(score.loc[u]), 1)] for u in us_dates],
+        "components": [{"group": g, "id": k, "name": name, "source": src, "weight": round(w_of(g), 4), "score": r1(ser.dropna().iloc[-1]) if ser.notna().any() else None} for g, k, name, src, ser in comps],
+        "missing": [COMPONENTS[k] for k in COMPONENTS if k not in us_scores] + [COMPONENTS_TW[k] for k in COMPONENTS_TW if k not in tw_scores],
+        "events": {"tw": ev},
+        # [台股日期, 加權指數, 綜合熱度, 美股組, 台股組]
+        "series": [[str(t.date()), round(float(twii.loc[t]), 2), r1(score.loc[t]), r1(us_g.loc[t]), r1(tw_g.loc[t])] for t in tail],
     }
     (d / "heat-index.json").write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     log(f"輸出：{d / 'heat-index.json'}")
