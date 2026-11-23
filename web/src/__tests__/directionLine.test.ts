@@ -33,3 +33,17 @@ describe('directionLine 幅度（endSize）', () => {
     expect(Math.log(out.at(-1)! / 100)).toBeCloseTo(-0.02, 6);
   });
 });
+
+import { knockout, BARS } from '../domain/intradayModel';
+describe('knockout（相似日淘汰賽）', () => {
+  const ctx = { prevDay: 0, prev5: 0, prevIntra: 0, futChg: 0, prevRange: 0.012 } as unknown as Parameters<typeof knockout>[1];
+  const day = (date: string, slope: number) => ({ date, gap: 0, r: Array.from({ length: BARS + 1 }, (_, j) => slope * j), ctx });
+  it('偏離的會被淘汰、停在偏離的那一根，至少留 3 條', () => {
+    const lib = [day('a', 0), day('b', 0.0001), day('c', -0.0001), day('d', 0.003), day('e', -0.003)];
+    const actual = Array.from({ length: 11 }, () => 100);
+    const out = knockout(lib, ctx, actual, 5, 0.6, 3);
+    const alive = out.filter((l) => l.out == null).map((l) => l.date).sort();
+    expect(alive).toEqual(['a', 'b', 'c']);
+    expect(out.find((l) => l.date === 'd')!.out).toBeGreaterThan(0);
+  });
+});

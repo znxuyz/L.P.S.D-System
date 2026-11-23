@@ -424,7 +424,7 @@ function dayTradeHtml(d: NonNullable<PredictData['dayTrade']>, f?: PredictData['
 let data: PredictData | null | undefined;
 let intra: IntradayData | null | undefined;
 let loading = false;
-const intraState: IntradayState = { mode: '', k: -1, tf: 5, asset: 'L', showActual: true, showAnalogs: true, showCandles: false, showBand: false, showLevels: true };
+const intraState: IntradayState = { mode: '', k: -1, tf: 5, asset: 'L', showActual: true, showAnalogs: true, knockout: false, showCandles: false, showBand: false, showLevels: true };
 let analogLib: AnalogDay[] | null = null;
 let paper: PaperData | null = null;
 let paperBt: PaperData | null = null;

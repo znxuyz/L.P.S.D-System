@@ -242,3 +242,11 @@
 .pd-table.pd-hold td small { display: block; margin-top: 2px; font-size: 11.5px; }
 .pd-hold-wrap { max-height: none; }
 @media (max-width: 720px) { .pd-table.pd-hold th, .pd-table.pd-hold td { padding: 7px 6px; } }
+/* 相似日淘汰賽 */
+.pd-ko-out { fill: none; stroke: rgba(180, 190, 215, 0.35); stroke-width: 1; }
+.pd-ko-x { fill: rgba(255, 140, 160, 0.85); font-size: 9px; }
+.pd-ko-live { fill: none; stroke: #ffb44a; stroke-width: 1.3; opacity: 0.6; }
+.pd-ko-avg { fill: none; stroke: #ffb44a; stroke-width: 3; }
+.lg-ko-live i { background: #ffb44a; opacity: 0.6; }
+.lg-ko-avg i { background: #ffb44a; height: 4px !important; }
+.lg-ko-out i { background: rgba(180, 190, 215, 0.5); }

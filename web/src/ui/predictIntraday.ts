@@ -7,7 +7,7 @@
  * - 00631L 的價格由加權指數換算（β 倍），不是 00631L 真實的 5 分 K。
  */
 import type { IndexPoint } from '../data/types';
-import { BARS, STEP, DAYTRADE_COST, analogLines, avgOf, barRange, blendLine, directionLine, typicalCloseMove, rangeLevels, simulateRange, type RangeLevels, type RangePlan, forecastDay, toLeveraged, type AnalogDay, type Bar, type DailyCtx, type DayForecast, type DayModel, type IntradayModel, discName } from '../domain/intradayModel';
+import { BARS, STEP, DAYTRADE_COST, analogLines, avgOf, barRange, blendLine, directionLine, typicalCloseMove, knockout, type KnockoutLine, rangeLevels, simulateRange, type RangeLevels, type RangePlan, forecastDay, toLeveraged, type AnalogDay, type Bar, type DailyCtx, type DayForecast, type DayModel, type IntradayModel, discName } from '../domain/intradayModel';
 import { escapeHtml as esc, num } from './format';
 
 type Verdict = 'signal' | 'none';
@@ -201,7 +201,18 @@ function predCandles(series: Partial<Record<LineId, Array<[number, number]>>>, f
   return out;
 }
 
-function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: Analogs): string {
+/** 淘汰賽的線：被淘汰的淡灰色停在淘汰那一根（✕），存活的橘色細線畫到收盤，存活平均畫粗線。 */
+function koSvg(ko: KnockoutLine[], avg: number[], xi: (i: number) => number, sy: (x: number) => number): string {
+  const pathOf = (cs: number[], end: number) => cs.slice(0, end + 1).map((p, j) => `${j ? 'L' : 'M'}${xi(j).toFixed(1)},${sy(p).toFixed(1)}`).join('');
+  const out = ko
+    .filter((l) => l.out != null)
+    .map((l) => `<path class="pd-ko-out" d="${pathOf(l.closes, l.out!)}"/><text class="pd-ko-x" x="${xi(l.out!).toFixed(1)}" y="${(sy(l.closes[l.out!]) + 3).toFixed(1)}" text-anchor="middle">✕</text>`)
+    .join('');
+  const live = ko.filter((l) => l.out == null).map((l) => `<path class="pd-ko-live" d="${pathOf(l.closes, l.closes.length - 1)}"/>`).join('');
+  return `${out}${live}${avg.length ? `<path class="pd-ko-avg" d="${pathOf(avg, avg.length - 1)}"/>` : ''}`;
+}
+
+function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: Analogs, ko: KnockoutLine[] | null = null): string {
   const W = 760;
   const H = 320;
   const pad = { l: 54, r: 12, t: 12, b: 24 };
@@ -209,8 +220,12 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
   const known = v.ix.slice(0, f.from);
   const future = st.showActual && !v.live ? v.ix.slice(f.from) : [];
   const series = lineSeries(v, f, an, choiceFor(v.choice, v.k));
-  const shown = LINE_IDS.filter((id) => series[id] && (id === 'dir' || id === 'blend' || id === 'model' || st.showAnalogs));
+  // 淘汰賽打開時不畫一般的相似日線（太亂）
+  const shown = LINE_IDS.filter((id) => series[id] && (id === 'dir' || id === 'blend' || id === 'model' || (st.showAnalogs && !ko)));
+  const koLive = ko?.filter((l) => l.out == null) ?? [];
+  const koAvg = koLive.length ? koLive[0].closes.map((_, j) => Math.exp(koLive.reduce((t, l) => t + Math.log(l.closes[j]), 0) / koLive.length)) : [];
   const vals = [
+    ...(ko ?? []).flatMap((l) => l.closes.slice(0, (l.out ?? BARS) + 1)),
     ...known.flatMap((b) => [b[1], b[2]]),
     ...future.flatMap((b) => [b[1], b[2]]),
     ...shown.flatMap((id) => series[id]!.map((p) => p[1])),
@@ -281,7 +296,7 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
     ${known.map((b, i) => candle(i, b, 'is-real')).join('')}
     ${future.map((b, i) => candle(f.from + i, b, 'is-actual')).join('')}
     ${st.showCandles ? predCandles(series, f).map((k) => candle(k.bar, [k.o, k.h, k.l, k.c], 'is-pred')).join('') : ''}
-    <g clip-path="url(#pd-clip)">${levelSvg}${order.map(path).join('')}${order.map(endLabel).join('')}</g>
+    <g clip-path="url(#pd-clip)">${ko ? koSvg(ko, koAvg, xi, sy) : ''}${levelSvg}${order.map(path).join('')}${order.map(endLabel).join('')}</g>
     ${f.from > 0 ? `<line class="pd-now" x1="${startX.toFixed(1)}" x2="${startX.toFixed(1)}" y1="${pad.t}" y2="${H - pad.b}"/>` : ''}
     ${ticks.map((t) => `<text class="pd-tick" x="${pad.l - 6}" y="${(pad.t + (1 - (t - lo) / (hi - lo || 1)) * (H - pad.t - pad.b) + 4).toFixed(1)}" text-anchor="end">${num(t, 2)}</text>`).join('')}
     ${[0, 60, 120, 180, 240].map((mm) => mm / STEP).map((b) => `<text class="pd-tick" x="${(pad.l + b * bw).toFixed(1)}" y="${H - 6}" text-anchor="${b === 0 ? 'start' : 'middle'}">${clock(b)}</text>`).join('')}
@@ -289,7 +304,8 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
   </svg></div>
   <p class="pd-legend pd-intra-legend">
     ${series.dir ? '<span class="lg-dir"><i></i>方向預測（主線）</span>' : ''}${series.blend ? '<span class="lg-blend"><i></i>綜合預測</span>' : ''}<span class="lg-model"><i></i>模型主線</span>
-    ${st.showAnalogs && series.avg ? `<span class="lg-avg"><i></i>相似日平均（前 ${choiceFor(v.choice, v.k).n} 名）</span>${dates.map((dt, i) => `<span class="lg-a${i + 1}"><i></i>相似日 ${i + 1}：${esc(dt)}</span>`).join('')}` : ''}
+    ${ko ? `<span class="lg-ko-live"><i></i>淘汰賽存活（${koLive.length}／${ko.length} 天：${koLive.slice(0, 6).map((l) => esc(l.date)).join('、')}${koLive.length > 6 ? '⋯' : ''}）</span><span class="lg-ko-avg"><i></i>存活平均</span><span class="lg-ko-out"><i></i>已淘汰（✕＝淘汰的時間點）</span><span class="muted">開盤時依開盤前條件與跳空挑 30 天，偏離超過容許範圍就淘汰。回測：存活平均預測之後的方向約 49～57%，沒有比 30 天全部平均準，當作「今天像哪幾天」來看。</span>` : ''}
+    ${st.showAnalogs && !ko && series.avg ? `<span class="lg-avg"><i></i>相似日平均（前 ${choiceFor(v.choice, v.k).n} 名）</span>${dates.map((dt, i) => `<span class="lg-a${i + 1}"><i></i>相似日 ${i + 1}：${esc(dt)}</span>`).join('')}` : ''}
     <span class="pd-key-real"><i></i>已走完</span>${future.length ? '<span class="pd-key-actual"><i></i>實際走勢（當時還不知道）</span>' : ''}
     <span class="pd-key-hl"><i></i>預估今日最高／最低</span>${band ? '<span class="pd-band-key"><i></i>收盤約 80% 區間</span>' : ''}
   </p>`;
@@ -478,6 +494,8 @@ export interface IntradayState {
   showActual: boolean;
   /** 相似日走勢線、預測 K 棒、80% 區間要不要畫。 */
   showAnalogs: boolean;
+  /** 相似日淘汰賽（開盤時 30 天，偏離的逐一淘汰）。 */
+  knockout?: boolean;
   showCandles: boolean;
   showBand: boolean;
   /** 進出場價位線。 */
@@ -526,6 +544,9 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
         20,
       )
     : null;
+  // 淘汰賽：開盤後才有（候選天數只看開盤前的條件，所以整天是同一批）
+  const ko: KnockoutLine[] | null =
+    st.knockout && v.k >= 0 && v.open != null && lib && lib.length ? knockout(lib.filter((a) => a.date < viewDate), v.ctx, [v.open, ...v.ix.slice(0, Math.max(0, v.k)).map((b) => b[3])], 30, undefined, 3, v.P0) : null;
   const L = convOf(v, d);
   const lev = v.L0 ? d.beta : 1;
   const last = f.bars[f.bars.length - 1];
@@ -555,6 +576,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
     </div>
     <div class="pd-intra-ctrl pd-intra-opts">
       <label class="pd-check"><input type="checkbox" data-opt="showAnalogs" ${st.showAnalogs ? 'checked' : ''} />相似日走勢線</label>
+      <label class="pd-check"><input type="checkbox" data-opt="knockout" ${st.knockout ? 'checked' : ''} />相似日淘汰賽${v.k < 0 ? '<small class="muted">（開盤後開始）</small>' : ''}</label>
       <label class="pd-check"><input type="checkbox" data-opt="showCandles" ${st.showCandles ? 'checked' : ''} />預測 K 棒</label>
       <label class="pd-check"><input type="checkbox" data-opt="showBand" ${st.showBand ? 'checked' : ''} />80% 區間</label>
       <label class="pd-check"><input type="checkbox" data-opt="showLevels" ${st.showLevels ? 'checked' : ''} />進出場點</label>
@@ -567,7 +589,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
       <div><dt>預估今日最高／最低</dt><dd class="num"><span class="up">${num(L(f.dayHigh), 2)}</span>／<span class="down">${num(L(f.dayLow), 2)}</span></dd></div>
       ${actualClose != null ? `<div><dt>實際收盤／最高／最低</dt><dd class="num">${num(L(actualClose), 2)} <small>${num(L(Math.max(...v.ix.map((x) => x[1]))), 2)}／${num(L(Math.min(...v.ix.map((x) => x[2]))), 2)}</small></dd></div>` : ''}
     </dl>
-    ${chart(d, v, f, st, an)}
+    ${chart(d, v, f, st, an, ko)}
     ${
       err
         ? `<p class="pd-day-err">這一次預測的誤差：每根收盤價 <b>${pctTxt(err.path, 2).replace('+', '')}</b>（假設不會動是 ${pctTxt(err.naive, 2).replace('+', '')}）・每根振幅 <b>${pctTxt(err.range, 2).replace('+', '')}</b>・
