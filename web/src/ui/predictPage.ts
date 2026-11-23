@@ -235,39 +235,70 @@ function heatScoreChart(rows: Array<[string, number]>, buy: number, hot: number,
   </svg>`;
 }
 
+/** 熱度的顏色：0 綠（籌碼乾淨）→ 50 黃 → 100 紅（散戶瘋狂）。 */
+function heatColor(v: number): string {
+  const t = Math.max(0, Math.min(1, v / 100));
+  const hue = 140 - 140 * t;
+  return `hsl(${hue.toFixed(0)} 75% 55%)`;
+}
+
+/** 雷達圖：每個元件今天的分數（0～100），30／80 兩圈參考線。 */
+function heatRadar(items: Array<{ name: string; score: number }>, buy: number, hot: number): string {
+  const n = items.length;
+  if (n < 3) return '';
+  const S = 300;
+  const c = S / 2;
+  const R = 96;
+  const ang = (i: number) => -Math.PI / 2 + (i / n) * Math.PI * 2;
+  const pt = (i: number, v: number) => [c + Math.cos(ang(i)) * (R * v) / 100, c + Math.sin(ang(i)) * (R * v) / 100];
+  const ring = (v: number, cl: string) => `<polygon class="${cl}" points="${items.map((_, i) => pt(i, v).map((x) => x.toFixed(1)).join(',')).join(' ')}"/>`;
+  const shape = items.map((it, i) => pt(i, Math.max(2, it.score)).map((x) => x.toFixed(1)).join(',')).join(' ');
+  const avg = items.reduce((t, x) => t + x.score, 0) / n;
+  const labels = items
+    .map((it, i) => {
+      const [x, y] = pt(i, 128);
+      const anchor = Math.abs(x - c) < 8 ? 'middle' : x > c ? 'start' : 'end';
+      const short = it.name.replace(/（.*$/, '');
+      return `<text class="hr-lab" x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}" text-anchor="${anchor}">${esc(short)}<tspan class="hr-val" dx="4" fill="${heatColor(it.score)}">${num(it.score, 0)}</tspan></text>`;
+    })
+    .join('');
+  return `<svg class="hr-radar" viewBox="-110 -6 ${S + 220} ${S + 12}" role="img" aria-label="各元件雷達圖">
+    ${ring(100, 'hr-ring')}${ring(hot, 'hr-hot')}${ring(buy, 'hr-buy')}
+    ${items.map((_, i) => `<line class="hr-axis" x1="${c}" y1="${c}" x2="${pt(i, 100)[0].toFixed(1)}" y2="${pt(i, 100)[1].toFixed(1)}"/>`).join('')}
+    <polygon class="hr-shape" points="${shape}" style="fill:${heatColor(avg)};stroke:${heatColor(avg)}"/>
+    ${labels}
+  </svg>`;
+}
+
 function heatHtml(h: HeatIndex | null): string {
   if (!h?.series?.length || !h.events?.tw) return '';
   const t = h.thresholds;
-  const zone = h.now < t.buy ? 'hx-k-buy' : h.now > t.hot ? 'hx-k-sell' : '';
+  const zone = h.now < t.buy ? '籌碼乾淨・抄底區' : h.now > t.hot ? '散戶瘋狂・過熱' : '中性';
+  const col = heatColor(h.now);
+  const items = h.components.filter((x) => x.score != null).map((x) => ({ name: x.name, score: x.score! }));
   const rows = h.series.filter((r) => r[2] != null);
   const e = h.events.tw;
-  const evRow = (k: '20' | '60') =>
-    `<tr><td>${k} 個交易日後</td><td class="num">${num(e[k].n)}</td><td class="num ${cls(e[k].avg ?? 0)}">${e[k].avg == null ? '—' : pctTxt(e[k].avg!)}</td><td class="num">${e[k].up == null ? '—' : `${num(e[k].up! * 100, 0)}%`}</td><td class="num muted">${pctTxt(e[k].allAvg)}・${num(e[k].allUp * 100, 0)}%</td></tr>`;
-  const group = (g: string) =>
-    h.components
-      .filter((x) => x.group === g)
-      .map((x) => `<tr><td>${esc(x.name)}<br><small class="muted">${esc(x.source)}</small></td><td class="num">${num(x.weight * 100, 1)}%</td><td class="num">${x.score == null ? '—' : num(x.score, 0)}</td></tr>`)
-      .join('');
-  return `<section class="pd-card glass" id="pd-heat">
-    <header class="pd-head"><div><p class="eyebrow">Margin heat · 每日推估</p><h2>台美融資熱度</h2></div></header>
-    <p class="pd-lead">美股官方的融資餘額一個月、甚至一季才公布一次，太慢；這裡用每天更新的公開資料，把<b>美股散戶融資熱度（原始五元件）</b>和<b>台股籌碼</b>各佔一半，合成一條 0～100 的線：跌破 <b>${t.buy}</b>＝散戶多頭死絕、籌碼極度乾淨（抄底區 ▲），超過 <b>${t.hot}</b>＝散戶瘋狂（▼）。</p>
-    <dl class="pd-stats">
-      <div><dt>最新熱度（${esc(h.asOf)}）</dt><dd class="num ${zone}">${num(h.now, 1)} <small class="muted">前一天 ${num(h.prev, 1)}</small></dd></div>
-      <div><dt>美股組／台股組</dt><dd class="num">${h.usNow == null ? '—' : num(h.usNow, 0)}／${h.twNow == null ? '—' : num(h.twNow, 0)}</dd></div>
-      <div><dt>判讀</dt><dd>${esc(h.advice)}</dd></div>
-    </dl>
-    ${heatPriceChart(rows.map((r) => [r[0], r[1], r[2]!] as [string, number, number]), '台灣加權指數', t.buy, t.hot)}
-    ${heatScoreChart(rows.map((r) => [r[0], r[2]!] as [string, number]), t.buy, t.hot, [{ cls: 'hx-us', vals: rows.map((r) => r[3]) }, { cls: 'hx-tw', vals: rows.map((r) => r[4]) }])}
-    <p class="pd-legend muted"><span class="hx-k-buy">▲</span> 熱度 &lt; ${t.buy}（籌碼乾淨，抄底區）　<span class="hx-k-sell">▼</span> 熱度 &gt; ${t.hot}（散戶瘋狂）　<span class="lg-hx-score"><i></i>綜合</span><span class="lg-hx-us"><i></i>美股組</span><span class="lg-hx-tw"><i></i>台股組</span></p>
-    <h3 class="pd-sub">驗證：熱度「跌破 ${t.buy}」那天之後的加權指數（共 ${num(e.events.length)} 次）</h3>
-    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th></th><th class="num">次數</th><th class="num">平均報酬</th><th class="num">上漲機率</th><th class="num">隨便哪一天</th></tr></thead><tbody>${evRow('20')}${evRow('60')}</tbody></table></div>
-    <h3 class="pd-sub">各元件的權重與今天的分數</h3>
-    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>元件</th><th class="num">權重</th><th class="num">今天</th></tr></thead><tbody>
-      <tr class="pd-sum-row"><td colspan="3">美股組（原始五元件）</td></tr>${group('美股')}
-      <tr class="pd-sum-row"><td colspan="3">台股組</td></tr>${group('台股')}
-    </tbody></table></div>
-    ${h.missing.length ? `<p class="muted pd-small">還沒有資料、這次沒用到：${h.missing.map(esc).join('、')}（選擇權 Put/Call 比從 CBOE 每天往回補，約一年份補齊後自動加入）。</p>` : ''}
-    <p class="pd-note">美股組、台股組各佔 50%，組內等權，不拿歷史去調權重（避免調到剛好符合過去）；每個元件先換成「過去一年的百分位數」，每天只用當天已經公布的資料，美股 D 日的分數算進台股下一個交易日。上面的驗證表照實列出跌破 ${t.buy} 之後的報酬跟「隨便哪一天」的差距。</p>
+  const wf = h.weighting;
+  const avg = (a: number[]) => a.reduce((x, y) => x + y, 0) / (a.length || 1);
+  return `<section class="pd-card glass hx-top" id="pd-heat">
+    <div class="hx-hero">
+      <div class="hx-gauge" style="--hx:${col}">
+        <p class="eyebrow">台美融資熱度・${esc(h.asOf)}</p>
+        <div class="hx-big num" style="color:${col}">${num(h.now, 0)}</div>
+        <div class="hx-bar"><i style="left:${Math.max(0, Math.min(100, h.now))}%"></i><span style="left:${t.buy}%"></span><span style="left:${t.hot}%"></span></div>
+        <p class="hx-zone" style="color:${col}">${zone}</p>
+        <p class="muted hx-sub">${h.now > h.prev ? '▲ 比前一天回升' : h.now < h.prev ? '▼ 比前一天下降' : '和前一天持平'}（${num(h.prev, 0)}）・美股 ${h.usNow == null ? '—' : num(h.usNow, 0)}／台股 ${h.twNow == null ? '—' : num(h.twNow, 0)}</p>
+      </div>
+      ${heatRadar(items, t.buy, t.hot)}
+    </div>
+    <details class="pd-more"><summary>走勢、權重與驗證</summary>
+      ${heatPriceChart(rows.map((r) => [r[0], r[1], r[2]!] as [string, number, number]), '台灣加權指數（▲ 熱度 &lt; ' + t.buy + '、▼ &gt; ' + t.hot + '）', t.buy, t.hot)}
+      ${heatScoreChart(rows.map((r) => [r[0], r[2]!] as [string, number]), t.buy, t.hot, [{ cls: 'hx-us', vals: rows.map((r) => r[3]) }, { cls: 'hx-tw', vals: rows.map((r) => r[4]) }])}
+      <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>元件</th><th class="num">權重</th><th class="num">今天</th></tr></thead><tbody>
+        ${h.components.map((x) => `<tr><td>${esc(x.group)}・${esc(x.name)}</td><td class="num">${num(x.weight * 100, 1)}%</td><td class="num">${x.score == null ? '—' : num(x.score, 0)}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="muted pd-small">權重由程式自己挑：目標是「熱度越低、之後 ${wf?.horizon ?? 60} 個交易日加權指數漲越多」，再往平均拉回一半避免過度配適。${wf?.ic?.length ? `逐年往前滾（只用之前的資料挑權重）的樣本外相關：最佳權重 ${num(avg(wf.ic), 2)}、平均權重 ${num(avg(wf.icEqual), 2)}（正值才代表有用）。` : ''}跌破 ${t.buy} 之後 60 日加權指數平均 ${e['60'].avg == null ? '—' : pctTxt(e['60'].avg!)}（隨便哪一天 ${pctTxt(e['60'].allAvg)}）。${h.missing.length ? `還沒有資料：${h.missing.map(esc).join('、')}。` : ''}</p>
+    </details>
   </section>`;
 }
 
@@ -576,20 +607,19 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
   const d = data;
   // 跳到區塊（黏在畫面上方）：最重要的放前面；舊的個股排名、當沖只是觀察用，放後面
   const jumps: Array<[string, string]> = [
+    ...(heat?.series?.length ? [['#pd-heat', '融資熱度'] as [string, string]] : []),
     ...(paper ? [['#pd-paper', '模擬帳戶'] as [string, string]] : []),
     ...(d.revStocks ? [['#pd-rev', '營收選股'] as [string, string]] : []),
     ['#pd-stock', '個股預測'],
-    ...(heat?.series?.length ? [['#pd-heat', '台美融資熱度'] as [string, string]] : []),
     ['#pd-market', '大盤展望'],
     ['#pd-intra', '盤中（00631L）'],
     ...(d.dayTrade ? [['#pd-day', '當沖・觀察'] as [string, string]] : []),
   ];
   const summary = `<nav class="pd-jump glass" aria-label="跳到預測頁的區塊">${jumps.map(([h, t]) => `<a href="${h}" class="pd-sum">${t}</a>`).join('')}</nav>`;
-  root.innerHTML = `<div class="pd-main">${head}${summary}
+  root.innerHTML = `<div class="pd-main">${heatHtml(heat)}${head}${summary}
     ${paperHtml(paper, paperBt, paperAlt)}
     ${d.revStocks ? revStocksHtml(d.revStocks) : ''}
     ${stockForecastShell()}
-    ${heatHtml(heat)}
     ${marketHtml(d.market, d.horizon, d.forward)}
     ${d.dayTrade ? dayTradeHtml(d.dayTrade, d.forward) : ''}
     <section id="pd-intra"></section>
