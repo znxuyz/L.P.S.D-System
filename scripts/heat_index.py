@@ -251,6 +251,42 @@ def event_study(score: pd.Series, close: pd.Series, hs=(20, 60)) -> dict:
     return out
 
 
+def rule_study(score: pd.Series, close: pd.Series, ratio: pd.Series | None) -> list[dict]:
+    """「熱度低」只代表籌碼乾淨，不代表跌完。比較幾種「確認到底」的進場規則（事先定好，不從結果挑參數）：
+    事件之間至少隔 20 天，看之後 20／60 日加權指數，跟隨便哪一天比；並拆開發期（～2025-10）與保留期。"""
+    s = score.reindex(close.index)
+    mn20 = s.rolling(20, min_periods=5).min()
+    mn60 = s.shift(1).rolling(60, min_periods=20).min()
+    low60 = close <= close.rolling(60).min()
+    r = ratio.reindex(close.index).ffill(limit=3) if ratio is not None else pd.Series(np.nan, index=close.index)
+    rules = {
+        "跌破 30（原本）": (s < BUY) & (s.shift(1) >= BUY),
+        "跌破 30 後回升站上 30": (s >= BUY) & (s.shift(1) < BUY),
+        "低檔（20 日內 < 20）反彈 10 分以上": (mn20 < 20) & (s - mn20 >= 10) & (s < 50),
+        "指數創 60 日新低、熱度沒創新低（背離）": low60 & (s > mn60 + 10) & (s < 40),
+        "熱度 < 30 ＋ 融資維持率 < 140%": (s < BUY) & (r < 140),
+    }
+    out = []
+    f20, f60 = close.shift(-20) / close - 1, close.shift(-60) / close - 1
+    valid = s.notna()
+    for name, sig in rules.items():
+        sig = sig.fillna(False) & valid
+        ev, last = [], -999
+        for i in np.flatnonzero(sig.values):
+            if i - last > 20:
+                ev.append(i)
+                last = i
+        idx = close.index[ev]
+        e20, e60 = f20.iloc[ev].dropna(), f60.iloc[ev].dropna()
+        dev = f60.loc[[t for t in idx if t < pd.Timestamp("2025-11-01")]].dropna()
+        hold = f60.loc[[t for t in idx if t >= pd.Timestamp("2025-11-01")]].dropna()
+        g = lambda x: float(x.mean()) if len(x) else None
+        out.append({"name": name, "n": len(ev), "events": [str(t.date()) for t in idx[-8:]], "avg20": g(e20), "avg60": g(e60), "up60": g(e60 > 0) if len(e60) else None, "dev60": g(dev), "devN": int(len(dev)), "hold60": g(hold), "holdN": int(len(hold))})
+    a60 = f60[valid].dropna()
+    out.append({"name": "隨便哪一天", "n": int(len(a60)), "avg20": float(f20[valid].dropna().mean()), "avg60": float(a60.mean()), "up60": float((a60 > 0).mean())})
+    return out
+
+
 # ---------------------------------------------------------------- 台股組
 COMPONENTS_TW = {
     "twMargin": "融資維持率（越低＝斷頭壓力越大）",
@@ -499,6 +535,16 @@ def main() -> None:
         upt = "—" if x["up"] is None else f"{x['up'] * 100:.0f}%"
         log(f"  {h} 日後  平均 {pct(x['avg'])}  上漲機率 {upt}　｜ 隨便哪一天 {pct(x['allAvg'])}、{x['allUp'] * 100:.0f}%")
 
+    mr = read_json(d / "market-risk.json")
+    ratio = None
+    if mr and mr.get("rows"):
+        ratio = pd.Series({pd.Timestamp(r[0]): r[1] for r in mr["rows"] if r[1]}, dtype=float)
+    rules = rule_study(oos if len(oos) and not use_equal else score, twii, ratio)
+    pf = lambda x: "  —  " if x is None else f"{x * 100:+5.1f}%"
+    log("\n找底規則比較（樣本外熱度；之後的加權指數報酬）：")
+    for r in rules:
+        upt = "—" if r["up60"] is None else f"{r['up60'] * 100:.0f}%"
+        log(f"  {r['name']:<28} {r['n']:>4} 次  20 日 {pf(r['avg20'])}  60 日 {pf(r['avg60'])}  上漲 {upt}" + (f"｜開發期 {pf(r['dev60'])}（{r['devN']}）保留期 {pf(r['hold60'])}（{r['holdN']}）" if 'devN' in r else ""))
     plot(twii, score, us_g, tw_g, png, f"台美融資熱度（美股原始五元件＋台股籌碼）　最新 {now:.0f}（{score.index[-1].date()}）")
     log(f"\n圖：{png}")
     tail = score.index[score.index >= score.index[-1] - pd.Timedelta(days=365 * 3)]
@@ -516,6 +562,7 @@ def main() -> None:
         "components": [{"group": g, "id": k, "name": name, "source": src, "weight": round(float(weights[k]), 4), "score": r1(ser.dropna().iloc[-1]) if ser.notna().any() else None} for g, k, name, src, ser in comps],
         "missing": [COMPONENTS[k] for k in COMPONENTS if k not in us_scores] + [COMPONENTS_TW[k] for k in COMPONENTS_TW if k not in tw_scores],
         "events": {"tw": ev},
+        "rules": rules,
         "weighting": {"horizon": H_FWD, "shrink": SHRINK, **wf},
         # [台股日期, 加權指數, 綜合熱度, 美股組, 台股組]
         "series": [[str(t.date()), round(float(twii.loc[t]), 2), r1(score.loc[t]), r1(us_g.loc[t]), r1(tw_g.loc[t])] for t in tail],
