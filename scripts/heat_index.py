@@ -513,7 +513,7 @@ def main() -> None:
     ev = event_study(oos if len(oos) and not use_equal else score, twii)
     now, prev = float(score.iloc[-1]), float(score.iloc[-2])
     if now < BUY:
-        advice = "籌碼極度乾淨（抄底區）" + ("：熱度開始回升" if now > prev else "：還在往下")
+        advice = "籌碼極度乾淨（低檔區，看找底燈號）" + ("：熱度開始回升" if now > prev else "：還在往下")
     elif now > HOT:
         advice = "散戶過熱：小心回檔"
     else:
@@ -539,6 +539,17 @@ def main() -> None:
     ratio = None
     if mr and mr.get("rows"):
         ratio = pd.Series({pd.Timestamp(r[0]): r[1] for r in mr["rows"] if r[1]}, dtype=float)
+    # 找底燈號：熱度 < 30 ＝黃燈（籌碼乾淨，可能還在跌）；熱度 < 30 且融資維持率 < 140%（斷頭潮）＝綠燈，之後 20 個交易日內都算
+    bottom = {"state": "watch" if now < BUY else "none", "ratio": None, "ratioDate": None, "trigger": None, "left": 0, "ratioTh": 140, "hold": 20}
+    if ratio is not None and len(ratio):
+        rr = ratio.reindex(score.index).ffill(limit=3)
+        hit = (score < BUY) & (rr < 140)
+        pos = np.flatnonzero(hit.values[-20:])
+        bottom["ratio"], bottom["ratioDate"] = float(ratio.iloc[-1]), str(ratio.index[-1].date())
+        if len(pos):
+            k = len(hit) - 20 + int(pos[-1])
+            bottom.update(state="go", trigger=str(score.index[k].date()), left=20 - (len(hit) - 1 - k))
+    log(f"找底燈號：{ {'go': '綠燈（熱度低＋斷頭潮）', 'watch': '黃燈（熱度低，還沒斷頭）', 'none': '沒亮'}[bottom['state']] }，融資維持率 {bottom['ratio']}（{bottom['ratioDate']}）")
     rules = rule_study(oos if len(oos) and not use_equal else score, twii, ratio)
     pf = lambda x: "  —  " if x is None else f"{x * 100:+5.1f}%"
     log("\n找底規則比較（樣本外熱度；之後的加權指數報酬）：")
@@ -563,6 +574,7 @@ def main() -> None:
         "missing": [COMPONENTS[k] for k in COMPONENTS if k not in us_scores] + [COMPONENTS_TW[k] for k in COMPONENTS_TW if k not in tw_scores],
         "events": {"tw": ev},
         "rules": rules,
+        "bottom": bottom,
         "weighting": {"horizon": H_FWD, "shrink": SHRINK, **wf},
         # [台股日期, 加權指數, 綜合熱度, 美股組, 台股組]
         "series": [[str(t.date()), round(float(twii.loc[t]), 2), r1(score.loc[t]), r1(us_g.loc[t]), r1(tw_g.loc[t])] for t in tail],

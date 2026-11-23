@@ -254,6 +254,10 @@ export interface HeatIndex {
   missing: string[];
   events: { tw: { events: string[]; '20': HeatEvent; '60': HeatEvent } };
   weighting?: { horizon: number; shrink: number; years: string[]; ic: number[]; icEqual: number[]; method?: 'equal' | 'optimized' };
+  /** 找底燈號：none 沒亮、watch 黃燈（熱度低）、go 綠燈（熱度低＋融資維持率跌破門檻） */
+  bottom?: { state: 'none' | 'watch' | 'go'; ratio: number | null; ratioDate: string | null; trigger: string | null; left: number; ratioTh: number; hold: number };
+  /** 各種找底規則的事後比較（樣本外熱度） */
+  rules?: Array<{ name: string; n: number; avg20: number | null; avg60: number | null; up60: number | null; dev60?: number | null; devN?: number; hold60?: number | null; holdN?: number }>;
   /** [台股日期, 加權指數, 綜合熱度, 美股組, 台股組] */
   series: Array<[string, number, number | null, number | null, number | null]>;
 }

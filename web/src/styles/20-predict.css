@@ -288,6 +288,13 @@
 .hx-bar span { position: absolute; top: -3px; width: 1px; height: 16px; background: rgba(255, 255, 255, 0.5); }
 .hx-zone { margin: 6px 0 2px; font-size: 20px; font-weight: 700; }
 .hx-sub { margin: 0; font-size: 12px; }
+.hx-light { margin: 12px 0 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 8px; font-size: 13px; text-align: center; }
+.hx-light i { width: 12px; height: 12px; border-radius: 50%; background: #64748b; flex: none; }
+.hx-light span { flex-basis: 100%; font-size: 12px; }
+.hx-light.hx-go i { background: #22c55e; box-shadow: 0 0 10px #22c55e; }
+.hx-light.hx-go b { color: #22c55e; }
+.hx-light.hx-watch i { background: #eab308; box-shadow: 0 0 8px #eab308; }
+.hx-light.hx-watch b { color: #eab308; }
 .hr-radar { width: 100%; height: auto; max-width: 520px; justify-self: center; }
 .hr-ring { fill: none; stroke: var(--glass-line); }
 .hr-hot { fill: none; stroke: rgba(239, 68, 68, 0.45); stroke-dasharray: 3 3; }
