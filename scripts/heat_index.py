@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import urllib.request
 from datetime import timedelta
@@ -66,20 +67,53 @@ def read_json(p: Path):
         return None
 
 
-def fred(series_id: str) -> pd.Series | None:
-    raw = http_get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}")
+def _fred_csv(series_id: str) -> pd.Series | None:
+    for host in ("fred.stlouisfed.org", "alfred.stlouisfed.org"):
+        raw = http_get(f"https://{host}/graph/fredgraph.csv?id={series_id}", timeout=30)
+        if not raw:
+            continue
+        try:
+            df = pd.read_csv(io.BytesIO(raw))
+            df.columns = ["date", "v"]
+            df["v"] = pd.to_numeric(df["v"], errors="coerce")
+            return pd.Series(df["v"].values, index=pd.to_datetime(df["date"])).dropna()
+        except Exception as e:
+            log(f"  FRED {series_id}（{host}）格式不符：{e}")
+    return None
+
+
+def _fred_api(series_id: str) -> pd.Series | None:
+    """FRED 官方 API（另一個主機；要免費金鑰，放 GitHub Secret FRED_API_KEY）。"""
+    key = os.environ.get("FRED_API_KEY")
+    if not key:
+        return None
+    raw = http_get(f"https://api.stlouisfed.org/fred/series/observations?series_id={series_id}&api_key={key}&file_type=json", timeout=60)
     if not raw:
         return None
     try:
-        df = pd.read_csv(io.BytesIO(raw))
-        df.columns = ["date", "v"]
-        df["v"] = pd.to_numeric(df["v"], errors="coerce")
-        s = pd.Series(df["v"].values, index=pd.to_datetime(df["date"])).dropna()
-        log(f"  FRED {series_id}：{len(s)} 筆（{s.index[0].date()}～{s.index[-1].date()}）")
-        return s
+        obs = json.loads(raw)["observations"]
+        return pd.Series(pd.to_numeric([o["value"] for o in obs], errors="coerce"), index=pd.to_datetime([o["date"] for o in obs])).dropna()
     except Exception as e:
-        log(f"  FRED {series_id} 格式不符：{e}")
+        log(f"  FRED API {series_id} 格式不符：{e}")
         return None
+
+
+_FRED_DOWN = False
+
+
+def fred(series_id: str) -> pd.Series | None:
+    """FRED：先試網頁 CSV（兩個主機），抓不到再試官方 API；CSV 連續逾時就不再試 CSV（省時間）。"""
+    global _FRED_DOWN
+    s = None if _FRED_DOWN else _fred_csv(series_id)
+    via = "CSV"
+    if s is None:
+        _FRED_DOWN = True
+        s, via = _fred_api(series_id), "API"
+    if s is None or not len(s):
+        log(f"  FRED {series_id}：抓不到" + ("" if os.environ.get("FRED_API_KEY") else "（GitHub 上連 FRED 網頁會逾時；設 Secret FRED_API_KEY 可改走官方 API）"))
+        return None
+    log(f"  FRED {series_id}（{via}）：{len(s)} 筆（{s.index[0].date()}～{s.index[-1].date()}）")
+    return s
 
 
 def yahoo_volume(symbol: str) -> pd.Series | None:
@@ -304,6 +338,9 @@ def us_to_tw(s: pd.Series, tw: pd.DatetimeIndex) -> pd.Series:
 
 
 def plot(twii: pd.Series, score: pd.Series, us_g: pd.Series, tw_g: pd.Series, path: Path, title: str) -> None:
+    import warnings
+
+    warnings.filterwarnings("ignore", category=UserWarning)  # 沒有中文字型時的大量警告
     import matplotlib
 
     matplotlib.use("Agg")
@@ -426,12 +463,18 @@ def main() -> None:
     log("用全部歷史挑最新權重⋯")
     known = allc.index[: max(0, len(allc) - H_FWD)]
     w = optimize(allc.loc[known], fwd.loc[known])
+    # 樣本外最佳化沒有贏等權 → 直接用等權（不硬套調出來的權重）
+    use_equal = bool(wf["ic"]) and np.mean(wf["ic"]) <= np.mean(wf["icEqual"])
+    if use_equal:
+        w = np.full(allc.shape[1], 1 / allc.shape[1])
+        log("  樣本外最佳化權重沒有贏等權 → 改用等權")
+    wf["method"] = "equal" if use_equal else "optimized"
     weights = dict(zip(allc.columns, w))
     score = weighted(allc, w).dropna()
     us_g, tw_g = us_g.reindex(score.index), tw_g.reindex(score.index)
 
     # 驗證用樣本外熱度（每年只用之前的資料挑權重），比較公正
-    ev = event_study(oos if len(oos) else score, twii)
+    ev = event_study(oos if len(oos) and not use_equal else score, twii)
     now, prev = float(score.iloc[-1]), float(score.iloc[-2])
     if now < BUY:
         advice = "籌碼極度乾淨（抄底區）" + ("：熱度開始回升" if now > prev else "：還在往下")

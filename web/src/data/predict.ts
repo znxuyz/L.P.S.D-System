@@ -253,7 +253,7 @@ export interface HeatIndex {
   components: Array<{ group: string; id: string; name: string; source: string; weight: number; score: number | null }>;
   missing: string[];
   events: { tw: { events: string[]; '20': HeatEvent; '60': HeatEvent } };
-  weighting?: { horizon: number; shrink: number; years: string[]; ic: number[]; icEqual: number[] };
+  weighting?: { horizon: number; shrink: number; years: string[]; ic: number[]; icEqual: number[]; method?: 'equal' | 'optimized' };
   /** [台股日期, 加權指數, 綜合熱度, 美股組, 台股組] */
   series: Array<[string, number, number | null, number | null, number | null]>;
 }

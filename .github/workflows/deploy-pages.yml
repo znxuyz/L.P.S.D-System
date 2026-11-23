@@ -50,6 +50,9 @@ jobs:
 
       # 模擬盤用：每天全市場行情（排行榜、偽即時行情）與新聞，由 data 分支的資料產生，不另外存
       - name: 產生模擬盤資料
+        env:
+          # 熱度指數：GitHub 連 FRED 網頁會逾時，有設這個 Secret 就改走 FRED 官方 API（沒設就略過那兩個元件）
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: |
           if [ -d .data/candles ]; then node scripts/sim-daily.ts .data && node scripts/sim-news.ts .data; fi
           # 模擬盤「分析」分頁：當時已公布的財報與本益比（每檔一個檔案）
