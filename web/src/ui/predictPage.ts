@@ -216,7 +216,7 @@ function heatPriceChart(rows: Array<[string, number, number]>, name: string, buy
 }
 
 /** 熱度 0～100（抄底區綠底、過熱區紅底）。 */
-function heatScoreChart(rows: Array<[string, number]>, buy: number, hot: number): string {
+function heatScoreChart(rows: Array<[string, number]>, buy: number, hot: number, extra: Array<{ cls: string; vals: Array<number | null> }> = []): string {
   const W = 520;
   const H = 150;
   const pad = { l: 46, r: 8, t: 6, b: 22 };
@@ -229,46 +229,45 @@ function heatScoreChart(rows: Array<[string, number]>, buy: number, hot: number)
     <rect class="hx-zone-buy" x="${pad.l}" y="${y(buy).toFixed(1)}" width="${W - pad.l - pad.r}" height="${(y(0) - y(buy)).toFixed(1)}"/>
     <rect class="hx-zone-sell" x="${pad.l}" y="${y(100).toFixed(1)}" width="${W - pad.l - pad.r}" height="${(y(hot) - y(100)).toFixed(1)}"/>
     ${[buy, hot].map((v) => `<line class="hx-th" x1="${pad.l}" x2="${W - pad.r}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"/><text class="pd-tick" x="${pad.l - 4}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end">${v}</text>`).join('')}
+    ${extra.map((e) => `<path class="${e.cls}" d="${e.vals.map((v, i) => (v == null ? '' : `${i && e.vals[i - 1] != null ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`)).join('')}"/>`).join('')}
     <path class="hx-score" d="${line}"/>
     ${years.map(([d, i]) => `<text class="pd-tick" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${d.slice(0, 4)}</text>`).join('')}
   </svg>`;
 }
 
 function heatHtml(h: HeatIndex | null): string {
-  if (!h?.series?.length) return '';
+  if (!h?.series?.length || !h.events?.tw) return '';
   const t = h.thresholds;
   const zone = h.now < t.buy ? 'hx-k-buy' : h.now > t.hot ? 'hx-k-sell' : '';
-  const us = h.series.map((r) => [r[0], r[1], r[3]] as [string, number, number]);
-  const tw = h.series.filter((r) => r[2] != null).map((r) => [r[0], r[2]!, r[3]] as [string, number, number]);
-  const evRow = (name: string, e: HeatIndex['events']['us'] | null) =>
-    e
-      ? (['20', '60'] as const)
-          .map(
-            (k) => `<tr><td>${name}　${k} 日後</td><td class="num">${num(e[k].n)}</td><td class="num ${cls(e[k].avg ?? 0)}">${e[k].avg == null ? '—' : pctTxt(e[k].avg!)}</td><td class="num">${e[k].up == null ? '—' : `${num(e[k].up! * 100, 0)}%`}</td><td class="num muted">${pctTxt(e[k].allAvg)}・${num(e[k].allUp * 100, 0)}%</td></tr>`,
-          )
-          .join('')
-      : '';
+  const rows = h.series.filter((r) => r[2] != null);
+  const e = h.events.tw;
+  const evRow = (k: '20' | '60') =>
+    `<tr><td>${k} 個交易日後</td><td class="num">${num(e[k].n)}</td><td class="num ${cls(e[k].avg ?? 0)}">${e[k].avg == null ? '—' : pctTxt(e[k].avg!)}</td><td class="num">${e[k].up == null ? '—' : `${num(e[k].up! * 100, 0)}%`}</td><td class="num muted">${pctTxt(e[k].allAvg)}・${num(e[k].allUp * 100, 0)}%</td></tr>`;
+  const group = (g: string) =>
+    h.components
+      .filter((x) => x.group === g)
+      .map((x) => `<tr><td>${esc(x.name)}<br><small class="muted">${esc(x.source)}</small></td><td class="num">${num(x.weight * 100, 1)}%</td><td class="num">${x.score == null ? '—' : num(x.score, 0)}</td></tr>`)
+      .join('');
   return `<section class="pd-card glass" id="pd-heat">
-    <header class="pd-head"><div><p class="eyebrow">Margin heat · 每日推估</p><h2>美股融資熱度</h2></div></header>
-    <p class="pd-lead">美股官方的融資餘額一個月、甚至一季才公布一次，太慢；這裡用每天更新的公開資料推估一條<b>散戶融資熱度線</b>：跌破 <b>${t.buy}</b>＝散戶多頭死絕、籌碼極度乾淨（抄底區 ▲），超過 <b>${t.hot}</b>＝散戶瘋狂（▼）。</p>
+    <header class="pd-head"><div><p class="eyebrow">Margin heat · 每日推估</p><h2>台美融資熱度</h2></div></header>
+    <p class="pd-lead">美股官方的融資餘額一個月、甚至一季才公布一次，太慢；這裡用每天更新的公開資料，把<b>美股散戶融資熱度（原始五元件）</b>和<b>台股籌碼</b>各佔一半，合成一條 0～100 的線：跌破 <b>${t.buy}</b>＝散戶多頭死絕、籌碼極度乾淨（抄底區 ▲），超過 <b>${t.hot}</b>＝散戶瘋狂（▼）。</p>
     <dl class="pd-stats">
-      <div><dt>最新熱度（美國 ${esc(h.asOf)}）</dt><dd class="num ${zone}">${num(h.now, 1)} <small class="muted">前一天 ${num(h.prev, 1)}</small></dd></div>
+      <div><dt>最新熱度（${esc(h.asOf)}）</dt><dd class="num ${zone}">${num(h.now, 1)} <small class="muted">前一天 ${num(h.prev, 1)}</small></dd></div>
+      <div><dt>美股組／台股組</dt><dd class="num">${h.usNow == null ? '—' : num(h.usNow, 0)}／${h.twNow == null ? '—' : num(h.twNow, 0)}</dd></div>
       <div><dt>判讀</dt><dd>${esc(h.advice)}</dd></div>
     </dl>
-    ${heatPriceChart(us, 'S&amp;P 500', t.buy, t.hot)}
-    ${heatPriceChart(tw, '台灣加權指數（美股隔天）', t.buy, t.hot)}
-    ${heatScoreChart(us.map((r) => [r[0], r[2]]), t.buy, t.hot)}
-    <p class="pd-legend muted"><span class="hx-k-buy">▲</span> 熱度 &lt; ${t.buy}（籌碼乾淨，抄底區）　<span class="hx-k-sell">▼</span> 熱度 &gt; ${t.hot}（散戶瘋狂）</p>
-    <h3 class="pd-sub">驗證：熱度「跌破 ${t.buy}」那天之後的表現</h3>
-    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th></th><th class="num">次數</th><th class="num">平均報酬</th><th class="num">上漲機率</th><th class="num">隨便哪一天</th></tr></thead><tbody>
-      ${evRow('S&amp;P 500', h.events.us)}${evRow('加權指數', h.events.tw)}
-    </tbody></table></div>
-    <h3 class="pd-sub">五個元件（等權平均，今天的分數）</h3>
+    ${heatPriceChart(rows.map((r) => [r[0], r[1], r[2]!] as [string, number, number]), '台灣加權指數', t.buy, t.hot)}
+    ${heatScoreChart(rows.map((r) => [r[0], r[2]!] as [string, number]), t.buy, t.hot, [{ cls: 'hx-us', vals: rows.map((r) => r[3]) }, { cls: 'hx-tw', vals: rows.map((r) => r[4]) }])}
+    <p class="pd-legend muted"><span class="hx-k-buy">▲</span> 熱度 &lt; ${t.buy}（籌碼乾淨，抄底區）　<span class="hx-k-sell">▼</span> 熱度 &gt; ${t.hot}（散戶瘋狂）　<span class="lg-hx-score"><i></i>綜合</span><span class="lg-hx-us"><i></i>美股組</span><span class="lg-hx-tw"><i></i>台股組</span></p>
+    <h3 class="pd-sub">驗證：熱度「跌破 ${t.buy}」那天之後的加權指數（共 ${num(e.events.length)} 次）</h3>
+    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th></th><th class="num">次數</th><th class="num">平均報酬</th><th class="num">上漲機率</th><th class="num">隨便哪一天</th></tr></thead><tbody>${evRow('20')}${evRow('60')}</tbody></table></div>
+    <h3 class="pd-sub">各元件的權重與今天的分數</h3>
     <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>元件</th><th class="num">權重</th><th class="num">今天</th></tr></thead><tbody>
-      ${h.components.map((x) => `<tr><td>${esc(x.name)}<br><small class="muted">${esc(x.source)}</small></td><td class="num">${num(x.weight * 100, 0)}%</td><td class="num">${num(x.score, 0)}</td></tr>`).join('')}
+      <tr class="pd-sum-row"><td colspan="3">美股組（原始五元件）</td></tr>${group('美股')}
+      <tr class="pd-sum-row"><td colspan="3">台股組</td></tr>${group('台股')}
     </tbody></table></div>
     ${h.missing.length ? `<p class="muted pd-small">還沒有資料、這次沒用到：${h.missing.map(esc).join('、')}（選擇權 Put/Call 比從 CBOE 每天往回補，約一年份補齊後自動加入）。</p>` : ''}
-    <p class="pd-note">每個元件先換成「過去一年的百分位數」再等權平均，不拿歷史去調權重（避免調到剛好符合過去）；每天只用當天已經公布的資料。上面的驗證表照實列出跌破 ${t.buy} 之後的報酬跟「隨便哪一天」的差距。</p>
+    <p class="pd-note">美股組、台股組各佔 50%，組內等權，不拿歷史去調權重（避免調到剛好符合過去）；每個元件先換成「過去一年的百分位數」，每天只用當天已經公布的資料，美股 D 日的分數算進台股下一個交易日。上面的驗證表照實列出跌破 ${t.buy} 之後的報酬跟「隨便哪一天」的差距。</p>
   </section>`;
 }
 
@@ -580,7 +579,7 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
     ...(paper ? [['#pd-paper', '模擬帳戶'] as [string, string]] : []),
     ...(d.revStocks ? [['#pd-rev', '營收選股'] as [string, string]] : []),
     ['#pd-stock', '個股預測'],
-    ...(heat?.series?.length ? [['#pd-heat', '融資熱度'] as [string, string]] : []),
+    ...(heat?.series?.length ? [['#pd-heat', '台美融資熱度'] as [string, string]] : []),
     ['#pd-market', '大盤展望'],
     ['#pd-intra', '盤中（00631L）'],
     ...(d.dayTrade ? [['#pd-day', '當沖・觀察'] as [string, string]] : []),

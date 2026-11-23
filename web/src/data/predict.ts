@@ -240,19 +240,21 @@ const getPaper = keyedRefresh<PaperData | null>(
 export const loadPaper = (): Promise<PaperData | null> => getPaper('paper.json');
 export const loadPaperBacktest = (file = 'paper-backtest.json'): Promise<PaperData | null> => getPaper(file);
 
-/** 美股融資熱度指數（每日推估，scripts/heat_index.py）。 */
+/** 台美融資熱度指數（每日推估，scripts/heat_index.py）：美股原始五元件＋台股籌碼。 */
 export interface HeatEvent { n: number; avg: number | null; up: number | null; allAvg: number; allUp: number }
 export interface HeatIndex {
   asOf: string;
   thresholds: { buy: number; hot: number };
   now: number;
   prev: number;
+  usNow: number | null;
+  twNow: number | null;
   advice: string;
-  components: Array<{ id: string; name: string; source: string; weight: number; score: number }>;
+  components: Array<{ group: string; id: string; name: string; source: string; weight: number; score: number | null }>;
   missing: string[];
-  events: { us: { events: string[]; '20': HeatEvent; '60': HeatEvent }; tw: { events: string[]; '20': HeatEvent; '60': HeatEvent } | null };
-  /** [美國日期, S&P 500, 之後第一個台股交易日的加權指數, 熱度] */
-  series: Array<[string, number, number | null, number]>;
+  events: { tw: { events: string[]; '20': HeatEvent; '60': HeatEvent } };
+  /** [台股日期, 加權指數, 綜合熱度, 美股組, 台股組] */
+  series: Array<[string, number, number | null, number | null, number | null]>;
 }
 export async function loadHeatIndex(): Promise<HeatIndex | null> {
   try {
