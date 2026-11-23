@@ -149,10 +149,13 @@
 .pd-sum-row td { font-weight: 700; color: var(--ink); }
 .pd-intra-opts { margin-top: -4px; }
 
-.pd-ln.ln-blend { stroke: #ffffff; stroke-width: 3; }
+.pd-ln.ln-dir { stroke: #ffffff; stroke-width: 3.5; filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.55)); }
+.pd-end.ln-dir { fill: #ffffff; }
+.lg-dir i { background: #ffffff; height: 4px !important; }
+.pd-ln.ln-blend { stroke: rgba(255, 255, 255, 0.55); stroke-width: 1.6; stroke-dasharray: 5 4; }
 .pd-ln.ln-model { stroke-width: 2 !important; }
-.pd-end.ln-blend { fill: #ffffff; }
-.lg-blend i { background: #ffffff; height: 4px !important; }
+.pd-end.ln-blend { fill: rgba(255, 255, 255, 0.55); }
+.lg-blend i { background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.6) 0 5px, transparent 5px 8px); }
 .pd-logic-list { margin: 8px 0 0; padding-left: 1.3em; display: grid; gap: 6px; font-size: 14px; }
 .pd-logic-list b { color: var(--ink); }
 

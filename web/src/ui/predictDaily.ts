@@ -4,7 +4,7 @@
  * 相似走勢預測線（自己的歷史裡最像的 5 段）附回測準確度。
  */
 import type { Candle } from '../domain/technicals';
-import { analogBacktest, analogForecast, bandCalib, dailyVol } from '../domain/stockForecast';
+import { analogBacktest, analogForecast, bandCalib, dailyVol, directionPath, typicalMove } from '../domain/stockForecast';
 import { adjustSplits, loadOfficialCandles } from '../data/candles';
 import { escapeHtml as esc, num } from './format';
 import { chartSvg, FH } from './predictStock';
@@ -47,13 +47,14 @@ export async function fillDaily(el: HTMLElement, asset: DailyAsset, txd?: Array<
   const last = candles[candles.length - 1];
   const p10 = cal?.p10 ?? -1.28;
   const p90 = cal?.p90 ?? 1.28;
+  // 主線：方向預測（一定押方向）；沒有相似走勢時才退回不會動
+  const dp = an ? directionPath(an, 5, typicalMove(sigma, H)) : null;
   const path = Array.from({ length: H }, (_, k) => {
     const t = k + 1;
-    return { t, mid: last.close, lo: last.close * Math.exp(p10 * sigma * Math.sqrt(t)), hi: last.close * Math.exp(p90 * sigma * Math.sqrt(t)) };
+    return { t, mid: dp ? last.close * Math.exp(dp[k]) : last.close, lo: last.close * Math.exp(p10 * sigma * Math.sqrt(t)), hi: last.close * Math.exp(p90 * sigma * Math.sqrt(t)) };
   });
   const end = path[H - 1];
-  const anEnd = an ? last.close * Math.exp(an.avg[H - 1]) : null;
-  const an1 = an ? last.close * Math.exp(an.avg[20]) : null;
+  const up = dp ? dp[H - 1] >= 0 : null;
   const m1 = path[20];
   const d = (x: number) => num(x, x < 100 ? 2 : 0);
   el.innerHTML = `
@@ -61,11 +62,11 @@ export async function fillDaily(el: HTMLElement, asset: DailyAsset, txd?: Array<
       <div><dt>${NAME[asset]} 收盤（${esc(last.date.slice(5))}）</dt><dd class="num">${d(last.close)}</dd></div>
       <div><dt>80% 區間（一個月後）</dt><dd class="num">${d(m1.lo)}～${d(m1.hi)}</dd></div>
       <div><dt>80% 區間（三個月後）</dt><dd class="num">${d(end.lo)}～${d(end.hi)}</dd></div>
-      <div><dt>相似走勢預測線（一個月／三個月後）</dt><dd class="num">${anEnd == null || an1 == null ? '—' : `${d(an1)} <small>${pctTxt(an1 / last.close - 1)}</small>／${d(anEnd)} <small>${pctTxt(anEnd / last.close - 1)}</small>`}</dd></div>
-      <div><dt>這條線過去的準確度（三個月後）</dt><dd class="num">${bt ? `方向 ${num(bt.hit * 100, 0)}% <small class="muted">／誤差 ${num(bt.rmse * 100, 1)}% vs 不會動 ${num(bt.rmseFlat * 100, 1)}%</small>` : '—'}</dd></div>
+      <div><dt>方向預測（一個月／三個月後）</dt><dd class="num">${up == null ? '—' : `<b class="${up ? 'up' : 'down'}">${up ? '押漲' : '押跌'}</b> ${d(m1.mid)} <small>${pctTxt(m1.mid / last.close - 1)}</small>／${d(end.mid)} <small>${pctTxt(end.mid / last.close - 1)}</small>`}</dd></div>
+      <div><dt>方向命中率（三個月後，過去約兩年）</dt><dd class="num">${bt ? `${num(bt.hit * 100, 0)}% <small class="muted">（${num(bt.n)} 次；同期間一直押漲 ${num(bt.upRate * 100, 0)}%）</small>` : '—'}</dd></div>
     </dl>
-    ${chartSvg(candles.slice(-H), path, an, 0, '中線（不會動）')}
-    <p class="pd-note">怎麼算的：<b>中線</b>＝不會動（今天的收盤）：${NAME[asset]}幾個月後漲或跌沒有可靠的預測（大盤展望的模型回測也沒有贏過「一直猜漲」），所以不假裝。<b>80% 區間</b>＝近 60 日波動 ${num(sigma * 100, 2)}%／天 × √天數，再用${NAME[asset]}自己過去每一天「之後三個月實際漲跌」的 10%／90% 分位數校準${cal?.coverage.length ? `，各年實際落在區間內：${cal.coverage.map((x) => `${esc(x.year)} ${num(x.inside * 100, 0)}%`).join('、')}` : ''}。<b>相似走勢預測線</b>＝自己的歷史裡最近 20 天走勢最像的 5 段，之後三個月的真實走勢依波動比例接在今天後面（粗線平均、細線最像的 3 段）；準確度是同樣方法、只用當時以前的資料回測過去約兩年的成績。</p>
+    ${chartSvg(candles.slice(-H), path, an, 0, '方向預測（主線）')}
+    <p class="pd-note">怎麼算的：<b>方向預測（主線）</b>一定押一個方向：在${NAME[asset]}自己的歷史裡找最近 20 天走勢形狀（漲跌先除以當時的波動）最像現在的 5 段，看它們之後三個月平均是漲還是跌來決定方向；線的形狀與幅度＝其中「也往這個方向走」的那幾段真實走勢的平均，終點幅度＝這種波動下三個月一般會走的幅度（中位數），所以會有一般行情該有的起伏，不會是一條平線。<b>方向命中率</b>是同樣方法、只用當時以前的資料，回測過去約兩年（每 5 天一次）三個月後方向猜對的比例。<b>80% 區間</b>＝近 60 日波動 ${num(sigma * 100, 2)}%／天 × √天數，再用${NAME[asset]}自己過去每一天「之後三個月實際漲跌」的 10%／90% 分位數校準${cal?.coverage.length ? `，各年實際落在區間內：${cal.coverage.map((x) => `${esc(x.year)} ${num(x.inside * 100, 0)}%`).join('、')}` : ''}。</p>
     ${asset === 'tx' ? '<p class="muted pd-small">台指期用近月一般時段（日盤）的日 K，換月時價格會跳一下（新舊合約價差），波動與區間會稍微高估。</p>' : ''}
     ${asset === 'L' ? '<p class="muted pd-small">00631L 是 2 倍槓桿，區間大約是加權指數的兩倍；真正要不要持有，看上面模擬帳戶的趨勢規則（200 日均線＋依波動調整）。</p>' : ''}`;
 }

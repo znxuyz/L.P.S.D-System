@@ -1,10 +1,10 @@
 /**
  * 預測頁「個股預測」：搜尋任一檔股票，選 K 線週期看預測。
- * - 日 K：未來約一個月的中線與 80% 區間（見 domain/stockForecast.ts，回測校準過）。
+ * - 日 K：未來約三個月的方向預測主線（一定押方向）與 80% 區間（見 domain/stockForecast.ts）。
  * - 3 分 K、5 分 K：個股沒有公開的歷史盤中資料，沒辦法訓練和驗證，誠實說明而不是亂畫。
  */
 import type { Candle } from '../domain/technicals';
-import { analogBacktest, analogForecast, dailyForecast, type AnalogResult, type StockCalib } from '../domain/stockForecast';
+import { analogBacktest, analogForecast, dailyForecast, directionPath, typicalMove, type AnalogResult, type StockCalib } from '../domain/stockForecast';
 import { adjustSplits, loadOfficialCandles } from '../data/candles';
 import { loadStockDirectory, searchDirectory, type DirEntry } from '../data/stockDirectory';
 import type { RevStocks } from '../data/predict';
@@ -94,10 +94,12 @@ async function show(sec: HTMLElement, rev: RevStocks | undefined): Promise<void>
   const an = analogForecast(closes, closes.length - 1, 20, FH);
   const bt = analogBacktest(closes, FH);
   const last = candles[candles.length - 1];
-  const end = f.path[f.path.length - 1];
-  const m1 = f.path[20];
-  const anEnd = an ? last.close * Math.exp(an.avg[an.avg.length - 1]) : null;
-  const an1 = an ? last.close * Math.exp(an.avg[20]) : null;
+  // 主線：方向預測（一定押方向）；區間仍以營收分數組的平均為中心
+  const dp = an ? directionPath(an, 5, typicalMove(f.sigma, FH)) : null;
+  const path = f.path.map((p, i) => ({ ...p, mid: dp ? last.close * Math.exp(dp[i]) : p.mid }));
+  const end = path[path.length - 1];
+  const m1 = path[20];
+  const up = end.mid >= last.close;
   const px = (v: number) => num(v, v < 100 ? 2 : 1);
   const dc = f.decile != null ? rev.calib.deciles[f.decile] : null;
   const cov = rev.calib.coverage.filter((x) => x.inside != null);
@@ -105,17 +107,16 @@ async function show(sec: HTMLElement, rev: RevStocks | undefined): Promise<void>
     <dl class="pd-stats">
       <div><dt>${esc(st.code)} ${esc(name)}　收盤（${esc(last.date.slice(5))}）</dt><dd class="num">${num(last.close, last.close < 100 ? 2 : 1)}</dd></div>
       <div><dt>營收選股分數</dt><dd class="num">${score == null ? '—' : `${score} <small class="muted">（第 ${f.decile! + 1} 組／10）</small>`}</dd></div>
-      <div><dt>中線（一個月／三個月後）</dt><dd class="num">${px(m1.mid)} <small>${pctTxt(f.avg)}</small>／${px(end.mid)} <small>${pctTxt(end.mid / last.close - 1)}</small></dd></div>
-      <div><dt>相似走勢預測線（一個月／三個月後）</dt><dd class="num">${anEnd == null || an1 == null ? '—' : `${px(an1)} <small>${pctTxt(an1 / last.close - 1)}</small>／${px(anEnd)} <small>${pctTxt(anEnd / last.close - 1)}</small>`}</dd></div>
-      <div><dt>這條線過去的準確度（三個月後，這檔股票）</dt><dd class="num">${bt ? `方向 ${num(bt.hit * 100, 0)}% <small class="muted">／誤差 ${num(bt.rmse * 100, 1)}% vs 不會動 ${num(bt.rmseFlat * 100, 1)}%</small>` : '—'}</dd></div>
+      <div><dt>方向預測（一個月／三個月後）</dt><dd class="num"><b class="${up ? 'up' : 'down'}">${up ? '押漲' : '押跌'}</b> ${px(m1.mid)} <small>${pctTxt(m1.mid / last.close - 1)}</small>／${px(end.mid)} <small>${pctTxt(end.mid / last.close - 1)}</small></dd></div>
+      <div><dt>方向命中率（三個月後，這檔過去約兩年）</dt><dd class="num">${bt ? `${num(bt.hit * 100, 0)}% <small class="muted">（${num(bt.n)} 次；同期間一直押漲 ${num(bt.upRate * 100, 0)}%）</small>` : '—'}</dd></div>
+      <div><dt>營收分數組一個月平均</dt><dd class="num">${pctTxt(f.avg)}</dd></div>
       <div><dt>80% 區間（一個月後）</dt><dd class="num">${px(m1.lo)}～${px(m1.hi)}</dd></div>
       <div><dt>80% 區間（三個月後）</dt><dd class="num">${px(end.lo)}～${px(end.hi)}</dd></div>
     </dl>
-    ${chartSvg(candles.slice(-FH), f.path, an)}
-    <p class="pd-note">怎麼算的：<b>中線</b>＝這檔股票目前的營收選股分數所在的那一組（全部股票分 10 組），2021 年以來每次換股後一個月的平均報酬 ${pctTxt(f.avg)}，三個月是把同樣的每日速度延長（只換股一次的話，訊號在第二、三個月會變弱，所以三個月的中線偏樂觀）${dc ? `（這一組贏全部平均的比例 ${num((dc.beat ?? 0) * 100, 0)}%）` : score == null ? '（這檔不在可選範圍：成交額太小或上市不滿一年，用全部股票的平均）' : ''}；<b>區間</b>＝近 60 日波動 ${num(f.sigma * 100, 2)}%／天 × √天數，再用歷史上實際落點的 10%／90% 分位數放寬，區間寬度是用「一個月後」校準的，延長到三個月用 √天數 外推；一個月後回測各年實際落在區間內的比例：${cov.map((x) => `${esc(x.year)} ${num(x.inside! * 100, 0)}%`).join('、')}。</p>
-    <p class="pd-note">怎麼畫的：<b>相似走勢預測線</b>＝在這檔股票自己的歷史裡，找最近 20 天走勢形狀（漲跌先除以當時的波動）跟現在最像的 5 段，把它們之後三個月的真實走勢依波動比例接在今天後面，粗線是平均、細線是最像的 3 段${an ? `（${an.lines.slice(0, 3).map((l) => esc(candles[l.at].date)).join('、')}）` : ''}。<b>準確度</b>是用同樣方法、只用當時以前的資料，回測這檔股票過去約兩年（每 5 天一次）三個月後的預測：方向猜對的比例，和誤差跟「假設不會動」比。</p>
-    <p class="pd-note is-warn">誠實說：我測了 17 檔常見股票，這種日 K 預測線一個月後的方向平均只猜對約 51%，誤差也都比「不會動」大，<b>畫出來的線方向沒有參考價值</b>（上面有這一檔自己的成績）。</p>
-    <p class="pd-note is-warn">也要誠實說：分數高的那幾組<b>平均</b>比較好（最高組一個月平均 ${pctTxt(rev.calib.deciles[9]?.avg ?? 0)}、最低組 ${pctTxt(rev.calib.deciles[0]?.avg ?? 0)}），但單一一檔股票下個月漲或跌接近擲銅板，中線只是「同類股票的平均」，<b>區間才是這張圖最可靠的部分</b>。</p>`;
+    ${chartSvg(candles.slice(-FH), path, an, 0, '方向預測（主線）')}
+    <p class="pd-note">怎麼算的：<b>方向預測（主線）</b>一定押一個方向：在這檔股票自己的歷史裡找最近 20 天走勢形狀（漲跌先除以當時的波動）最像現在的 5 段${an ? `（${an.lines.slice(0, 3).map((l) => esc(candles[l.at].date)).join('、')}⋯）` : ''}，看它們之後三個月平均是漲還是跌來決定方向；線的形狀與幅度＝其中「也往這個方向走」的那幾段真實走勢的平均，終點幅度＝這種波動下三個月一般會走的幅度（中位數）。細線是最像的 3 段。<b>方向命中率</b>是同樣方法、只用當時以前的資料，回測這檔過去約兩年（每 5 天一次）三個月後方向猜對的比例。</p>
+    <p class="pd-note"><b>區間</b>＝近 60 日波動 ${num(f.sigma * 100, 2)}%／天 × √天數，以營收選股分數組的平均報酬 ${pctTxt(f.avg)}／月為中心${dc ? `（這一組贏全部平均的比例 ${num((dc.beat ?? 0) * 100, 0)}%）` : score == null ? '（這檔不在可選範圍，用全部股票的平均）' : ''}，再用歷史實際落點的 10%／90% 分位數放寬；一個月後回測各年實際落在區間內的比例：${cov.map((x) => `${esc(x.year)} ${num(x.inside! * 100, 0)}%`).join('、')}。</p>
+    <p class="pd-note is-warn">命中率照實寫：之前測 17 檔常見股票，這種方法一個月後的方向平均約對 51%。看上面這一檔自己的命中率決定要信幾成；營收分數高的組<b>平均</b>比較好（最高組一個月 ${pctTxt(rev.calib.deciles[9]?.avg ?? 0)}、最低組 ${pctTxt(rev.calib.deciles[0]?.avg ?? 0)}）。</p>`;
 }
 
 /** 日 K（最近 120 天）＋未來的中線與區間。 */

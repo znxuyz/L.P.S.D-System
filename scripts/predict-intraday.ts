@@ -40,6 +40,7 @@ import {
   type RangePlan,
   avgOf,
   blendLine,
+  directionLine,
   ANALOG_NS,
   BLEND_WS,
   type AnalogDay,
@@ -440,7 +441,7 @@ let fitted: ReturnType<typeof fitAll> | null = null;
 let avgEx: { up: number[]; down: number[] } | null = null;
 const lambdaLog: Record<string, number[]> = {};
 // 各種預測線的成績：[時間點][線] → 平方誤差、筆數、收盤方向猜對、最接近實際的次數
-const LINES = ['blend', 'model', 'avg', 'a1', 'a2', 'a3'] as const;
+const LINES = ['dir', 'blend', 'model', 'avg', 'a1', 'a2', 'a3'] as const;
 // 自動挑設定：每個時間點、每組（相似日天數 n、模型權重 w）到前一天為止的累計平方誤差
 const choiceSE: Record<number, Map<string, number>> = Object.fromEntries(ORIGINS.map((o) => [o, new Map<string, number>()]));
 const choiceDays: Record<number, number> = Object.fromEntries(ORIGINS.map((o) => [o, 0]));
@@ -537,6 +538,8 @@ for (let n = FIRST; n < days.length; n++) {
         a2: an.lines[1]?.closes ?? [],
         a3: an.lines[2]?.closes ?? [],
       };
+      // 方向預測線：一定押方向（綜合預測的方向 × 同方向相似日的真實走勢）
+      lines.dir = directionLine(an.lines, lines.blend, ref);
       // 今天結束後，更新每一組設定的累計誤差（明天才用得到）
       if (an.lines.length >= 20 && modelCloses.length === actual.length) {
         for (const nn of ANALOG_NS) {

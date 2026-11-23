@@ -505,6 +505,22 @@ export function avgOf(lines: AnalogLine[], n: number): number[] {
   return use.length ? use[0].closes.map((_, i) => Math.exp(mean(use.map((l) => Math.log(l.closes[i]))))) : [];
 }
 
+/**
+ * 方向預測線：一定押一個方向，不會畫成「不會動」的平線。
+ * - 方向＝綜合預測（blend）最後是漲還是跌（相對 ref：開盤前是昨收，盤中是現價）。
+ * - 形狀與幅度＝相似日裡「最後也往同一方向走」的前 n 天的真實走勢平均（已依波動比例縮放），
+ *   所以線的起伏大小就是這種日子一般會走的幅度，不是被縮小的平均值。
+ * - 同方向的相似日不到 3 天時，用全部相似日平均；方向相反就以 ref 為中心鏡射。
+ */
+export function directionLine(lines: AnalogLine[], blend: number[], ref: number, n = 7): number[] {
+  if (!blend.length || !(ref > 0)) return [];
+  const up = blend[blend.length - 1] >= ref;
+  const same = lines.filter((l) => l.closes.length && l.closes[l.closes.length - 1] >= ref === up).slice(0, n);
+  if (same.length >= 3) return avgOf(same, same.length);
+  const base = lines.length ? avgOf(lines, Math.min(n, lines.length)) : blend;
+  return base[base.length - 1] >= ref === up ? base : base.map((v) => (ref * ref) / v);
+}
+
 /** 綜合預測：模型主線與相似日平均依權重 w（給模型）混合（對數空間）。 */
 export const blendLine = (model: number[], avg: number[], w: number) => model.map((v, i) => (avg[i] > 0 ? Math.exp(w * Math.log(v) + (1 - w) * Math.log(avg[i])) : v));
 
