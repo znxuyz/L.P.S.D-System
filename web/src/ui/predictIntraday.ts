@@ -7,15 +7,15 @@
  * - 00631L 的價格由加權指數換算（β 倍），不是 00631L 真實的 5 分 K。
  */
 import type { IndexPoint } from '../data/types';
-import { BARS, STEP, DAYTRADE_COST, analogLines, avgOf, barRange, blendLine, rangeLevels, simulateRange, type RangeLevels, type RangePlan, forecastDay, toLeveraged, type AnalogDay, type Bar, type DailyCtx, type DayForecast, type DayModel, type IntradayModel, discName } from '../domain/intradayModel';
+import { BARS, STEP, DAYTRADE_COST, analogLines, avgOf, barRange, blendLine, directionLine, rangeLevels, simulateRange, type RangeLevels, type RangePlan, forecastDay, toLeveraged, type AnalogDay, type Bar, type DailyCtx, type DayForecast, type DayModel, type IntradayModel, discName } from '../domain/intradayModel';
 import { escapeHtml as esc, num } from './format';
 
 type Verdict = 'signal' | 'none';
 type RangePlanOut = RangePlan & { m: number | null; noTrade: boolean };
 type RangeStat = { from: string; to: string; days: number; trades: number; win: number; avg: number; total: number; maxDD: number; target: number; stop: number; hold: number };
-export type LineId = 'blend' | 'model' | 'avg' | 'a1' | 'a2' | 'a3';
-const LINE_NAME: Record<LineId, string> = { blend: '綜合預測', model: '模型主線', avg: '相似日平均', a1: '相似日 1', a2: '相似日 2', a3: '相似日 3' };
-const LINE_IDS: LineId[] = ['blend', 'model', 'avg', 'a1', 'a2', 'a3'];
+export type LineId = 'dir' | 'blend' | 'model' | 'avg' | 'a1' | 'a2' | 'a3';
+const LINE_NAME: Record<LineId, string> = { dir: '方向預測（主線）', blend: '綜合預測', model: '模型主線', avg: '相似日平均', a1: '相似日 1', a2: '相似日 2', a3: '相似日 3' };
+const LINE_IDS: LineId[] = ['dir', 'blend', 'model', 'avg', 'a1', 'a2', 'a3'];
 
 export interface IntradayData {
   generatedAt: string;
@@ -160,7 +160,12 @@ function lineSeries(v: View, f: DayForecast, an: Analogs, ch: { n: number; w: nu
     const avgN = avgOf(an.lines, ch.n);
     out.avg = conv(avgN);
     const modelCloses = pre ? [f.open, ...f.bars.map((b) => b.c)] : f.bars.map((b) => b.c);
-    out.blend = conv(blendLine(modelCloses, avgN, ch.w));
+    const bl = blendLine(modelCloses, avgN, ch.w);
+    out.blend = conv(bl);
+    // 方向預測（主線）：一定押方向；起點價格：開盤前是昨收，盤中是現價
+    const ref = pre ? v.P0 : start[1];
+    const dl = directionLine(an.lines, bl, ref);
+    if (dl.length) out.dir = conv(dl);
     an.lines.slice(0, 3).forEach((l, i) => (out[`a${i + 1}` as LineId] = conv(l.closes)));
   }
   return out;
@@ -184,7 +189,7 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
   const known = v.ix.slice(0, f.from);
   const future = st.showActual && !v.live ? v.ix.slice(f.from) : [];
   const series = lineSeries(v, f, an, choiceFor(v.choice, v.k));
-  const shown = LINE_IDS.filter((id) => series[id] && (id === 'blend' || id === 'model' || st.showAnalogs));
+  const shown = LINE_IDS.filter((id) => series[id] && (id === 'dir' || id === 'blend' || id === 'model' || st.showAnalogs));
   const vals = [
     ...known.flatMap((b) => [b[1], b[2]]),
     ...future.flatMap((b) => [b[1], b[2]]),
@@ -263,7 +268,7 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
     <text class="pd-tick" x="${W - pad.r}" y="${H - 6}" text-anchor="end">13:30</text>
   </svg></div>
   <p class="pd-legend pd-intra-legend">
-    ${series.blend ? '<span class="lg-blend"><i></i>綜合預測（主要預測線）</span>' : ''}<span class="lg-model"><i></i>模型主線</span>
+    ${series.dir ? '<span class="lg-dir"><i></i>方向預測（主線）</span>' : ''}${series.blend ? '<span class="lg-blend"><i></i>綜合預測</span>' : ''}<span class="lg-model"><i></i>模型主線</span>
     ${st.showAnalogs && series.avg ? `<span class="lg-avg"><i></i>相似日平均（前 ${choiceFor(v.choice, v.k).n} 名）</span>${dates.map((dt, i) => `<span class="lg-a${i + 1}"><i></i>相似日 ${i + 1}：${esc(dt)}</span>`).join('')}` : ''}
     <span class="pd-key-real"><i></i>已走完</span>${future.length ? '<span class="pd-key-actual"><i></i>實際走勢（當時還不知道）</span>' : ''}
     <span class="pd-key-hl"><i></i>預估今日最高／最低</span>${band ? '<span class="pd-band-key"><i></i>收盤約 80% 區間</span>' : ''}
@@ -388,10 +393,12 @@ function linesTableOf(lines: NonNullable<IntradayData['lines']>, lev: number, ti
   const d = { lines };
   if (!d.lines?.length) return '';
   const head = d.lines.map((o) => `<th class="num">${esc(o.label)}</th>`).join('');
-  const rows = LINE_IDS.map((id) => {
+  // 舊的資料檔沒有「方向預測」：只列有資料的線
+  const ids = LINE_IDS.filter((id) => d.lines!.every((o) => o[id]));
+  const rows = ids.map((id) => {
     const cells = d.lines!.map((o) => {
       const x = o[id];
-      const best = Math.min(...LINE_IDS.map((j) => o[j].rmse));
+      const best = Math.min(...ids.map((j) => o[j].rmse));
       return `<td class="num"><b class="${x.rmse === best ? 'up' : ''}">${num(x.rmse * lev * 100, 2)}%</b><br><small>方向 ${num(x.hit * 100, 0)}%・最準 ${num(x.best * 100, 0)}%</small></td>`;
     });
     return `<tr><td><span class="lg-${id}"><i></i>${LINE_NAME[id]}</span></td>${cells.join('')}</tr>`;
@@ -446,7 +453,7 @@ export interface IntradayState {
   tf: 1 | 3 | 5;
   /** 看哪個標的。 */
   asset?: IntraAsset;
-  /** 看日 K（未來一個月）而不是盤中。 */
+  /** 看日 K（未來約三個月）而不是盤中。 */
   daily?: boolean;
   showActual: boolean;
   /** 相似日走勢線、預測 K 棒、80% 區間要不要畫。 */
@@ -464,7 +471,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
   const assetBtns = `<div class="pd-tf pd-intra-asset" role="group" aria-label="標的">${(['L', 'ix', 'tx'] as const).map((a) => `<button type="button" data-intra-asset="${a}" class="${asset === a ? 'is-on' : ''}">${ASSET_NAME[a]}</button>`).join('')}</div>`;
   const head = (badge: string) =>
     st.daily
-      ? `<header class="pd-head"><div><p class="eyebrow">Daily · 日 K</p><h2>${NAME} 日 K：未來約一個月</h2></div>${badge}</header><div class="pd-intra-pick">${assetBtns}${tfBtns}</div>`
+      ? `<header class="pd-head"><div><p class="eyebrow">Daily · 日 K</p><h2>${NAME} 日 K：未來約三個月</h2></div>${badge}</header><div class="pd-intra-pick">${assetBtns}${tfBtns}</div>`
       : `<header class="pd-head"><div><p class="eyebrow">Intraday · ${STEP} 分 K</p><h2>${NAME} 整天 ${STEP} 分 K 預測線</h2></div>${badge}</header><div class="pd-intra-pick">${assetBtns}${tfBtns}</div>`;
   if (st.daily) return `<section class="pd-card glass" id="pd-intra">${head('')}<div id="pd-intra-daily"><p class="muted">載入日 K⋯⋯</p></div></section>`;
   if (d === undefined) return `<section class="pd-card glass" id="pd-intra">${head('')}<p class="muted">載入中⋯⋯</p></section>`;
@@ -505,8 +512,9 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
   const now = v.k < 0 ? null : f.from === 0 ? f.open : v.ix[f.from - 1][3];
   const err = dayErrors(d, v, f);
   const lerr = lineErrors(v, f, an, lev);
-  // 上方的「預測收盤」用綜合預測（主要預測線）；沒有相似日資料時用模型主線
-  const mainSeries = lineSeries(v, f, an, choiceFor(v.choice, v.k)).blend;
+  // 上方的「預測收盤」用方向預測（主線，一定押方向）；沒有相似日資料時用綜合預測、模型主線
+  const ser = lineSeries(v, f, an, choiceFor(v.choice, v.k));
+  const mainSeries = ser.dir ?? ser.blend;
   const mainClose = mainSeries?.length ? mainSeries[mainSeries.length - 1][1] : last?.c;
   const actualClose = !v.live && v.ix.length === BARS ? v.ix[BARS - 1][3] : null;
   const opts = [
@@ -516,7 +524,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
   const b = d.backtest;
   const pct2 = (x: number) => `${num(x * lev * 100, 2)}%`;
   return `<section class="pd-card glass" id="pd-intra">${head(badges)}
-    <p class="pd-lead">以 ${STEP} 分鐘為單位畫出整天（09:00～13:30，${BARS} 根）的預測線：<b>模型主線</b>是統計上誤差最小的預測；<b>相似日走勢線</b>是從歷史裡找出到目前為止跟今天最像的幾天，把它們接下來的真實走勢（依波動比例縮放）接在現在的價格後面。
+    <p class="pd-lead">以 ${STEP} 分鐘為單位畫出整天（09:00～13:30，${BARS} 根）的預測線。<b>方向預測（主線，藍色粗線）</b>一定押一個方向：方向＝綜合預測最後是漲還是跌，形狀與幅度＝相似日裡最後也往這個方向走的那幾天的真實走勢平均，所以會有一般盤中該有的起伏；它的方向命中率列在下面的表。<b>模型主線</b>是統計上誤差最小的預測（沒把握時會接近平線）；<b>相似日走勢線</b>是從歷史裡找出到目前為止跟今天最像的幾天，把它們接下來的真實走勢（依波動比例縮放）接在現在的價格後面。
       開盤前先預測跳空，盤中每走完一根就重新預測。下面列出每條線過去的準確度。
       ${asset === 'L' ? `00631L 的價格用「加權指數 × ${num(d.beta, 2)} 倍」換算（近一年日報酬估計）。` : asset === 'tx' ? `台指期（近月、日盤）的價位用「加權指數 × 前一天收盤時的期貨 ÷ 現貨」換算：盤中期貨跟現貨幾乎同步，差的是價差（逆價差、正價差）會慢慢變；夜盤（15:00～05:00）沒有現貨，不在這個預測裡。${v.T0 ? '' : '<b>（這一天沒有臺指期收盤資料，先顯示加權指數）</b>'}` : '直接預測加權指數（點數）。'}</p>
     <div class="pd-intra-ctrl">
@@ -534,7 +542,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
     <dl class="pd-stats pd-intra-stats">
       <div><dt>預測時間</dt><dd class="num">${kLabel(v.k)}</dd></div>
       <div><dt>${now == null ? '預測開盤' : '現在'}</dt><dd class="num">${num(L(now ?? f.open), 2)}${now == null ? ` <small class="${cls(f.open - v.P0)}">${pctTxt(Math.log(f.open / v.P0) * lev)}</small>` : ''}</dd></div>
-      <div><dt>${v.k >= 0 ? '預測收盤<small class="muted">（開盤後方向沒把握，回測約 52～57%）</small>' : '預測收盤（綜合）'}</dt><dd class="num ${v.k >= 0 ? '' : cls((mainClose ?? v.P0) - v.P0)}">${mainClose ? num(L(mainClose), 2) : '—'} <small>${mainClose ? pctTxt(Math.log(mainClose / v.P0) * lev) : ''}</small></dd></div>
+      <div><dt>${v.k >= 0 ? '預測收盤<small class="muted">（開盤後方向沒把握，回測約 52～57%）</small>' : '預測收盤（方向預測）'}</dt><dd class="num ${v.k >= 0 ? '' : cls((mainClose ?? v.P0) - v.P0)}">${mainClose ? num(L(mainClose), 2) : '—'} <small>${mainClose ? pctTxt(Math.log(mainClose / v.P0) * lev) : ''}</small></dd></div>
       <div><dt>收盤約 80% 區間</dt><dd class="num">${last ? `${num(L(last.lo), 2)}～${num(L(last.hi), 2)}` : '—'}</dd></div>
       <div><dt>預估今日最高／最低</dt><dd class="num"><span class="up">${num(L(f.dayHigh), 2)}</span>／<span class="down">${num(L(f.dayLow), 2)}</span></dd></div>
       ${actualClose != null ? `<div><dt>實際收盤／最高／最低</dt><dd class="num">${num(L(actualClose), 2)} <small>${num(L(Math.max(...v.ix.map((x) => x[1]))), 2)}／${num(L(Math.min(...v.ix.map((x) => x[2]))), 2)}</small></dd></div>` : ''}

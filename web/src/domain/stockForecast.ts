@@ -96,12 +96,36 @@ export function analogForecast(closes: number[], end = closes.length - 1, L = 20
   return { lines, avg };
 }
 
+/**
+ * 方向預測線（主線，一定押方向）：方向＝相似走勢平均最後是漲還是跌；
+ * 形狀與幅度＝相似時段裡「最後也往同一方向走」的那幾段真實走勢平均（已依波動縮放），不會被平均成一條平線。
+ * 同方向的不到 2 段時，用全部的平均；方向相反就上下鏡射。回傳累計對數報酬（t＝1..H）。
+ */
+export function directionPath(an: AnalogResult, n = 5, endSize?: number): number[] {
+  const up = (an.avg[an.avg.length - 1] ?? 0) >= 0;
+  const same = an.lines.filter((l) => (l.path[l.path.length - 1] ?? 0) >= 0 === up).slice(0, n);
+  const raw =
+    same.length >= 2
+      ? same[0].path.map((_, t) => same.reduce((s, l) => s + l.path[t], 0) / same.length)
+      : (an.avg[an.avg.length - 1] ?? 0) >= 0 === up
+        ? an.avg
+        : an.avg.map((v) => -v);
+  // 終點幅度固定成 endSize（例如「這種波動下這段時間一般會走多少」）：相似走勢放大後可能很誇張，只取它的形狀
+  const end = Math.abs(raw[raw.length - 1] ?? 0);
+  if (endSize == null || !(end > 1e-9)) return raw;
+  return raw.map((v) => (v / end) * endSize);
+}
+
+/** 這段時間一般會走多少（對數報酬的中位數絕對值）：常態分布下 |z| 的中位數 0.6745 × 波動 × √天數。 */
+export const typicalMove = (sigma: number, days: number) => 0.6745 * sigma * Math.sqrt(days);
+
 /** 這檔股票過去用相似走勢預測一個月後的成績（每 5 天一次、只用當時以前的資料）：方向命中率、誤差 vs「不會動」。 */
-export function analogBacktest(closes: number[], H = 21, tests = 120): { n: number; hit: number; rmse: number; rmseFlat: number } | null {
+export function analogBacktest(closes: number[], H = 21, tests = 120): { n: number; hit: number; rmse: number; rmseFlat: number; upRate: number } | null {
   let n = 0;
   let hit = 0;
   let se = 0;
   let seFlat = 0;
+  let ups = 0;
   for (let e = closes.length - 1 - H; e > closes.length - 1 - H - tests * 5 && e > 200; e -= 5) {
     const f = analogForecast(closes, e, 20, H);
     if (!f) continue;
@@ -109,11 +133,12 @@ export function analogBacktest(closes: number[], H = 21, tests = 120): { n: numb
     const pred = f.avg[H - 1];
     if (!Number.isFinite(act)) continue;
     n++;
+    if (act > 0) ups++;
     if (Math.sign(pred) === Math.sign(act)) hit++;
     se += (pred - act) ** 2;
     seFlat += act * act;
   }
-  return n >= 20 ? { n, hit: hit / n, rmse: Math.sqrt(se / n), rmseFlat: Math.sqrt(seFlat / n) } : null;
+  return n >= 20 ? { n, hit: hit / n, rmse: Math.sqrt(se / n), rmseFlat: Math.sqrt(seFlat / n), upRate: ups / n } : null;
 }
 
 /**
