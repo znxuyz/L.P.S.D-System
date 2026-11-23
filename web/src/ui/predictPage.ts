@@ -163,6 +163,38 @@ function stageHtml(p: PaperData | null): string {
   </details>`;
 }
 
+/** 模擬帳戶目前持有什麼（不管有沒有持股都顯示：00631L、營收選股的每一檔、兩個部位的現金）。 */
+function holdingsHtml(p: PaperData, tr: PaperData['trend']): string {
+  const h = p.holdings;
+  const rows: string[] = [];
+  const money = (v: number) => num(v, 0);
+  if (h && h.trend.shares > 0)
+    rows.push(`<tr><td>趨勢</td><td><b>00631L</b> 元大台灣50正2<small class="muted">${num(h.trend.shares)} 股${h.trend.price != null ? ` × ${num(h.trend.price, 2)}` : ''}${h.trend.since ? `・${esc(h.trend.since)} 起` : ''}</small></td><td class="num">${money(h.trend.value)}</td><td class="num">—</td></tr>`);
+  if (h) rows.push(`<tr><td>趨勢</td><td>現金 <span class="muted">（年息 1.5%）</span></td><td class="num">${money(h.trend.cash)}</td><td class="num">—</td></tr>`);
+  for (const x of p.positions)
+    rows.push(`<tr><td>選股</td><td><b>${esc(x.code)}</b> ${esc(x.name)}<small class="muted">${num(x.shares)} 股・成本 ${num(x.cost, 2)}</small></td><td class="num">${x.price == null ? '—' : money(x.shares * x.price)}</td><td class="num ${cls(x.ret)}">${x.ret == null ? '—' : pctTxt(x.ret)}</td></tr>`);
+  if (h) rows.push(`<tr><td>選股</td><td>現金 <span class="muted">（年息 1.5%）</span></td><td class="num">${money(h.stocksCash)}</td><td class="num">—</td></tr>`);
+  const allCash = !p.positions.length && !(h && h.trend.shares > 0);
+  const why = allCash
+    ? `<p class="pd-advice">目前<b>全部是現金</b>：${tr ? `加權指數 ${esc(tr.asOf)} 收盤 ${num(tr.close, 0)}，${tr.dist < 0 ? `低於 200 日均線 ${num(Math.abs(tr.dist) * 100, 1)}%，` : ''}` : ''}規則是大盤在 200 日均線之下就不持股。等加權指數收盤站回均線，<b>隔天開盤</b>買 00631L；營收選股在站回均線後的<b>下一個換股日</b>（每月 12 日後第一個交易日）買下面「營收選股」名單的 20 檔。</p>`
+    : '';
+  return `<h3 class="pd-sub">目前持有（${esc(p.asOf ?? '')} 收盤）</h3>${why}
+    ${rows.length ? `<div class="pd-table-wrap pd-hold-wrap"><table class="pd-table pd-hold"><thead><tr><th>部位</th><th>持有</th><th class="num">市值</th><th class="num">報酬</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>` : ''}`;
+}
+
+/** 最近的交易：直接列出最近 10 筆，其餘收在「更多」。 */
+function tradesHtml(p: PaperData, book: Record<string, string>): string {
+  const row = (t: PaperData['trades'][number]) =>
+    `<tr><td class="num">${esc(t.date)}</td><td>${book[t.book] ?? t.book}</td><td><b>${esc(t.code)}</b> ${esc(t.name)}</td><td class="${t.side === 'buy' ? 'up' : t.side === 'sell' ? 'down' : ''}">${t.side === 'buy' ? '買進' : t.side === 'sell' ? '賣出' : t.side === 'long' ? '做多' : '做空'}</td><td class="num">${t.price == null ? '—' : num(t.price, 2)}</td><td class="num ${cls(t.pnl)}">${t.pnl == null ? '—' : num(t.pnl, 0)}</td><td class="muted">${esc(t.note)}</td></tr>`;
+  const head = '<thead><tr><th>日期</th><th>部位</th><th>標的</th><th>動作</th><th class="num">價格</th><th class="num">損益</th><th>說明</th></tr></thead>';
+  if (!p.trades.length) return '<h3 class="pd-sub">交易紀錄</h3><p class="muted">還沒有任何交易（開始以來規則都是持有現金）。</p>';
+  const first = p.trades.slice(0, 10);
+  const rest = p.trades.slice(10);
+  return `<h3 class="pd-sub">最近的交易（共 ${num(p.tradeCount)} 筆）</h3>
+    <div class="pd-table-wrap"><table class="pd-table">${head}<tbody>${first.map(row).join('')}</tbody></table></div>
+    ${rest.length ? `<details class="pd-more"><summary>更早的 ${num(rest.length)} 筆</summary><div class="pd-table-wrap"><table class="pd-table">${head}<tbody>${rest.map(row).join('')}</tbody></table></div></details>` : ''}`;
+}
+
 function paperHtml(p: PaperData | null, bt: PaperData | null, alt: PaperData | null = null): string {
   const pct = (v: number | null | undefined) => pctTxt(v ?? 0);
   const tr = p?.trend ?? bt?.trend;
@@ -184,11 +216,8 @@ function paperHtml(p: PaperData | null, bt: PaperData | null, alt: PaperData | n
       <div><dt>趨勢／營收選股</dt><dd class="num"><span class="${cls(p.books.trend)}">${pct(p.books.trend)}</span>／<span class="${cls(p.books.stocks)}">${pct(p.books.stocks)}</span></dd></div>
     </dl>
     ${p.curve.length >= 2 ? lineChart(p.curve.map((c) => [c[0], c[1] / p.capital, c[5] / p.capital] as [string, number, number]), [{ name: '模型模擬帳戶', cls: 's1' }, { name: '同額買大盤', cls: 's3' }]) : ''}
-    ${p.positions.length ? `<h3 class="pd-sub">營收選股目前持股（${esc(p.heldSince ?? '')} 換股，每月 12 日後換一次）</h3><div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>股票</th><th class="num">股數</th><th class="num">成本</th><th class="num">現價</th><th class="num">報酬</th></tr></thead><tbody>${p.positions.map((x) => `<tr><td><b>${esc(x.code)}</b> ${esc(x.name)}</td><td class="num">${num(x.shares)}</td><td class="num">${num(x.cost, 2)}</td><td class="num">${x.price == null ? '—' : num(x.price, 2)}</td><td class="num ${cls(x.ret)}">${pct(x.ret)}</td></tr>`).join('')}</tbody></table></div>` : ''}
-    <details class="pd-more"><summary>最近的交易（共 ${num(p.tradeCount)} 筆）</summary>
-      <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>日期</th><th>部位</th><th>標的</th><th>動作</th><th class="num">價格</th><th class="num">損益</th><th>說明</th></tr></thead>
-      <tbody>${p.trades.map((t) => `<tr><td class="num">${esc(t.date)}</td><td>${book[t.book] ?? t.book}</td><td><b>${esc(t.code)}</b> ${esc(t.name)}</td><td>${t.side === 'buy' ? '買進' : t.side === 'sell' ? '賣出' : t.side === 'long' ? '做多' : '做空'}</td><td class="num">${t.price == null ? '—' : num(t.price, 2)}</td><td class="num ${cls(t.pnl)}">${t.pnl == null ? '—' : num(t.pnl, 0)}</td><td class="muted">${esc(t.note)}</td></tr>`).join('')}</tbody></table></div>
-    </details>`;
+    ${holdingsHtml(p, tr)}
+    ${tradesHtml(p, book)}`;
   const hist = bt && bt.days
     ? `<h3 class="pd-sub">歷史回測（${esc(bt.start ?? '')} ～ ${esc(bt.asOf ?? '')}，同一套規則）</h3>
     <dl class="pd-stats">

@@ -128,32 +128,45 @@ if (afterClose && isTradingToday) {
 }
 
 // ---------------------------------------------------------------- 過去：試歷史 1 分 K
+// 某一天回傳空資料不代表富果不提供歷史（可能那天停牌、還沒上市，或剛好查不到）：跳過那一天繼續；
+// 只有連續 EMPTY_STOP 個交易日「每一檔都是空的」，才當作已經到富果歷史資料的盡頭，停止往回補。
+// 請求失敗（不是 200）一次就停，避免金鑰或額度有問題時一直打。
+const EMPTY_STOP = Number(process.env.STOCK1M_EMPTY_STOP ?? 5);
 let histOk: boolean | null = null;
 let savedPast = 0;
+let emptyRun = 0;
+let stopWhy = '';
 const past = cal.filter((d) => d >= START && d < today).reverse();
 for (const d of past) {
-  if (!canGo() || histOk === false) break;
+  if (!canGo() || stopWhy) break;
   const day = loadDay(d);
   const todo = codes.filter((c) => !day[c]);
   if (!todo.length) continue;
   let changed = false;
+  let gotAny = false;
+  let tried = 0;
   for (const code of todo) {
     if (!canGo()) break;
     const r = await get(`/historical/candles/${code}?from=${d}&to=${d}&timeframe=1&fields=open,high,low,close,volume`);
+    tried++;
     const rows = r.body?.data;
-    if (r.status === 200 && Array.isArray(rows) && rows.length && /T\d{2}:\d{2}/.test(rows[0].date ?? '')) {
-      const e = encode(rows);
-      if (e) (day[code] = e), (changed = true), savedPast++;
-      histOk = true;
-    } else if (histOk === null) {
-      // 第一次就不行：富果不提供（或這個方案不提供）歷史盤中 K 線
-      histOk = false;
-      console.log(`  歷史 1 分 K 不可用（${r.status}）：${JSON.stringify(r.body).slice(0, 200)}；之後只收當天`);
+    if (r.status !== 200) {
+      stopWhy = `${d} ${code} 請求失敗（${r.status}）：${JSON.stringify(r.body).slice(0, 160)}`;
       break;
     }
+    if (Array.isArray(rows) && rows.length && /T\d{2}:\d{2}/.test(rows[0].date ?? '')) {
+      const e = encode(rows);
+      if (e) (day[code] = e), (changed = true), savedPast++, (gotAny = true);
+      histOk = true;
+    }
+    // 這一天前 8 檔都是空的：整天跳過（省請求）
+    if (!gotAny && tried >= 8) break;
   }
   if (changed) writeFileSync(fileOf(d), JSON.stringify(day));
+  emptyRun = gotAny ? 0 : emptyRun + 1;
+  if (emptyRun >= EMPTY_STOP) stopWhy = `連續 ${EMPTY_STOP} 個交易日都沒有資料（到 ${d}），應該是富果歷史 1 分 K 的最早日期`;
 }
+if (stopWhy) console.log(`  停止往回補：${stopWhy}`);
 const files = readdirSync(out).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f));
-console.log(`個股 1 分 K：${codes.length} 檔；當天存 ${savedToday} 檔、過去補 ${savedPast} 檔日；請求 ${used} 次；歷史 1 分 K ${histOk == null ? '沒試' : histOk ? '可用' : '不可用'}；共 ${files.length} 天`);
+console.log(`個股 1 分 K：${codes.length} 檔；當天存 ${savedToday} 檔、過去補 ${savedPast} 檔日；請求 ${used} 次；歷史 1 分 K ${histOk == null ? '這次沒抓到' : '可用'}；共 ${files.length} 天`);
 if (existsSync(fileOf(today))) console.log(`  今天 ${Object.keys(loadDay(today)).length} 檔`);

@@ -317,6 +317,14 @@ const out = {
     const k = [...kOf(p.code).entries()].filter(([d]) => d <= lastDay).at(-1)?.[1];
     return { code: p.code, name: names[p.code] ?? '', shares: p.shares, cost: r2(p.cost), price: k ? r2(k[3]) : null, ret: k ? r5(k[3] / p.cost - 1) : null };
   }),
+  // 目前持有：趨勢部位（00631L 股數、市值、現金）與營收選股的現金（持股在 positions）
+  holdings: (() => {
+    const lastL = [...kOf('00631L').entries()].filter(([d]) => d <= lastDay).at(-1)?.[1][3] ?? null;
+    return {
+      trend: { code: '00631L', shares: trShares, price: lastL == null ? null : r2(lastL), value: r2(trShares * (lastL ?? 0)), cash: r2(trCash), since: trSince },
+      stocksCash: r2(tranches.reduce((t, x) => t + x.cash, 0)),
+    };
+  })(),
   heldSince: (() => {
     const xs = tranches.map((t) => t.since).filter((x): x is number => x != null);
     return xs.length ? cal[Math.min(...xs)] : null;
