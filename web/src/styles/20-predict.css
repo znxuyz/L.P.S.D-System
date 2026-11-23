@@ -250,3 +250,15 @@
 .lg-ko-live i { background: #ffb44a; opacity: 0.6; }
 .lg-ko-avg i { background: #ffb44a; height: 4px !important; }
 .lg-ko-out i { background: rgba(180, 190, 215, 0.5); }
+/* 方向命中率長條圖 */
+.pd-hitchart { width: 100%; height: auto; max-width: 720px; }
+.pd-hitchart .hc-good { fill: var(--accent); }
+.pd-hitchart .hc-weak { fill: color-mix(in srgb, var(--accent) 35%, transparent); }
+.pd-hitchart .hc-val { fill: var(--ink); font-size: 13px; font-weight: 700; }
+.pd-hitchart .hc-grid { stroke: var(--glass-line); }
+.pd-hitchart .hc-coin { stroke: #ffb44a; stroke-dasharray: 4 4; }
+.pd-hitchart .hc-coin-t { fill: #ffb44a; }
+/* 主線畫成 K 棒：亮一點才看得清楚 */
+.pd-intra-chart .k-up.is-pred rect { fill: color-mix(in srgb, var(--up) 45%, transparent); stroke-width: 1.6; }
+.pd-intra-chart .k-down.is-pred rect { fill: color-mix(in srgb, var(--down) 45%, transparent); stroke-width: 1.6; }
+.pd-key-pred i { background: linear-gradient(90deg, var(--up) 50%, var(--down) 50%); }
