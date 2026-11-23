@@ -240,22 +240,20 @@ const getPaper = keyedRefresh<PaperData | null>(
 export const loadPaper = (): Promise<PaperData | null> => getPaper('paper.json');
 export const loadPaperBacktest = (file = 'paper-backtest.json'): Promise<PaperData | null> => getPaper(file);
 
-/** 台美聯動籌碼熱度指數（scripts/heat_index.py）。 */
+/** 美股融資熱度指數（每日推估，scripts/heat_index.py）。 */
+export interface HeatEvent { n: number; avg: number | null; up: number | null; allAvg: number; allUp: number }
 export interface HeatIndex {
   asOf: string;
-  thresholds: { buy: number; sell: number; exit: number };
+  thresholds: { buy: number; hot: number };
   now: number;
   prev: number;
   advice: string;
-  position: number;
-  indicators: Array<{ id: string; name: string; group: string; source: string; weight: number; score: number }>;
+  components: Array<{ id: string; name: string; source: string; weight: number; score: number }>;
   missing: string[];
-  oos: { from: string; to: string; strategy: HeatStats; buyHold: HeatStats };
-  inSample: HeatStats;
-  buckets: Array<{ name: string; n: number; avg: number | null; up: number | null }>;
-  series: Array<[string, number, number | null]>;
+  events: { us: { events: string[]; '20': HeatEvent; '60': HeatEvent }; tw: { events: string[]; '20': HeatEvent; '60': HeatEvent } | null };
+  /** [美國日期, S&P 500, 之後第一個台股交易日的加權指數, 熱度] */
+  series: Array<[string, number, number | null, number]>;
 }
-export interface HeatStats { ret: number; cagr: number; sharpe: number; mdd: number; days: number }
 export async function loadHeatIndex(): Promise<HeatIndex | null> {
   try {
     const r = await fetch('data/heat-index.json', { cache: 'no-cache' });

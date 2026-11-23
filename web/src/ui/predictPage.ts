@@ -5,7 +5,7 @@
  * - 點個股可以跳到個股分析頁。
  */
 import { loadCloseFile } from '../data/closeProvider';
-import { dayTradeBands, dayTradeCall, loadAnalogs, loadPaper, loadPaperBacktest, loadPredict, loadPredictIntraday, type PaperData, type PredictData, type RevStocks, type StockPick, type Verdict, loadHeatIndex, type HeatIndex } from '../data/predict';
+import { dayTradeBands, dayTradeCall, loadAnalogs, loadPaper, loadPaperBacktest, loadPredict, loadPredictIntraday, type PaperData, type PredictData, type RevStocks, type Verdict, loadHeatIndex, type HeatIndex } from '../data/predict';
 import { sessionAt, taipeiDate } from '../data/liveProvider';
 import { sessionOpenMs } from '../data/twse';
 import type { IndexPoint } from '../data/types';
@@ -64,40 +64,11 @@ function lineChart(rows: Array<[string, ...number[]]>, series: Array<{ name: str
   <p class="pd-legend">${series.map((s) => `<span class="${s.cls}"><i></i>${esc(s.name)}</span>`).join('')}</p>`;
 }
 
-function pickTable(rows: StockPick[], kind: 'top' | 'bottom'): string {
-  const lv = kind === 'top';
-  const px = (v: number | null | undefined) => (v == null ? '—' : num(v, v < 100 ? 2 : 1));
-  return `<div class="pd-table-wrap"><table class="pd-table">
-    <thead><tr><th>#</th><th>股票</th><th class="num">收盤</th><th class="num">分數</th>${lv ? '<th class="num">進場</th><th class="num">出場</th><th class="num">參考停損</th>' : ''}<th>主要原因</th></tr></thead>
-    <tbody>${rows
-      .map(
-        (r, i) => `<tr data-code="${esc(r.code)}" tabindex="0" title="看 ${esc(r.code)} 個股分析">
-        <td class="num muted">${i + 1}</td>
-        <td><b>${esc(r.code)}</b> ${esc(r.name)}</td>
-        <td class="num">${r.close == null ? '—' : num(r.close, r.close < 100 ? 2 : 1)}</td>
-        <td class="num"><span class="pd-score ${kind === 'top' ? 'up' : 'down'}">${r.score}</span></td>
-        ${lv ? `<td class="num">${r.levels?.entry != null ? `限價 ${px(r.levels.entry)}` : '明天開盤'}</td><td class="num">${r.levels?.target != null ? `停利 ${px(r.levels.target)}<br>` : ''}20 交易日後${r.levels?.stop != null ? `<br><small>停損 ${px(r.levels.stop)}</small>` : ''}</td><td class="num muted">${px(r.levels?.refStop)}</td>` : ''}
-        <td class="pd-reasons">${r.reasons.map(([t]) => `<span>${esc(t)}</span>`).join('')}</td>
-      </tr>`,
-      )
-      .join('')}</tbody></table></div>`;
-}
 
 /** 實盤成績（事前存檔）的小區塊。 */
 const FW_INTRO = '每天收盤後就把預測存進 forecasts 分支（只會新增、不會修改，git 時間證明是事前做的），結果出來後只拿存檔的數字打分數，完全不可能看答案。';
 function fwBlock(title: string, n: number, body: string, wait: string): string {
   return `<div class="pd-fw"><h3 class="pd-sub">實盤成績（事前存檔）</h3><p class="muted pd-small">${FW_INTRO}</p>${n ? `<p class="pd-fw-sum">${title}</p>${body}` : `<p class="muted">${wait}</p>`}</div>`;
-}
-function fwStocks(f: PredictData['forward']): string {
-  const x = f?.stocks;
-  if (!x) return '';
-  const rows = x.rows.map((r) => `<tr><td class="num">${esc(r.asOf)}</td><td class="num">${num(r.ic, 3)}</td><td class="num ${cls(r.top - r.all)}">${pctTxt(r.top - r.all)}</td><td class="num ${cls(r.bottom - r.all)}">${pctTxt(r.bottom - r.all)}</td><td class="num ${cls(r.market)}">${pctTxt(r.market)}</td></tr>`).join('');
-  return fwBlock(
-    `${x.n} 期：平均 IC <b>${num(x.icMean ?? 0, 3)}</b>・最看好 30 檔比全部平均 <b class="${cls(x.topExcess)}">${pctTxt(x.topExcess)}</b>・最該避開 15 檔比全部平均 <b class="${cls(x.bottomExcess)}">${pctTxt(x.bottomExcess)}</b>`,
-    x.n,
-    `<div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>預測日</th><th class="num">IC</th><th class="num">最看好 vs 平均</th><th class="num">最該避開 vs 平均</th><th class="num">大盤</th></tr></thead><tbody>${rows}</tbody></table></div>`,
-    '從今天開始存檔；個股看 20 個交易日，所以約一個月後出現第一筆。',
-  );
 }
 function fwMarket(f: PredictData['forward']): string {
   const x = f?.market;
@@ -113,19 +84,6 @@ function fwDayTrade(f: PredictData['forward']): string {
   return fwBlock(`${x.n} 天、出手 ${x.trades} 次，累計（扣成本）<b class="${cls(x.total)}">${pctTxt(x.total, 2)}</b>`, x.n, `<div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>交易日</th><th class="num">跳空</th><th>動作</th><th class="num">開→收</th><th class="num">損益</th></tr></thead><tbody>${rows}</tbody></table></div>`, '從今天開始存檔；下一個交易日收盤後出現第一筆。');
 }
 
-function entryExitHtml(e: PredictData['stocks']['entryExit']): string {
-  if (!e) return '';
-  const b = e.backtest;
-  const row = (name: string, x: { perSignal: number; fill: number; win: number; days: number; worst: number; p10: number }, hl = false) =>
-    `<tr${hl ? ' class="pd-sum-row"' : ''}><td>${esc(name)}</td><td class="num ${cls(x.perSignal)}">${pctTxt(x.perSignal, 2)}</td><td class="num">${num(x.fill * 100, 0)}%</td><td class="num">${num(x.win * 100, 0)}%</td><td class="num">${num(x.days, 1)}</td><td class="num down">${pctTxt(x.worst)}</td><td class="num down">${pctTxt(x.p10)}</td></tr>`;
-  return `<h3 class="pd-sub">進場與出場</h3>
-    <p class="pd-advice"><b>目前的方式：${esc(e.plan.name)}，最晚 20 個交易日後出場。</b>
-      進出場方式（等拉回再買、停利、停損，依各股近 14 天平均振幅 ATR 設定，共 64 種）每一期只用「已經結束的期間」挑最賺的；回測顯示單純持有最好，所以模型選了它。
-      想控制風險可以用表格裡的<b>參考停損</b>（收盤 − 2.5×ATR）：代價是平均報酬變低，好處是最慘的虧損變小（見下表）。</p>
-    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>方式（樣本外 ${num(b.periods)} 期、每期最看好 30 檔）</th><th class="num">每個訊號平均</th><th class="num">買得到</th><th class="num">勝率</th><th class="num">平均持有天數</th><th class="num">最慘一筆</th><th class="num">最差 10%</th></tr></thead>
-    <tbody>${row('逐段往前滾自動挑的方式', b.strategy, true)}${row('隔天開盤買、20 天後賣', b.baseline)}${b.reference.map((r) => row(r.name, r)).join('')}</tbody></table></div>
-    <p class="muted pd-small">全部扣成本（手續費不打折來回（保守）＋證交稅）。「每個訊號平均」把沒買到的算 0（錢沒在賺）。模擬保守：跳空直接用開盤價成交；同一天碰到停利與停損當作先停損。</p>`;
-}
 
 /** 模型模擬帳戶：完全照事前存檔的預測自動下單（紙上交易）。 */
 /** 每年的報酬（帳戶、大盤），從每月報酬連乘。 */
@@ -204,7 +162,7 @@ function paperHtml(p: PaperData | null, bt: PaperData | null, alt: PaperData | n
     <ul class="pd-rules"><li><b>趨勢 50%</b>：前一天加權指數收盤在 200 日均線之上 → 持有 00631L（2 倍槓桿），跌破 → 全部換現金，隔天開盤換。這是公開研究的經典規則（槓桿 ETF＋200 日均線），不是用我們的資料調出來的。<b>持有比例依波動調整</b>：比例＝長期一般波動 ÷ 近 20 日波動（最多 100%），市場很亂時少放一點，壓低最大回落。</li>
       <li><b>現金</b>（趨勢不持有、營收選股持有現金時）以年息 1.5% 計（定存或貨幣基金）。</li>
       <li><b>營收選股 50%</b>：每月 12 日後第一個交易日開盤，換成下面「營收選股」的 20 檔（留在名單的不動）；大盤在 200 日均線之下就全部持有現金。</li></ul>
-    <p class="muted pd-small">舊的逆勢個股排名、00631L 開盤當沖、區間進出場，2022～2026 回測都沒有贏大盤，不放錢（成績在各自的區塊）。</p>
+    <p class="muted pd-small">00631L 開盤當沖、區間進出場 2022～2026 回測都沒有贏大盤，不放錢（舊的逆勢個股排名已經拿掉）。</p>
     ${tr ? `<p class="pd-advice">下一個交易日：<b class="${tr.nextHold ? 'up' : 'down'}">${tr.nextHold ? `持有 00631L ${num((tr.nextWeight ?? 1) * 100, 0)}%` : '持有現金（不持有 00631L）'}</b>　<span class="muted">加權指數 ${esc(tr.asOf)} 收盤 ${num(tr.close, 0)}，200 日均線 ${num(tr.ma, 0)}（${tr.dist >= 0 ? '高於' : '低於'}均線 ${num(Math.abs(tr.dist) * 100, 1)}%）${tr.vol20 != null && tr.volMed != null ? `；近 20 日波動 ${num(tr.vol20 * 100, 0)}%（一般 ${num(tr.volMed * 100, 0)}%）` : ''}</span></p>` : ''}`;
   const book: Record<string, string> = { stocks: '個股', dayTrade: '開盤當沖', trend: '趨勢', range: '區間進出場' };
   const live = !p || !p.days
@@ -235,79 +193,82 @@ function paperHtml(p: PaperData | null, bt: PaperData | null, alt: PaperData | n
   return `<section class="pd-card glass" id="pd-paper">${head}${stageHtml(p)}${live}${hist}</section>`;
 }
 
-/** 台美聯動籌碼熱度指數：上圖加權指數＋恐慌（▲）／狂熱（▼）標記，下圖熱度 0～100。 */
-function heatChart(h: HeatIndex): string {
-  const rows = h.series.filter((r) => r[2] != null) as Array<[string, number, number]>;
+/** 一條指數（S&P 500 或加權指數）＋熱度 < 抄底線（▲）／> 過熱線（▼）標記。 */
+function heatPriceChart(rows: Array<[string, number, number]>, name: string, buy: number, hot: number): string {
   if (rows.length < 20) return '';
   const W = 520;
-  const H1 = 230;
-  const H2 = 140;
-  const gap = 16;
-  const pad = { l: 44, r: 8, t: 10, b: 22 };
+  const H = 190;
+  const pad = { l: 46, r: 8, t: 18, b: 4 };
   const n = rows.length;
   const x = (i: number) => pad.l + (i / (n - 1)) * (W - pad.l - pad.r);
   const cs = rows.map((r) => r[1]);
-  const lo = Math.min(...cs) * 0.97;
-  const hi = Math.max(...cs) * 1.03;
-  const y1 = (v: number) => pad.t + (1 - (v - lo) / (hi - lo)) * (H1 - pad.t);
-  const top2 = H1 + gap;
-  const y2 = (v: number) => top2 + (1 - v / 100) * H2;
-  const { buy, sell } = h.thresholds;
-  const line1 = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y1(r[1]).toFixed(1)}`).join('');
-  const line2 = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y2(r[2]).toFixed(1)}`).join('');
+  const lo = Math.min(...cs) * 0.96;
+  const hi = Math.max(...cs) * 1.04;
+  const y = (v: number) => pad.t + (1 - (v - lo) / (hi - lo)) * (H - pad.t - pad.b);
+  const line = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(r[1]).toFixed(1)}`).join('');
   const marks = rows
-    .map((r, i) =>
-      r[2] < buy
-        ? `<path class="hx-buy" d="M${x(i).toFixed(1)},${(y1(r[1]) + 6).toFixed(1)}l-3.5,6h7z"/>`
-        : r[2] > sell
-          ? `<path class="hx-sell" d="M${x(i).toFixed(1)},${(y1(r[1]) - 6).toFixed(1)}l-3.5,-6h7z"/>`
-          : '',
-    )
+    .map((r, i) => (r[2] < buy ? `<path class="hx-buy" d="M${x(i).toFixed(1)},${(y(r[1]) + 5).toFixed(1)}l-3.5,6h7z"/>` : r[2] > hot ? `<path class="hx-sell" d="M${x(i).toFixed(1)},${(y(r[1]) - 5).toFixed(1)}l-3.5,-6h7z"/>` : ''))
     .join('');
-  // 年份標在每年的第一天（太靠左邊的第一個不標，避免疊字）
+  return `<svg class="pd-chart hx-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${name}">
+    <text class="pd-tick hx-name" x="${pad.l}" y="12">${name}</text>
+    ${[lo, (lo + hi) / 2, hi].map((v) => `<text class="pd-tick" x="${pad.l - 4}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end">${num(v, 0)}</text>`).join('')}
+    <path class="hx-close" d="${line}"/>${marks}</svg>`;
+}
+
+/** 熱度 0～100（抄底區綠底、過熱區紅底）。 */
+function heatScoreChart(rows: Array<[string, number]>, buy: number, hot: number): string {
+  const W = 520;
+  const H = 150;
+  const pad = { l: 46, r: 8, t: 6, b: 22 };
+  const n = rows.length;
+  const x = (i: number) => pad.l + (i / (n - 1)) * (W - pad.l - pad.r);
+  const y = (v: number) => pad.t + (1 - v / 100) * (H - pad.t - pad.b);
+  const line = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(r[1]).toFixed(1)}`).join('');
   const years = rows.map((r, i) => [r[0], i] as const).filter(([d], i) => i > n * 0.06 && d.slice(0, 4) !== rows[i - 1][0].slice(0, 4));
-  return `<svg class="pd-chart hx-chart" viewBox="0 0 ${W} ${top2 + H2 + pad.b}" role="img" aria-label="加權指數與熱度指數">
-    ${[lo, (lo + hi) / 2, hi].map((v) => `<text class="pd-tick" x="${pad.l - 4}" y="${(y1(v) + 4).toFixed(1)}" text-anchor="end">${num(v, 0)}</text>`).join('')}
-    <path class="hx-close" d="${line1}"/>${marks}
-    <rect class="hx-zone-buy" x="${pad.l}" y="${y2(buy).toFixed(1)}" width="${W - pad.l - pad.r}" height="${(y2(0) - y2(buy)).toFixed(1)}"/>
-    <rect class="hx-zone-sell" x="${pad.l}" y="${y2(100).toFixed(1)}" width="${W - pad.l - pad.r}" height="${(y2(sell) - y2(100)).toFixed(1)}"/>
-    ${[buy, sell].map((v) => `<line class="hx-th" x1="${pad.l}" x2="${W - pad.r}" y1="${y2(v).toFixed(1)}" y2="${y2(v).toFixed(1)}"/><text class="pd-tick" x="${pad.l - 4}" y="${(y2(v) + 4).toFixed(1)}" text-anchor="end">${v}</text>`).join('')}
-    <path class="hx-score" d="${line2}"/>
-    ${years.map(([d, i]) => `<text class="pd-tick" x="${x(i).toFixed(1)}" y="${top2 + H2 + 16}" text-anchor="middle">${d.slice(0, 4)}</text>`).join('')}
-  </svg>
-  <p class="pd-legend muted"><span class="hx-k-buy">▲</span> 熱度 &lt; ${buy}（恐慌，抄底區）　<span class="hx-k-sell">▼</span> 熱度 &gt; ${sell}（狂熱，頂部風險）　下圖：熱度 0～100，綠底＝恐慌區、紅底＝狂熱區</p>`;
+  return `<svg class="pd-chart hx-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="熱度">
+    <rect class="hx-zone-buy" x="${pad.l}" y="${y(buy).toFixed(1)}" width="${W - pad.l - pad.r}" height="${(y(0) - y(buy)).toFixed(1)}"/>
+    <rect class="hx-zone-sell" x="${pad.l}" y="${y(100).toFixed(1)}" width="${W - pad.l - pad.r}" height="${(y(hot) - y(100)).toFixed(1)}"/>
+    ${[buy, hot].map((v) => `<line class="hx-th" x1="${pad.l}" x2="${W - pad.r}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"/><text class="pd-tick" x="${pad.l - 4}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end">${v}</text>`).join('')}
+    <path class="hx-score" d="${line}"/>
+    ${years.map(([d, i]) => `<text class="pd-tick" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${d.slice(0, 4)}</text>`).join('')}
+  </svg>`;
 }
 
 function heatHtml(h: HeatIndex | null): string {
-  if (!h) return '';
+  if (!h?.series?.length) return '';
   const t = h.thresholds;
-  const zone = h.now < t.buy ? 'hx-k-buy' : h.now > t.sell ? 'hx-k-sell' : '';
-  const st = (x: HeatIndex['oos']['strategy']) => `${pctTxt(x.ret)} <small class="muted">年化 ${pctTxt(x.cagr)}・夏普 ${num(x.sharpe, 2)}・最大回落 ${pctTxt(x.mdd)}</small>`;
-  const beat = h.oos.strategy.sharpe > h.oos.buyHold.sharpe;
+  const zone = h.now < t.buy ? 'hx-k-buy' : h.now > t.hot ? 'hx-k-sell' : '';
+  const us = h.series.map((r) => [r[0], r[1], r[3]] as [string, number, number]);
+  const tw = h.series.filter((r) => r[2] != null).map((r) => [r[0], r[2]!, r[3]] as [string, number, number]);
+  const evRow = (name: string, e: HeatIndex['events']['us'] | null) =>
+    e
+      ? (['20', '60'] as const)
+          .map(
+            (k) => `<tr><td>${name}　${k} 日後</td><td class="num">${num(e[k].n)}</td><td class="num ${cls(e[k].avg ?? 0)}">${e[k].avg == null ? '—' : pctTxt(e[k].avg!)}</td><td class="num">${e[k].up == null ? '—' : `${num(e[k].up! * 100, 0)}%`}</td><td class="num muted">${pctTxt(e[k].allAvg)}・${num(e[k].allUp * 100, 0)}%</td></tr>`,
+          )
+          .join('')
+      : '';
   return `<section class="pd-card glass" id="pd-heat">
-    <header class="pd-head"><div><p class="eyebrow">Heat index · 台美聯動</p><h2>台美聯動籌碼熱度指數</h2></div>
-      <span class="pd-verdict ${beat ? 'is-ok' : 'is-warn'}">${beat ? '✅ 樣本外贏過一直持有' : '⚠️ 樣本外沒有贏過一直持有'}</span></header>
-    <p class="pd-lead">把美股的恐慌與流動性、台股的散戶籌碼與融資斷頭壓力，融合成 0～100 分：<b>0 分＝最恐慌</b>（歷史上最適合抄底），<b>100 分＝最狂熱</b>。每個指標先換成「過去一年的百分位數」，權重由回測自動挑。</p>
+    <header class="pd-head"><div><p class="eyebrow">Margin heat · 每日推估</p><h2>美股融資熱度</h2></div></header>
+    <p class="pd-lead">美股官方的融資餘額一個月、甚至一季才公布一次，太慢；這裡用每天更新的公開資料推估一條<b>散戶融資熱度線</b>：跌破 <b>${t.buy}</b>＝散戶多頭死絕、籌碼極度乾淨（抄底區 ▲），超過 <b>${t.hot}</b>＝散戶瘋狂（▼）。</p>
     <dl class="pd-stats">
-      <div><dt>最新熱度（${esc(h.asOf)}）</dt><dd class="num ${zone}">${num(h.now, 1)} <small class="muted">前一天 ${num(h.prev, 1)}</small></dd></div>
-      <div><dt>交易建議</dt><dd>${esc(h.advice)}</dd></div>
+      <div><dt>最新熱度（美國 ${esc(h.asOf)}）</dt><dd class="num ${zone}">${num(h.now, 1)} <small class="muted">前一天 ${num(h.prev, 1)}</small></dd></div>
+      <div><dt>判讀</dt><dd>${esc(h.advice)}</dd></div>
     </dl>
-    ${heatChart(h)}
-    <h3 class="pd-sub">預測：這個熱度之後 20 個交易日，加權指數通常怎麼走</h3>
-    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>熱度</th><th class="num">天數</th><th class="num">之後 20 日平均</th><th class="num">上漲機率</th></tr></thead><tbody>
-      ${h.buckets.filter((b) => b.n).map((b) => `<tr${b.name === '全部日子' ? ' class="pd-sum-row"' : ''}><td>${esc(b.name)}</td><td class="num">${num(b.n)}</td><td class="num ${cls(b.avg ?? 0)}">${pctTxt(b.avg ?? 0)}</td><td class="num">${num((b.up ?? 0) * 100, 0)}%</td></tr>`).join('')}
+    ${heatPriceChart(us, 'S&amp;P 500', t.buy, t.hot)}
+    ${heatPriceChart(tw, '台灣加權指數（美股隔天）', t.buy, t.hot)}
+    ${heatScoreChart(us.map((r) => [r[0], r[2]]), t.buy, t.hot)}
+    <p class="pd-legend muted"><span class="hx-k-buy">▲</span> 熱度 &lt; ${t.buy}（籌碼乾淨，抄底區）　<span class="hx-k-sell">▼</span> 熱度 &gt; ${t.hot}（散戶瘋狂）</p>
+    <h3 class="pd-sub">驗證：熱度「跌破 ${t.buy}」那天之後的表現</h3>
+    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th></th><th class="num">次數</th><th class="num">平均報酬</th><th class="num">上漲機率</th><th class="num">隨便哪一天</th></tr></thead><tbody>
+      ${evRow('S&amp;P 500', h.events.us)}${evRow('加權指數', h.events.tw)}
     </tbody></table></div>
-    <h3 class="pd-sub">各指標的權重與今天的分數</h3>
-    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>指標</th><th class="num">權重</th><th class="num">今天</th></tr></thead><tbody>
-      ${[...h.indicators].sort((a, b) => b.weight - a.weight).map((x) => `<tr><td>${esc(x.name)}<br><small class="muted">${esc(x.group)}・${esc(x.source)}</small></td><td class="num">${num(x.weight * 100, 1)}%</td><td class="num">${num(x.score, 0)}</td></tr>`).join('')}
+    <h3 class="pd-sub">五個元件（等權平均，今天的分數）</h3>
+    <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>元件</th><th class="num">權重</th><th class="num">今天</th></tr></thead><tbody>
+      ${h.components.map((x) => `<tr><td>${esc(x.name)}<br><small class="muted">${esc(x.source)}</small></td><td class="num">${num(x.weight * 100, 0)}%</td><td class="num">${num(x.score, 0)}</td></tr>`).join('')}
     </tbody></table></div>
-    ${h.missing.length ? `<p class="muted pd-small">這次抓不到、沒有用的指標：${h.missing.map(esc).join('、')}。</p>` : ''}
-    <h3 class="pd-sub">策略回測（樣本外 ${esc(h.oos.from)}～${esc(h.oos.to)}：每一年只用那年以前的資料挑權重）</h3>
-    <dl class="pd-stats">
-      <div><dt>熱度策略（&lt; ${t.buy} 勾頭買、&gt; ${t.sell} 減半、&gt; ${t.exit} 出場）</dt><dd class="num">${st(h.oos.strategy)}</dd></div>
-      <div><dt>一直持有加權指數</dt><dd class="num">${st(h.oos.buyHold)}</dd></div>
-    </dl>
-    <p class="pd-note is-warn">照實說：「用全部歷史挑權重再回測同一段」夏普 ${num(h.inSample.sharpe, 2)}，看過答案、偏樂觀；上面的樣本外成績才是公正的。${beat ? '' : '熱度到 80 就減碼、要等跌到 25 以下才買回，在大多頭裡會錯過大段漲幅，所以樣本外輸給一直持有；'}熱度比較適合當「現在市場有多恐慌／多狂熱」的溫度計，配合上面模擬帳戶的 200 日均線規則看。</p>
+    ${h.missing.length ? `<p class="muted pd-small">還沒有資料、這次沒用到：${h.missing.map(esc).join('、')}（選擇權 Put/Call 比從 CBOE 每天往回補，約一年份補齊後自動加入）。</p>` : ''}
+    <p class="pd-note">每個元件先換成「過去一年的百分位數」再等權平均，不拿歷史去調權重（避免調到剛好符合過去）；每天只用當天已經公布的資料。上面的驗證表照實列出跌破 ${t.buy} 之後的報酬跟「隨便哪一天」的差距。</p>
   </section>`;
 }
 
@@ -413,41 +374,6 @@ function revStocksHtml(r: RevStocks): string {
     ${b.curve.length >= 2 ? lineChart(b.curve, [{ name: '營收選股（含跌破 200 日均線持有現金）', cls: 's1' }, { name: '加權指數', cls: 's3' }], { log: true }) : ''}
     <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>年度</th><th class="num">營收選股</th><th class="num">加權指數</th><th class="num">差距</th></tr></thead><tbody>${b.years.map((y) => `<tr><td>${esc(y.year)}</td><td class="num ${cls(y.ret)}">${pct(y.ret)}</td><td class="num ${cls(y.market)}">${pct(y.market)}</td><td class="num ${cls((y.ret ?? 0) - (y.market ?? 0))}">${pct((y.ret ?? 0) - (y.market ?? 0))}</td></tr>`).join('')}</tbody></table></div>
     <p class="pd-note">怎麼確定沒看答案：每一次換股只用當時已經公布的資料（M 月營收從次月 11 日起才算知道、季報過了申報期限才算）；四項訊號、20 檔、每月 12 日換股都是看結果之前就定好的，換成 10、30、50 檔也都贏大盤。要誠實說的是：單看「營收創新高」那一項成績更好，但它是看過結果才知道的，所以沒有改用它。2024 年（台積電一枝獨秀）輸大盤；大盤在 200 日均線之下時持有現金，所以 2022 年空頭沒有大虧。真正的考驗是模擬帳戶的實盤。</p>
-  </section>`;
-}
-
-function stocksHtml(s: PredictData['stocks'], h: number, f?: PredictData['forward']): string {
-  const b = s.backtest;
-  return `<section class="pd-card glass" id="pd-stocks">
-    <header class="pd-head"><div><p class="eyebrow">Stocks · ${h} 日</p><h2>舊個股排名 <small class="muted">（逆勢模型，觀察用）</small></h2></div>${badge(s.verdict)}</header>
-    <p class="pd-lead">每天收盤後替 ${num(s.universe)} 檔（近 20 日平均成交額 0.3 億以上）打分數：預測未來 ${h} 個交易日<b>相對其他股票</b>的強弱。分數是全市場排名百分位（100＝最看好）。資料到 ${md(s.asOf)}。</p>
-    <p class="pd-note is-warn"><b>目前僅供觀察，不是買進建議。</b>這版模型偏好「跌深、離一年高點遠、高殖利率」的股票（逆勢撿便宜），2022～2026 逐段往前滾回測，「最看好」名單<b>沒有贏大盤</b>，連全部股票的平均都輸；比較有用的是「最該避開」那一邊。正式的選股請看上面的「營收選股」。</p>
-    <div class="pd-cols">
-      <div><h3 class="pd-sub">最看好 <small class="muted">前 30 名</small></h3>${pickTable(s.top, 'top')}</div>
-      <div><h3 class="pd-sub">最該避開 <small class="muted">後 15 名</small></h3>${pickTable(s.bottom, 'bottom')}</div>
-    </div>
-    <h3 class="pd-sub">回測（${b.from.slice(0, 7)} ～ ${b.to.slice(0, 7)}，樣本外，每 ${h} 天換一次）</h3>
-    <dl class="pd-stats">
-      <div><dt>排名相關係數（IC）</dt><dd class="num">${num(b.icMean, 3)} <small class="muted">t ${num(b.icT, 1)}</small></dd></div>
-      <div><dt>IC 為正的比例</dt><dd class="num">${pctTxt(b.icPositive, 0, false)}</dd></div>
-      <div><dt>前 10% 年化（扣成本）</dt><dd class="num ${cls(b.cagrTop)}">${pctTxt(b.cagrTop)}</dd></div>
-      <div><dt>同期大盤年化</dt><dd class="num ${cls(b.cagrMarket)}">${pctTxt(b.cagrMarket)}</dd></div>
-      <div><dt>贏過大盤的期數</dt><dd class="num">${pctTxt(b.hitRate, 0, false)}</dd></div>
-      <div><dt>最大回落</dt><dd class="num down">${pctTxt(b.maxDD)}</dd></div>
-    </dl>
-    ${lineChart(b.curve, [{ name: '前 10%（扣成本）', cls: 's1' }, { name: '全部股票平均', cls: 's2' }, { name: '加權指數', cls: 's3' }], { log: true })}
-    <p class="pd-note">IC（預測排名和實際排名的相關係數）長期為正，代表<b>排序有統計上的意義</b>，主要是能挑出<b>表現較差、該避開</b>的股票；
-      前段班平均只略好於全體。近幾年大盤主要由權值股（台積電等）拉動，多數股票跑輸指數，所以「前 10%」等權組合也沒贏過加權指數。
-      成本以手續費不打折來回（保守）＋證交稅 ${pctTxt(b.cost, 2, false)} 計算。</p>
-    <details class="pd-more"><summary>模型權重（每個因子排名每高一級，預測排名的變化）</summary>
-      <ul class="pd-weights">${[...s.weights]
-        .sort((a, c) => Math.abs(c.w) - Math.abs(a.w))
-        .map((w) => `<li><span>${esc(w.name)}</span><b class="num ${cls(w.w)}">${w.w > 0 ? '+' : ''}${num(w.w, 3)}</b></li>`)
-        .join('')}</ul>
-      <p class="muted">只列線性部分；模型另外有每個因子的平方項，抓「太極端反而不好」的關係（例如漲太多、波動太大）。</p>
-    </details>
-    ${entryExitHtml(s.entryExit)}
-    ${fwStocks(f)}
   </section>`;
 }
 
@@ -654,10 +580,9 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
     ...(paper ? [['#pd-paper', '模擬帳戶'] as [string, string]] : []),
     ...(d.revStocks ? [['#pd-rev', '營收選股'] as [string, string]] : []),
     ['#pd-stock', '個股預測'],
-    ...(heat ? [['#pd-heat', '熱度指數'] as [string, string]] : []),
+    ...(heat?.series?.length ? [['#pd-heat', '融資熱度'] as [string, string]] : []),
     ['#pd-market', '大盤展望'],
     ['#pd-intra', '盤中（00631L）'],
-    ['#pd-stocks', '個股排名・觀察'],
     ...(d.dayTrade ? [['#pd-day', '當沖・觀察'] as [string, string]] : []),
   ];
   const summary = `<nav class="pd-jump glass" aria-label="跳到預測頁的區塊">${jumps.map(([h, t]) => `<a href="${h}" class="pd-sum">${t}</a>`).join('')}</nav>`;
@@ -667,7 +592,6 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
     ${stockForecastShell()}
     ${heatHtml(heat)}
     ${marketHtml(d.market, d.horizon, d.forward)}
-    ${stocksHtml(d.stocks, d.horizon, d.forward)}
     ${d.dayTrade ? dayTradeHtml(d.dayTrade, d.forward) : ''}
     <section id="pd-intra"></section>
     <p class="muted pd-foot">預測是依歷史資料統計的結果，<b>不構成投資建議</b>；過去的回測成績不代表未來。更新時間 ${esc(new Date(d.generatedAt).toLocaleString('zh-TW', { hour12: false }))}。</p>
