@@ -41,6 +41,7 @@ import {
   avgOf,
   blendLine,
   directionLine,
+  typicalCloseMove,
   ANALOG_NS,
   BLEND_WS,
   type AnalogDay,
@@ -539,7 +540,8 @@ for (let n = FIRST; n < days.length; n++) {
         a3: an.lines[2]?.closes ?? [],
       };
       // 方向預測線：一定押方向（綜合預測的方向 × 同方向相似日的真實走勢）
-      lines.dir = directionLine(an.lines, lines.blend, ref);
+      const lastBar = f.bars[f.bars.length - 1];
+      lines.dir = directionLine(an.lines, lines.blend, ref, 7, lastBar ? typicalCloseMove(lastBar.lo, lastBar.hi) : undefined);
       // 今天結束後，更新每一組設定的累計誤差（明天才用得到）
       if (an.lines.length >= 20 && modelCloses.length === actual.length) {
         for (const nn of ANALOG_NS) {

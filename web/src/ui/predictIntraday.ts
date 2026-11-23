@@ -7,7 +7,7 @@
  * - 00631L 的價格由加權指數換算（β 倍），不是 00631L 真實的 5 分 K。
  */
 import type { IndexPoint } from '../data/types';
-import { BARS, STEP, DAYTRADE_COST, analogLines, avgOf, barRange, blendLine, directionLine, rangeLevels, simulateRange, type RangeLevels, type RangePlan, forecastDay, toLeveraged, type AnalogDay, type Bar, type DailyCtx, type DayForecast, type DayModel, type IntradayModel, discName } from '../domain/intradayModel';
+import { BARS, STEP, DAYTRADE_COST, analogLines, avgOf, barRange, blendLine, directionLine, typicalCloseMove, rangeLevels, simulateRange, type RangeLevels, type RangePlan, forecastDay, toLeveraged, type AnalogDay, type Bar, type DailyCtx, type DayForecast, type DayModel, type IntradayModel, discName } from '../domain/intradayModel';
 import { escapeHtml as esc, num } from './format';
 
 type Verdict = 'signal' | 'none';
@@ -164,7 +164,8 @@ function lineSeries(v: View, f: DayForecast, an: Analogs, ch: { n: number; w: nu
     out.blend = conv(bl);
     // 方向預測（主線）：一定押方向；起點價格：開盤前是昨收，盤中是現價
     const ref = pre ? v.P0 : start[1];
-    const dl = directionLine(an.lines, bl, ref);
+    const lastBar = f.bars[f.bars.length - 1];
+    const dl = directionLine(an.lines, bl, ref, 7, lastBar ? typicalCloseMove(lastBar.lo, lastBar.hi) : undefined);
     if (dl.length) out.dir = conv(dl);
     an.lines.slice(0, 3).forEach((l, i) => (out[`a${i + 1}` as LineId] = conv(l.closes)));
   }
@@ -181,6 +182,25 @@ function levelsFor(d: IntradayData, v: View): { lv: RangeLevels; plan: RangePlan
   return { lv, plan: use, isRef: use !== v.plan, sim };
 }
 
+/**
+ * 預測 K 棒：沿著方向預測主線畫（沒有主線時沿模型主線）。每根的開盤＝前一根收盤、收盤＝主線上的點，
+ * 上下影線用模型預測的那一根的振幅（扣掉實體後平均分到上下）。
+ */
+function predCandles(series: Partial<Record<LineId, Array<[number, number]>>>, f: DayForecast): Array<{ bar: number; o: number; h: number; l: number; c: number }> {
+  const line = series.dir ?? series.model;
+  if (!line || line.length < 2) return [];
+  const rng = new Map(f.bars.map((b) => [b.bar, Math.log(b.h / b.l)]));
+  const out: Array<{ bar: number; o: number; h: number; l: number; c: number }> = [];
+  for (let n = 1; n < line.length; n++) {
+    const bar = line[n][0] - 1;
+    const o = line[n - 1][1];
+    const c = line[n][1];
+    const wick = Math.max(0, (rng.get(bar) ?? 0) - Math.abs(Math.log(c / o))) / 2;
+    out.push({ bar, o, c, h: Math.max(o, c) * Math.exp(wick), l: Math.min(o, c) * Math.exp(-wick) });
+  }
+  return out;
+}
+
 function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: Analogs): string {
   const W = 760;
   const H = 320;
@@ -194,7 +214,7 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
     ...known.flatMap((b) => [b[1], b[2]]),
     ...future.flatMap((b) => [b[1], b[2]]),
     ...shown.flatMap((id) => series[id]!.map((p) => p[1])),
-    ...(st.showCandles ? f.bars.flatMap((b) => [b.h, b.l]) : []),
+    ...(st.showCandles ? predCandles(series, f).flatMap((k) => [k.h, k.l]) : []),
     f.dayHigh,
     f.dayLow,
     v.P0,
@@ -260,7 +280,7 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
     ${hline(f.dayHigh, '預估最高', 'is-hi')}${hline(f.dayLow, '預估最低', 'is-lo')}
     ${known.map((b, i) => candle(i, b, 'is-real')).join('')}
     ${future.map((b, i) => candle(f.from + i, b, 'is-actual')).join('')}
-    ${st.showCandles ? f.bars.map((b) => candle(b.bar, [b.o, b.h, b.l, b.c], 'is-pred')).join('') : ''}
+    ${st.showCandles ? predCandles(series, f).map((k) => candle(k.bar, [k.o, k.h, k.l, k.c], 'is-pred')).join('') : ''}
     <g clip-path="url(#pd-clip)">${levelSvg}${order.map(path).join('')}${order.map(endLabel).join('')}</g>
     ${f.from > 0 ? `<line class="pd-now" x1="${startX.toFixed(1)}" x2="${startX.toFixed(1)}" y1="${pad.t}" y2="${H - pad.b}"/>` : ''}
     ${ticks.map((t) => `<text class="pd-tick" x="${pad.l - 6}" y="${(pad.t + (1 - (t - lo) / (hi - lo || 1)) * (H - pad.t - pad.b) + 4).toFixed(1)}" text-anchor="end">${num(t, 2)}</text>`).join('')}
