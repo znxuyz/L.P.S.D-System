@@ -25,3 +25,11 @@ describe('directionPath（日 K 方向預測）', () => {
     expect(out[1]).toBeLessThanOrEqual(0);
   });
 });
+
+describe('directionLine 幅度（endSize）', () => {
+  it('終點落在指定幅度、方向不變', () => {
+    const L2 = (end: number) => ({ date: 'x', closes: [100, (100 + end) / 2, end] });
+    const out = directionLine([L2(90), L2(88), L2(91)], [100, 99, 98], 100, 7, 0.02);
+    expect(Math.log(out.at(-1)! / 100)).toBeCloseTo(-0.02, 6);
+  });
+});

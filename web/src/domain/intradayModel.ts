@@ -512,14 +512,20 @@ export function avgOf(lines: AnalogLine[], n: number): number[] {
  *   所以線的起伏大小就是這種日子一般會走的幅度，不是被縮小的平均值。
  * - 同方向的相似日不到 3 天時，用全部相似日平均；方向相反就以 ref 為中心鏡射。
  */
-export function directionLine(lines: AnalogLine[], blend: number[], ref: number, n = 7): number[] {
+export function directionLine(lines: AnalogLine[], blend: number[], ref: number, n = 7, endSize?: number): number[] {
   if (!blend.length || !(ref > 0)) return [];
   const up = blend[blend.length - 1] >= ref;
   const same = lines.filter((l) => l.closes.length && l.closes[l.closes.length - 1] >= ref === up).slice(0, n);
-  if (same.length >= 3) return avgOf(same, same.length);
   const base = lines.length ? avgOf(lines, Math.min(n, lines.length)) : blend;
-  return base[base.length - 1] >= ref === up ? base : base.map((v) => (ref * ref) / v);
+  const raw = same.length >= 3 ? avgOf(same, same.length) : base[base.length - 1] >= ref === up ? base : base.map((v) => (ref * ref) / v);
+  // 終點幅度固定成 endSize（這種日子收盤一般會走多少）：相似日依現在的波動放大後可能很誇張，只取形狀
+  const end = Math.abs(Math.log(raw[raw.length - 1] / ref));
+  if (endSize == null || !(endSize > 0) || !(end > 1e-9)) return raw;
+  return raw.map((v) => ref * Math.exp((Math.log(v / ref) / end) * endSize));
 }
+
+/** 收盤「一般會走多少」：收盤約 80% 區間的半寬換成中位數幅度（常態分布 0.6745 ÷ 1.2816）。 */
+export const typicalCloseMove = (lo: number, hi: number) => (lo > 0 && hi > lo ? (Math.log(hi / lo) / 2) * (0.6745 / 1.2816) : undefined);
 
 /** 綜合預測：模型主線與相似日平均依權重 w（給模型）混合（對數空間）。 */
 export const blendLine = (model: number[], avg: number[], w: number) => model.map((v, i) => (avg[i] > 0 ? Math.exp(w * Math.log(v) + (1 - w) * Math.log(avg[i])) : v));
