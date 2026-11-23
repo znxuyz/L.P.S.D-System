@@ -161,9 +161,36 @@ const volMed: number[] = [];
   // 最後一天之後（下一個交易日）用的中位數
   volMed.push(sorted.length ? sorted[Math.floor(sorted.length / 2)] : NaN);
 }
+/**
+ * 跌破 200 日均線後的「斷頭抄底」：大盤融資維持率收盤後跌破 140%（市場慣用的斷頭恐慌線，不是我們調出來的），
+ * 接下來 BOTTOM_HOLD（預設 20）個交易日即使在均線之下也持有 00631L（比例一樣依波動調整，崩跌時波動大、自然買得少）；
+ * 期間站回均線就回到一般規則。BOTTOM=0 關掉（比較用）。
+ * 研究（2x 槓桿模擬、2020-11～2026-11）：線下觸發 4 段（2022-07、2022-09、2022-10、2025-04），
+ * 之後 20 日加權指數 +4.6%、−4.0%、+15.6%、+6.7%；全期 +657% → +1011%、最大回落不變（−41%），2022 −16% → +6%。
+ * 樣本只有 4 段，門檻 135／145 效果差很多 → 只把它當有限度的加碼，不擴大成其他抄底訊號
+ * （5 日跌 8%、融資 10 日減 12%、熱度 < 30 都試過：保留期或 2022 變差，不採用）。
+ */
+const BOTTOM = process.env.BOTTOM !== '0';
+const BOTTOM_TH = Number(process.env.BOTTOM_TH ?? 140);
+const BOTTOM_HOLD = Number(process.env.BOTTOM_HOLD ?? 20);
+const ratioOf = new Map<string, number>();
+for (const r of read<{ rows: Array<[string, number | null]> }>(join(dir, 'market-risk.json'), { rows: [] }).rows) if (r[1] != null && r[1] > 0) ratioOf.set(r[0], r[1]);
+/** bottomLeft[i]：第 i 天收盤後，抄底期還剩幾天（0＝不在抄底期）。 */
+const bottomLeft: number[] = [];
+{
+  let k = 0;
+  for (let i = 0; i < taiex.length; i++) {
+    const below = i >= MA_N - 1 && !aboveMa(i);
+    const r = ratioOf.get(taiex[i][0]);
+    if (!below) k = 0;
+    else if (BOTTOM && r != null && r < BOTTOM_TH) k = BOTTOM_HOLD;
+    else if (k > 0) k--;
+    bottomLeft.push(k);
+  }
+}
 /** 第 i 天收盤後算出的「下一個交易日」00631L 持有比例（0～1）。 */
 const trendWeight = (i: number) => {
-  if (!aboveMa(i)) return 0;
+  if (!aboveMa(i) && !bottomLeft[i]) return 0;
   if (!VOL_TARGET) return 1;
   const w = volMed[i + 1] / vol20[i];
   return Number.isFinite(w) ? Math.max(0, Math.min(1, w)) : 1;
@@ -232,7 +259,7 @@ if (startIdx > 0) {
       if ((full && want !== cur && (want === 0 ? trShares > 0 : want >= 0.2)) || (!full && Math.abs(want - cur) > 0.2)) {
         const target = maxShares(L[0], want * val);
         const diff = target - trShares;
-        const why = want === 0 ? '加權指數昨天跌破 200 日均線，換現金' : cur === 0 ? `加權指數在 200 日均線之上，買進（持有 ${Math.round(want * 100)}%）` : `波動變化，持有比例 ${Math.round(cur * 100)}% → ${Math.round(want * 100)}%`;
+        const why = want === 0 ? (trSince && bottomLeft[i - 2] === 1 ? '抄底期結束、仍在 200 日均線之下，換現金' : '加權指數昨天跌破 200 日均線，換現金') : cur === 0 ? (bottomLeft[i - 1] && !aboveMa(i - 1) ? `融資維持率跌破 ${BOTTOM_TH}%（斷頭潮），均線下抄底 ${BOTTOM_HOLD} 天（持有 ${Math.round(want * 100)}%）` : `加權指數在 200 日均線之上，買進（持有 ${Math.round(want * 100)}%）`) : `波動變化，持有比例 ${Math.round(cur * 100)}% → ${Math.round(want * 100)}%`;
         if (diff > 0) {
           const cost = buyCost(L[0], diff);
           trCash -= cost;
@@ -304,7 +331,7 @@ const out = {
   // 趨勢部位：目前持有什麼、下一個交易日該持有什麼（看最新收盤與 200 日均線）
   trend: (() => {
     const li = cal.length - 1;
-    return { holding: trShares > 0, since: trSince, nextHold: aboveMa(li), nextWeight: r5(trendWeight(li)), vol20: r5(vol20[li]), volMed: r5(volMed[li + 1] ?? volMed[li]), close: r2(taiex[li][4]), ma: r2(maOf(li)), dist: r5(taiex[li][4] / maOf(li) - 1), asOf: cal[li] };
+    return { holding: trShares > 0, since: trSince, nextHold: aboveMa(li) || bottomLeft[li] > 0, bottomLeft: bottomLeft[li], ratio: [...ratioOf.entries()].filter(([d]) => d <= cal[li]).at(-1)?.[1] ?? null, nextWeight: r5(trendWeight(li)), vol20: r5(vol20[li]), volMed: r5(volMed[li + 1] ?? volMed[li]), close: r2(taiex[li][4]), ma: r2(maOf(li)), dist: r5(taiex[li][4] / maOf(li) - 1), asOf: cal[li] };
   })(),
   monthly,
   curve: equityRows,

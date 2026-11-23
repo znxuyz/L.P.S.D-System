@@ -74,7 +74,7 @@ jobs:
           node scripts/close-snapshot.ts .data
           # 台美聯動籌碼熱度指數（Python；FRED、FinMind 抓不到時只用手上有的指標，失敗也不影響部署）
           python3 -m pip install -q pandas numpy scipy matplotlib || true
-          python3 scripts/heat_index.py .data --png .data/heat-index.png || echo "熱度指數失敗，略過"
+          (python3 scripts/heat_index.py .data --png .data/heat-index.png || echo "熱度指數失敗，略過") 2>&1 | tee .data/heat.log
 
       - name: 放進網站
         run: |
@@ -98,6 +98,10 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist
+      # 摘要放在最後（上傳步驟會列出上萬個檔案，前面的輸出不好找）
+      - name: 熱度指數摘要
+        if: always()
+        run: cat .data/heat.log 2>/dev/null | grep -v findfont || true
 
   deploy:
     needs: build

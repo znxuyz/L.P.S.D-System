@@ -135,7 +135,7 @@ function holdingsHtml(p: PaperData, tr: PaperData['trend']): string {
   if (h) rows.push(`<tr><td>選股</td><td>現金 <span class="muted">（年息 1.5%）</span></td><td class="num">${money(h.stocksCash)}</td><td class="num">—</td></tr>`);
   const allCash = !p.positions.length && !(h && h.trend.shares > 0);
   const why = allCash
-    ? `<p class="pd-advice">目前<b>全部是現金</b>：${tr ? `加權指數 ${esc(tr.asOf)} 收盤 ${num(tr.close, 0)}，${tr.dist < 0 ? `低於 200 日均線 ${num(Math.abs(tr.dist) * 100, 1)}%，` : ''}` : ''}規則是大盤在 200 日均線之下就不持股。等加權指數收盤站回均線，<b>隔天開盤</b>買 00631L；營收選股在站回均線後的<b>下一個換股日</b>（每月 12 日後第一個交易日）買下面「營收選股」名單的 20 檔。</p>`
+    ? `<p class="pd-advice">目前<b>全部是現金</b>：${tr ? `加權指數 ${esc(tr.asOf)} 收盤 ${num(tr.close, 0)}，${tr.dist < 0 ? `低於 200 日均線 ${num(Math.abs(tr.dist) * 100, 1)}%，` : ''}` : ''}規則是大盤在 200 日均線之下就不持股，<b>例外是斷頭抄底</b>：大盤融資維持率跌破 140%（${tr?.ratio != null ? `目前 ${num(tr.ratio, 1)}%` : '最新一天還沒公布'}），隔天開盤買 00631L 抱 20 個交易日（比例依波動調整）。否則等加權指數收盤站回均線，<b>隔天開盤</b>買 00631L；營收選股在站回均線後的<b>下一個換股日</b>（每月 12 日後第一個交易日）買下面「營收選股」名單的 20 檔。</p>`
     : '';
   return `<h3 class="pd-sub">目前持有（${esc(p.asOf ?? '')} 收盤）</h3>${why}
     ${rows.length ? `<div class="pd-table-wrap pd-hold-wrap"><table class="pd-table pd-hold"><thead><tr><th>部位</th><th>持有</th><th class="num">市值</th><th class="num">報酬</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>` : ''}`;
@@ -163,7 +163,7 @@ function paperHtml(p: PaperData | null, bt: PaperData | null, alt: PaperData | n
       <li><b>現金</b>（趨勢不持有、營收選股持有現金時）以年息 1.5% 計（定存或貨幣基金）。</li>
       <li><b>營收選股 50%</b>：每月 12 日後第一個交易日開盤，換成下面「營收選股」的 20 檔（留在名單的不動）；大盤在 200 日均線之下就全部持有現金。</li></ul>
     <p class="muted pd-small">00631L 開盤當沖、區間進出場 2022～2026 回測都沒有贏大盤，不放錢（舊的逆勢個股排名已經拿掉）。</p>
-    ${tr ? `<p class="pd-advice">下一個交易日：<b class="${tr.nextHold ? 'up' : 'down'}">${tr.nextHold ? `持有 00631L ${num((tr.nextWeight ?? 1) * 100, 0)}%` : '持有現金（不持有 00631L）'}</b>　<span class="muted">加權指數 ${esc(tr.asOf)} 收盤 ${num(tr.close, 0)}，200 日均線 ${num(tr.ma, 0)}（${tr.dist >= 0 ? '高於' : '低於'}均線 ${num(Math.abs(tr.dist) * 100, 1)}%）${tr.vol20 != null && tr.volMed != null ? `；近 20 日波動 ${num(tr.vol20 * 100, 0)}%（一般 ${num(tr.volMed * 100, 0)}%）` : ''}</span></p>` : ''}`;
+    ${tr ? `<p class="pd-advice">下一個交易日：<b class="${tr.nextHold ? 'up' : 'down'}">${tr.nextHold ? `持有 00631L ${num((tr.nextWeight ?? 1) * 100, 0)}%${tr.dist < 0 && tr.bottomLeft ? `（斷頭抄底，還剩 ${tr.bottomLeft} 天）` : ''}` : '持有現金（不持有 00631L）'}</b>　<span class="muted">加權指數 ${esc(tr.asOf)} 收盤 ${num(tr.close, 0)}，200 日均線 ${num(tr.ma, 0)}（${tr.dist >= 0 ? '高於' : '低於'}均線 ${num(Math.abs(tr.dist) * 100, 1)}%）${tr.ratio != null ? `；融資維持率 ${num(tr.ratio, 1)}%（跌破 140% 抄底）` : ''}${tr.vol20 != null && tr.volMed != null ? `；近 20 日波動 ${num(tr.vol20 * 100, 0)}%（一般 ${num(tr.volMed * 100, 0)}%）` : ''}</span></p>` : ''}`;
   const book: Record<string, string> = { stocks: '個股', dayTrade: '開盤當沖', trend: '趨勢', range: '區間進出場' };
   const live = !p || !p.days
     ? '<p class="pd-advice">第一份事前存檔今晚產生，<b>下一個交易日開盤開始自動交易</b>；之後每天收盤後更新帳戶。</p>'
