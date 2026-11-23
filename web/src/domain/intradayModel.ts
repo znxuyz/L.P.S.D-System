@@ -472,6 +472,56 @@ export function analogDistance(t: TodayState, a: AnalogDay): number {
   return dist;
 }
 
+/**
+ * 淘汰賽：開盤時用「開盤前的條件」（前一天走勢、美股、夜盤、波動）找出最像的 n 天，全部從今天的開盤價開始畫
+ * （依波動比例縮放）；之後每走完一根，偏離實際走勢超過容許範圍的就淘汰，停在那一根。
+ * 容許範圍＝z × 這種日子的一般波動 × √(經過的時間 ÷ 整天)，越後面越寬（偏離本來就會累積）；
+ * 淘汰到剩不到 minKeep 條時，保留目前最接近的 minKeep 條。
+ * 回測（最近 200 個交易日）：30 條到 10:00 約剩 14 條、13:00 約剩 13 條；存活平均預測「之後到收盤」的方向約 49～57%，
+ * 沒有比 30 條全部平均準，所以這是「今天像過去哪幾天」的觀察工具，不是更準的預測。
+ * actual：今天 c 的索引 0（開盤）～k 的實際價格。回傳每條的走勢（c 的索引 0～BARS）與被淘汰的位置（null＝存活）。
+ */
+/** 淘汰賽容許範圍：一般波動 ×（KO_FLOOR＋KO_Z × √(時間比例)）。 */
+export let KO_Z = 0.6;
+export let KO_FLOOR = 0.3;
+export function setKnockoutTol(z: number, floor: number): void {
+  KO_Z = z;
+  KO_FLOOR = floor;
+}
+export interface KnockoutLine {
+  date: string;
+  closes: number[];
+  out: number | null;
+}
+export function knockout(lib: AnalogDay[], ctx: DailyCtx, actual: number[], n = 30, z = KO_Z, minKeep = 3, P0?: number): KnockoutLine[] {
+  const open = actual[0];
+  if (!(open > 0) || !lib.length) return [];
+  // 開盤前的條件＋開盤跳空（開盤後就知道了）一起比
+  const t: TodayState = { k: 0, gap: P0 && P0 > 0 ? Math.log(open / P0) : NaN, r: [0], ctx };
+  const st = sigmaOf(ctx);
+  const lines: KnockoutLine[] = lib
+    .map((a) => ({ a, d: analogDistance(t, a) }))
+    .sort((x, y) => x.d - y.d)
+    .slice(0, n)
+    .map(({ a }) => {
+      const s = st / sigmaOf(a.ctx);
+      return { date: a.date, closes: Array.from({ length: BARS + 1 }, (_, j) => open * Math.exp((a.r[j] ?? a.r[a.r.length - 1] ?? 0) * s)), out: null };
+    });
+  const se = new Map<KnockoutLine, number>();
+  for (let j = 1; j < actual.length; j++) {
+    const alive = lines.filter((l) => l.out == null);
+    for (const l of alive) se.set(l, (se.get(l) ?? 0) + Math.log(l.closes[j] / actual[j]) ** 2);
+    if (alive.length <= minKeep) break;
+    // 到目前為止的平均偏離（不看單一根的瞬間偏離）；容許範圍起步留一點寬度，再隨時間放寬
+    const tol = st * (KO_FLOOR + z * Math.sqrt(j / BARS));
+    const dev = (l: KnockoutLine) => Math.sqrt((se.get(l) ?? 0) / j);
+    let gone = alive.filter((l) => dev(l) > tol);
+    if (alive.length - gone.length < minKeep) gone = [...alive].sort((x, y) => dev(y) - dev(x)).slice(0, alive.length - minKeep);
+    for (const l of gone) l.out = j;
+  }
+  return lines;
+}
+
 export interface AnalogLine {
   date: string;
   /** 從預測起點之後的收盤價：第 from＋1～54 根（開盤前從開盤 0 開始）。 */
