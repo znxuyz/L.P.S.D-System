@@ -270,10 +270,24 @@ function heatRadar(items: Array<{ name: string; score: number }>, buy: number, h
   </svg>`;
 }
 
+/** 找底燈號：熱度低＝黃燈（籌碼乾淨但可能還在跌），再加上融資維持率跌破門檻（斷頭潮）＝綠燈。 */
+function bottomLight(h: HeatIndex): string {
+  const b = h.bottom;
+  if (!b) return '';
+  const r = b.ratio == null ? '' : `融資維持率 ${num(b.ratio, 1)}%（${esc(b.ratioDate ?? '')}）`;
+  const [cls, label, why] =
+    b.state === 'go'
+      ? ['go', '綠燈・確認到底', `熱度低＋斷頭潮（${esc(b.trigger ?? '')} 起，還剩 ${b.left} 個交易日）；${r}`]
+      : b.state === 'watch'
+        ? ['watch', '黃燈・還沒確認', `籌碼乾淨，但還沒出現斷頭潮；${r}，跌破 ${b.ratioTh}% 才亮綠燈`]
+        : ['off', '沒亮', `熱度還沒低於 ${h.thresholds.buy}；${r}`];
+  return `<p class="hx-light hx-${cls}"><i></i><b>找底燈號：${label}</b><span class="muted">${why}</span></p>`;
+}
+
 function heatHtml(h: HeatIndex | null): string {
   if (!h?.series?.length || !h.events?.tw) return '';
   const t = h.thresholds;
-  const zone = h.now < t.buy ? '籌碼乾淨・抄底區' : h.now > t.hot ? '散戶瘋狂・過熱' : '中性';
+  const zone = h.now < t.buy ? '籌碼乾淨・低檔區' : h.now > t.hot ? '散戶瘋狂・過熱' : '中性';
   const col = heatColor(h.now);
   const items = h.components.filter((x) => x.score != null).map((x) => ({ name: x.name, score: x.score! }));
   const rows = h.series.filter((r) => r[2] != null);
@@ -288,6 +302,7 @@ function heatHtml(h: HeatIndex | null): string {
         <div class="hx-bar"><i style="left:${Math.max(0, Math.min(100, h.now))}%"></i><span style="left:${t.buy}%"></span><span style="left:${t.hot}%"></span></div>
         <p class="hx-zone" style="color:${col}">${zone}</p>
         <p class="muted hx-sub">${h.now > h.prev ? '▲ 比前一天回升' : h.now < h.prev ? '▼ 比前一天下降' : '和前一天持平'}（${num(h.prev, 0)}）・美股 ${h.usNow == null ? '—' : num(h.usNow, 0)}／台股 ${h.twNow == null ? '—' : num(h.twNow, 0)}</p>
+        ${bottomLight(h)}
       </div>
       ${heatRadar(items, t.buy, t.hot)}
     </div>
@@ -297,6 +312,10 @@ function heatHtml(h: HeatIndex | null): string {
       <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>元件</th><th class="num">權重</th><th class="num">今天</th></tr></thead><tbody>
         ${h.components.map((x) => `<tr><td>${esc(x.group)}・${esc(x.name)}</td><td class="num">${num(x.weight * 100, 1)}%</td><td class="num">${x.score == null ? '—' : num(x.score, 0)}</td></tr>`).join('')}
       </tbody></table></div>
+      ${h.rules?.length ? `<p class="pd-small"><b>熱度低不等於到底</b>：崩跌途中熱度會一路停在低檔。下表比較幾種「確認到底」的進場規則（事先定好規則、用樣本外熱度），看之後的加權指數：</p>
+      <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>進場規則</th><th class="num">次數</th><th class="num">20 日</th><th class="num">60 日</th><th class="num">60 日上漲</th></tr></thead><tbody>
+        ${h.rules.map((r) => `<tr><td>${esc(r.name)}</td><td class="num">${r.n}</td><td class="num">${r.avg20 == null ? '—' : pctTxt(r.avg20)}</td><td class="num">${r.avg60 == null ? '—' : pctTxt(r.avg60)}</td><td class="num">${r.up60 == null ? '—' : num(r.up60 * 100, 0) + '%'}</td></tr>`).join('')}
+      </tbody></table></div>` : ''}
       <p class="muted pd-small">權重由程式自己挑：目標是「熱度越低、之後 ${wf?.horizon ?? 60} 個交易日加權指數漲越多」，再往平均拉回一半避免過度配適。${wf?.ic?.length ? `逐年往前滾（只用之前的資料挑權重）的樣本外相關：最佳權重 ${num(avg(wf.ic), 2)}、平均權重 ${num(avg(wf.icEqual), 2)}（正值才代表有用）。${wf.method === 'equal' ? '最佳化沒有贏平均權重，所以目前<b>用平均權重</b>。' : ''}` : ''}跌破 ${t.buy} 之後 60 日加權指數平均 ${e['60'].avg == null ? '—' : pctTxt(e['60'].avg!)}（隨便哪一天 ${pctTxt(e['60'].allAvg)}）。${h.missing.length ? `還沒有資料：${h.missing.map(esc).join('、')}。` : ''}</p>
     </details>
   </section>`;
