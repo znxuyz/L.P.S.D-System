@@ -4,6 +4,7 @@
  * - 每個模型都附上樣本外回測成績，並自動判斷「有沒有比隨便猜更好」；沒有的就直接說沒有。
  * - 點個股可以跳到個股分析頁。
  */
+import { loadCloseFile } from '../data/closeProvider';
 import { dayTradeBands, dayTradeCall, loadAnalogs, loadPaper, loadPaperBacktest, loadPredict, loadPredictIntraday, type PaperData, type PredictData, type RevStocks, type StockPick, type Verdict } from '../data/predict';
 import { sessionAt, taipeiDate } from '../data/liveProvider';
 import { sessionOpenMs } from '../data/twse';
@@ -431,13 +432,16 @@ let paperAlt: PaperData | null = null;
 /** 即時的加權指數（只有富果／證交所即時行情才有；收盤回放是模擬走勢，不能用）。 */
 export type LiveIndex = () => IndexPoint[] | null;
 let liveIndex: LiveIndex = () => null;
+/** 最新收盤資料的日期（close.json）：檢查預測檔是不是最新的。 */
+let lastTradeDate: string | null = null;
 let liveTimer: ReturnType<typeof setInterval> | undefined;
 
 export function renderPredictPage(root: HTMLElement, onStock: (code: string) => void, getLive?: LiveIndex): void {
   if (getLive) liveIndex = getLive;
   if (!loading) {
     loading = true;
-    void Promise.all([loadPredict(), loadPredictIntraday(), loadAnalogs(), loadPaper(), loadPaperBacktest(), loadPaperBacktest('paper-backtest-novt.json')]).then(([d, i, a, pp, pb, pa]) => {
+    void Promise.all([loadPredict(), loadPredictIntraday(), loadAnalogs(), loadPaper(), loadPaperBacktest(), loadPaperBacktest('paper-backtest-novt.json'), loadCloseFile()]).then(([d, i, a, pp, pb, pa, cf]) => {
+      lastTradeDate = cf?.date ?? null;
       data = d;
       intra = i;
       analogLib = a;
@@ -460,6 +464,8 @@ function liveState(): { open: number | null; bars: ReturnType<typeof liveBars>['
   const series = liveIndex();
   if (!series) return { ...none, ok: false, why: '需要富果或證交所即時行情' };
   if (!intra?.ready || taipeiDate(Date.now()) <= intra.next.after) return { ...none, ok: false, why: '今天的模型資料還沒準備好' };
+  // 預測檔比最新的收盤資料舊（例如手機存著前幾天的檔案）：昨收會是錯的，不畫
+  if (lastTradeDate && intra.next.after < lastTradeDate) return { ...none, ok: false, why: `預測資料停在 ${intra.next.after}（最新收盤是 ${lastTradeDate}），請重新整理` };
   // 開盤前也能看（開盤前的預測）；週末、收盤後沒有今天的資料時就是休市
   const r = liveBars(series, sessionOpenMs(new Date()));
   if (!r.open && sessionAt(Date.now()) === 'closed') return { ...none, ok: false, why: '今天休市' };
