@@ -477,6 +477,11 @@ function drawIntra(root: HTMLElement): void {
   const el = root.querySelector<HTMLElement>('#pd-intra');
   if (!el) return;
   const live = liveState();
+  // 收盤後：今天的資料已經進回放清單的話，改成回放今天（才能拉預測時間復盤），不要卡在即時
+  const today = taipeiDate(Date.now());
+  const closed = sessionAt(Date.now()) === 'closed';
+  const hasToday = !!intra?.recent?.some((r) => r.date === today);
+  if (closed && hasToday && (intraState.mode === 'live' || !intraState.mode)) intraState.mode = today;
   if (!intraState.mode) intraState.mode = live.ok ? 'live' : '';
   el.outerHTML = intradayHtml(intra, intraState, live, analogLib);
   bindIntra(root);
