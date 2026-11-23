@@ -297,7 +297,7 @@ function heatHtml(h: HeatIndex | null): string {
       <div class="pd-table-wrap"><table class="pd-table"><thead><tr><th>元件</th><th class="num">權重</th><th class="num">今天</th></tr></thead><tbody>
         ${h.components.map((x) => `<tr><td>${esc(x.group)}・${esc(x.name)}</td><td class="num">${num(x.weight * 100, 1)}%</td><td class="num">${x.score == null ? '—' : num(x.score, 0)}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="muted pd-small">權重由程式自己挑：目標是「熱度越低、之後 ${wf?.horizon ?? 60} 個交易日加權指數漲越多」，再往平均拉回一半避免過度配適。${wf?.ic?.length ? `逐年往前滾（只用之前的資料挑權重）的樣本外相關：最佳權重 ${num(avg(wf.ic), 2)}、平均權重 ${num(avg(wf.icEqual), 2)}（正值才代表有用）。` : ''}跌破 ${t.buy} 之後 60 日加權指數平均 ${e['60'].avg == null ? '—' : pctTxt(e['60'].avg!)}（隨便哪一天 ${pctTxt(e['60'].allAvg)}）。${h.missing.length ? `還沒有資料：${h.missing.map(esc).join('、')}。` : ''}</p>
+      <p class="muted pd-small">權重由程式自己挑：目標是「熱度越低、之後 ${wf?.horizon ?? 60} 個交易日加權指數漲越多」，再往平均拉回一半避免過度配適。${wf?.ic?.length ? `逐年往前滾（只用之前的資料挑權重）的樣本外相關：最佳權重 ${num(avg(wf.ic), 2)}、平均權重 ${num(avg(wf.icEqual), 2)}（正值才代表有用）。${wf.method === 'equal' ? '最佳化沒有贏平均權重，所以目前<b>用平均權重</b>。' : ''}` : ''}跌破 ${t.buy} 之後 60 日加權指數平均 ${e['60'].avg == null ? '—' : pctTxt(e['60'].avg!)}（隨便哪一天 ${pctTxt(e['60'].allAvg)}）。${h.missing.length ? `還沒有資料：${h.missing.map(esc).join('、')}。` : ''}</p>
     </details>
   </section>`;
 }
