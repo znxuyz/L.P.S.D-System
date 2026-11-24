@@ -270,14 +270,14 @@ function heatRadar(items: Array<{ name: string; score: number }>, buy: number, h
   </svg>`;
 }
 
-/** 找底燈號：熱度低＝黃燈（籌碼乾淨但可能還在跌），再加上融資維持率跌破門檻（斷頭潮）＝綠燈。 */
+/** 找底燈號：熱度低＝黃燈（籌碼乾淨但可能還在跌）；融資維持率跌破門檻（斷頭潮）＝綠燈（驗證過只有這個有用）。 */
 function bottomLight(h: HeatIndex): string {
   const b = h.bottom;
   if (!b) return '';
   const r = b.ratio == null ? '' : `融資維持率 ${num(b.ratio, 1)}%（${esc(b.ratioDate ?? '')}）`;
   const [cls, label, why] =
     b.state === 'go'
-      ? ['go', '綠燈・確認到底', `熱度低＋斷頭潮（${esc(b.trigger ?? '')} 起，還剩 ${b.left} 個交易日）；${r}`]
+      ? ['go', '綠燈・確認到底', `斷頭潮：融資維持率跌破 ${b.ratioTh}%（${esc(b.trigger ?? '')} 起，還剩 ${b.left} 個交易日）；${r}`]
       : b.state === 'watch'
         ? ['watch', '黃燈・還沒確認', `籌碼乾淨，但還沒出現斷頭潮；${r}，跌破 ${b.ratioTh}% 才亮綠燈`]
         : ['off', '沒亮', `熱度還沒低於 ${h.thresholds.buy}；${r}`];

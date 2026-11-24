@@ -265,6 +265,7 @@ def rule_study(score: pd.Series, close: pd.Series, ratio: pd.Series | None) -> l
         "低檔（20 日內 < 20）反彈 10 分以上": (mn20 < 20) & (s - mn20 >= 10) & (s < 50),
         "指數創 60 日新低、熱度沒創新低（背離）": low60 & (s > mn60 + 10) & (s < 40),
         "熱度 < 30 ＋ 融資維持率 < 140%": (s < BUY) & (r < 140),
+        "只看融資維持率 < 140%（斷頭潮）": r < 140,
     }
     out = []
     f20, f60 = close.shift(-20) / close - 1, close.shift(-60) / close - 1
@@ -539,17 +540,17 @@ def main() -> None:
     ratio = None
     if mr and mr.get("rows"):
         ratio = pd.Series({pd.Timestamp(r[0]): r[1] for r in mr["rows"] if r[1]}, dtype=float)
-    # 找底燈號：熱度 < 30 ＝黃燈（籌碼乾淨，可能還在跌）；熱度 < 30 且融資維持率 < 140%（斷頭潮）＝綠燈，之後 20 個交易日內都算
+    # 找底燈號：熱度 < 30 ＝黃燈（籌碼乾淨，可能還在跌）；融資維持率 < 140%（斷頭潮）＝綠燈，之後 20 個交易日內都算
     bottom = {"state": "watch" if now < BUY else "none", "ratio": None, "ratioDate": None, "trigger": None, "left": 0, "ratioTh": 140, "hold": 20}
     if ratio is not None and len(ratio):
         rr = ratio.reindex(score.index).ffill(limit=3)
-        hit = (score < BUY) & (rr < 140)
+        hit = rr < 140  # 完整 10 元件驗證：加上「熱度 < 30」反而只剩 1 次，綠燈只看斷頭潮
         pos = np.flatnonzero(hit.values[-20:])
         bottom["ratio"], bottom["ratioDate"] = float(ratio.iloc[-1]), str(ratio.index[-1].date())
         if len(pos):
             k = len(hit) - 20 + int(pos[-1])
             bottom.update(state="go", trigger=str(score.index[k].date()), left=20 - (len(hit) - 1 - k))
-    log(f"找底燈號：{ {'go': '綠燈（熱度低＋斷頭潮）', 'watch': '黃燈（熱度低，還沒斷頭）', 'none': '沒亮'}[bottom['state']] }，融資維持率 {bottom['ratio']}（{bottom['ratioDate']}）")
+    log(f"找底燈號：{ {'go': '綠燈（斷頭潮）', 'watch': '黃燈（熱度低，還沒斷頭）', 'none': '沒亮'}[bottom['state']] }，融資維持率 {bottom['ratio']}（{bottom['ratioDate']}）")
     rules = rule_study(oos if len(oos) and not use_equal else score, twii, ratio)
     pf = lambda x: "  —  " if x is None else f"{x * 100:+5.1f}%"
     log("\n找底規則比較（樣本外熱度；之後的加權指數報酬）：")
