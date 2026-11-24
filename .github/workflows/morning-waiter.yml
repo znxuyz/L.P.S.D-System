@@ -1,0 +1,57 @@
+name: Morning waiter
+
+# GitHub 的排程（schedule）常延遲好幾個小時：11/24 早上 05:17～08:31 的 8 次排程，實際 13:19～18:13 才跑，
+# 開盤前（台北 05:00～08:45）的事前存檔全部沒存到。手動觸發（workflow_dispatch）不會延遲，所以用這個工作：
+# 一直在背景等，到台北平日 05:35、07:35 就觸發 morning-forecast；每次最多等 5 小時 40 分，到時間就重新觸發自己接力。
+# 同時只留一個（新的取代舊的，重新計算要等多久）；每天台北 23:05 的排程是備援，萬一接力斷了會接回來。
+on:
+  workflow_dispatch:
+  schedule:
+    # 備援：萬一接力斷了，排程（就算延遲）也會把它叫起來
+    - cron: '5 15 * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: morning-waiter
+  cancel-in-progress: true
+
+jobs:
+  wait:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: 等到台北 05:35／07:35（平日）
+        id: w
+        run: |
+          now=$(date +%s)
+          best=0
+          for add in 0 1 2 3 4 5 6 7; do
+            day=$(TZ=Asia/Taipei date -d "@$(( now + add * 86400 ))" +%F)
+            for hm in 05:35 07:35; do
+              t=$(TZ=Asia/Taipei date -d "$day $hm" +%s)
+              wd=$(TZ=Asia/Taipei date -d "$day" +%u)
+              if [ "$wd" -le 5 ] && [ "$t" -gt "$now" ] && { [ "$best" -eq 0 ] || [ "$t" -lt "$best" ]; }; then best=$t; fi
+            done
+          done
+          wait=$(( best - now ))
+          echo "下一次：$(TZ=Asia/Taipei date -d "@$best" '+%F %H:%M')（台北），還要 $(( wait / 60 )) 分鐘"
+          if [ "$wait" -le $(( 340 * 60 )) ]; then
+            sleep "$wait"
+            echo "fire=true" >> "$GITHUB_OUTPUT"
+          else
+            sleep $(( 340 * 60 ))
+          fi
+      - name: 觸發開盤前預測
+        if: steps.w.outputs.fire == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run morning-forecast.yml --repo "$GITHUB_REPOSITORY" --ref main && echo "已觸發 morning-forecast"
+      - name: 接力（重新觸發自己）
+        # 被新的取代（cancelled）時不要接力，不然會互相取消、一直重來
+        if: success() || failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sleep 5; gh workflow run morning-waiter.yml --repo "$GITHUB_REPOSITORY" --ref main
