@@ -77,7 +77,8 @@ async function updateMargin(dir: string): Promise<void> {
         writeFileSync(join(out, `${d}.json`), JSON.stringify(m));
         console.log(`  ${d}：融資 ${Math.round(m.finAmt / 1e5).toLocaleString()} 億、${Object.keys(m.perStock).length} 檔`);
       } else {
-        empty.add(d);
+        // 今天的可能只是還沒公布（約 21:00 後）：不記成沒資料，下一輪再抓
+        if (d !== now.toISOString().slice(0, 10)) empty.add(d);
         console.log(`  ${d}：沒有資料`);
       }
     } catch (e) {
