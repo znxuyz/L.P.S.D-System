@@ -62,7 +62,8 @@ jobs:
       # 三個網站各一組、同時進行（每組只對自己的網站發請求，間隔不變，不會加重單一網站的負擔）。
       # 每次最多跑 50 分鐘，時間到就停下來存檔，下一次從斷點繼續。
       - name: 抓資料（證交所／櫃買、公開資訊觀測站、集保 平行）
-        timeout-minutes: 60
+        # 抓資料最多 40 分鐘（DEADLINE），48 分鐘還沒結束的程式由看門狗停掉；之後還要整理、存檔、事前存檔、型態統計（約 20 分鐘）
+        timeout-minutes: 90
         env:
           FUGLE_API_KEY: ${{ secrets.FUGLE_API_KEY }}
           PRIVATE_DATA_TOKEN: ${{ secrets.PRIVATE_DATA_TOKEN }}
@@ -78,7 +79,7 @@ jobs:
         run: |
           set +e
           START_S=$(date +%s)
-          export DEADLINE=$(( START_S * 1000 + 50 * 60 * 1000 ))
+          export DEADLINE=$(( START_S * 1000 + 40 * 60 * 1000 ))
           (
             if [ "$HOURLY" != true ]; then node scripts/active-etf.ts .data; node scripts/stock-list.ts .data; fi
             # 股票名稱（含已下市）：每季抽一天抓一次，抓過就不再抓
@@ -126,7 +127,11 @@ jobs:
           # 期交所：外資台指期淨未平倉（每月一次請求）
           # 臺指期近月日 K（一般時段＋夜盤）也在這一組（同一個網站，依序請求）
           ( PART=futures node scripts/market-risk.ts .data; node scripts/taifex-daily.ts .data ) > taifex.log 2>&1 &
-          wait
+          # 看門狗：48 分鐘還沒抓完的就停掉（2010 年起的回補量很大；寧可這一組少存一點，也不要整輪逾時什麼都沒存）
+          ( sleep $(( 48 * 60 )); echo "看門狗：48 分鐘到，停掉還在抓的程式"; pkill -f "node scripts/" ) > watchdog.log 2>&1 &
+          WD=$!
+          wait $(jobs -p | grep -v "^$WD$")
+          kill $WD 2>/dev/null
           # 大盤風險指標（融資維持率、外資期貨）：兩組都抓完再整理
           node scripts/market-risk.ts .data > risk.log 2>&1
           # 集保補完之後重算一次千張大戶變化（不發請求的部分很快）
@@ -146,9 +151,9 @@ jobs:
           if [ "$HOURLY" != true ] || [ ! -f .data/pattern-stats.json ]; then
             DEADLINE=$(( $(date +%s) * 1000 + 12 * 60 * 1000 )) node --import ./scripts/lib/ts-resolve.mjs scripts/pattern-stats.ts .data > stats.log 2>&1
           fi
-          for f in twse mops tdcc taifex us fugle risk chips2 archive stats; do [ -f $f.log ] || continue; echo "::group::$f"; tail -n 80 $f.log; echo "::endgroup::"; done
+          for f in watchdog twse mops tdcc taifex us fugle risk chips2 archive stats; do [ -f $f.log ] || continue; echo "::group::$f"; tail -n 80 $f.log; echo "::endgroup::"; done
           # 跑滿時間代表還有沒補完的資料
-          if [ $(( $(date +%s) - START_S )) -ge $(( 45 * 60 )) ]; then echo "MORE=true" >> "$GITHUB_ENV"; fi
+          if [ $(( $(date +%s) - START_S )) -ge $(( 38 * 60 )) ]; then echo "MORE=true" >> "$GITHUB_ENV"; fi
 
       # data 分支只留一個版本（舊版本沒有用，避免儲存庫越來越大）
       - name: 存回 data 分支
