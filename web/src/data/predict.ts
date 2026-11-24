@@ -121,7 +121,7 @@ export interface PredictData {
     cost: number;
     verdict: Verdict;
     rule: { a: number; b: number; gapMean: number; gapSd: number };
-    drivers: Array<{ name: string; value: number | null; contrib: number | null; w: number }>;
+    drivers: Array<{ id?: string; name: string; value: number | null; contrib: number | null; w: number }>;
     backtest: {
       from: string;
       days: number;

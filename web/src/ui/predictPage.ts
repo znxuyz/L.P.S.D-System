@@ -434,7 +434,12 @@ function dayTradeHtml(d: NonNullable<PredictData['dayTrade']>, f?: PredictData['
     .filter((x) => x.contrib != null)
     .sort((a, c) => Math.abs(c.contrib!) - Math.abs(a.contrib!))
     .slice(0, 4)
-    .map((x) => `<li><span class="${cls(x.contrib)}">${x.contrib! > 0 ? '▲' : '▼'}</span>${esc(x.name)}</li>`)
+    .map((x) => {
+      // 數值（報酬類用 %）＋ 對預測的影響方向：「▲推升」不是「它上漲」
+      const pctIds = ['prevIntra', 'r1', 'r5', 'r20', 'range', 'vol20', 'usSox', 'usTsm', 'usSpx', 'night'];
+      const v = x.value != null && x.id && pctIds.includes(x.id) ? ` <b class="num ${cls(x.value)}">${pctTxt(x.value, 1)}</b>` : '';
+      return `<li>${esc(x.name)}${v} <span class="${cls(x.contrib)}">→ ${x.contrib! > 0 ? '▲ 推升預測' : '▼ 壓低預測'}</span></li>`;
+    })
     .join('');
   return `<section class="pd-card glass" id="pd-day">
     <header class="pd-head"><div><p class="eyebrow">Day trade · ${esc(d.code)}</p><h2>${esc(d.name)} 當沖</h2></div>${badge(d.verdict)}</header>
@@ -446,7 +451,7 @@ function dayTradeHtml(d: NonNullable<PredictData['dayTrade']>, f?: PredictData['
     </form>
     <p class="pd-bands">依目前的模型：開盤價 ${bands.long ? `<b class="up">${esc(bands.long === 'any' ? '任何價格' : bands.long)}</b> 做多` : '<span class="muted">不會出現做多訊號</span>'}；
       ${bands.short ? `<b class="down">${esc(bands.short === 'any' ? '任何價格' : bands.short)}</b> 做空` : '<span class="muted">不會出現做空訊號</span>'}；其他價格觀望。</p>
-    ${drivers ? `<h3 class="pd-sub">昨天收盤後影響最大的因素</h3><ul class="pd-drivers is-inline">${drivers}</ul>` : ''}
+    ${drivers ? `<h3 class="pd-sub">影響最大的因素 <small class="muted">（數值是昨天／前一晚的實際漲跌，箭頭是它把「開盤到收盤」的預測往上或往下推；例如美股大跌常是開低之後盤中反彈）</small></h3><ul class="pd-drivers is-inline">${drivers}</ul>` : ''}
     <h3 class="pd-sub">回測（${(b.from ?? '').slice(0, 7)} 起，樣本外，開盤進場、收盤出場）</h3>
     <dl class="pd-stats">
       <div><dt>出手次數</dt><dd class="num">${num(b.trades)} <small class="muted">／${num(b.days)} 天（多 ${b.longs}、空 ${b.shorts}）</small></dd></div>

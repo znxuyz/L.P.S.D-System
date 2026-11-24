@@ -849,7 +849,7 @@ if (dt) {
     verdict: eq > 1 && taken.length >= 30 ? 'signal' : 'none',
     // 預測（開盤到收盤的報酬）＝ a ＋ b ×（跳空－平均）÷ 標準差（截斷在 ±4）
     rule: { a: r4(a), b: r4(fit.b[1]), gapMean: r4(fit.st.mean[0]), gapSd: r4(fit.st.sd[0]) },
-    drivers: DT.map((d, j) => ({ name: d.name, value: j === 0 ? null : r4(xNext[j]), contrib: j === 0 ? null : r4(fit!.b[j + 1] * zNext[j]), w: r4(fit!.b[j + 1]) })),
+    drivers: DT.map((d, j) => ({ id: d.id, name: d.name, value: j === 0 ? null : r4(xNext[j]), contrib: j === 0 ? null : r4(fit!.b[j + 1] * zNext[j]), w: r4(fit!.b[j + 1]) })),
     backtest: {
       from: trades[0]?.[0] ?? null,
       days: trades.length,
