@@ -88,3 +88,11 @@ jobs:
             git push -q origin HEAD:forecasts
             echo "已推送開盤前存檔"
           fi
+
+      # 由等待工作（workflow_dispatch＋GITHUB_TOKEN）啟動時，GitHub 不會再用 workflow_run 連鎖觸發部署，
+      # 開盤前網站就停在前一晚的預測（11/25 當沖卡片還是沒看到美股大跌的版本），所以這裡直接觸發部署
+      - name: 更新網站
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-pages.yml --repo "$GITHUB_REPOSITORY" --ref main && echo "已觸發部署"
