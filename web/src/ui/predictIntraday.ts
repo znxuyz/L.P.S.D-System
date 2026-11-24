@@ -93,7 +93,26 @@ const pctTxt = (v: number, d = 2) => `${v > 0 ? '+' : ''}${num(v * 100, d)}%`;
 const cls = (v: number) => (v > 0 ? 'up' : v < 0 ? 'down' : '');
 
 /** 加權指數 → 顯示的標的價位：00631L（β 倍）、台指期（前一天收盤時的期現貨比例）、加權指數本身。 */
-const convOf = (v: View, d: IntradayData) => (x: number) => (v.L0 ? toLeveraged(x, v.P0, v.L0, d.beta) : v.T0 ? (x * v.T0) / v.P0 : x);
+/**
+ * 漲跌停：00631L 是 2 倍槓桿 ETF，漲跌幅 ±20%（10% × 2 倍）；台指期 ±10%；加權指數沒有。
+ * 換算後的價位一律夾在漲跌停之間（大盤還能漲，00631L 漲停了也不會再高）。
+ */
+export function limitBand(prev: number, pct: number, tick: number): [number, number] {
+  const r = (x: number) => Math.round(x * 1e6) / 1e6;
+  return [r(Math.ceil((prev * (1 - pct)) / tick - 1e-9) * tick), r(Math.floor((prev * (1 + pct)) / tick + 1e-9) * tick)];
+}
+const etfTick = (p: number) => (p < 50 ? 0.01 : 0.05);
+const convOf = (v: View, d: IntradayData) => {
+  if (v.L0) {
+    const [lo, hi] = limitBand(v.L0, 0.2, etfTick(v.L0));
+    return (x: number) => Math.min(hi, Math.max(lo, toLeveraged(x, v.P0, v.L0!, d.beta)));
+  }
+  if (v.T0) {
+    const [lo, hi] = limitBand(v.T0, 0.1, 1);
+    return (x: number) => Math.min(hi, Math.max(lo, (x * v.T0!) / v.P0));
+  }
+  return (x: number) => x;
+};
 export type IntraAsset = 'L' | 'ix' | 'tx';
 export const ASSET_NAME: Record<IntraAsset, string> = { L: '00631L', ix: '加權指數', tx: '台指期（日盤）' };
 
@@ -635,8 +654,8 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
     </div>
     <dl class="pd-stats pd-intra-stats">
       <div><dt>預測時間</dt><dd class="num">${kLabel(v.k)}</dd></div>
-      <div><dt>${now == null ? '預測開盤' : '現在'}</dt><dd class="num">${num(L(now ?? f.open), 2)}${now == null ? ` <small class="${cls(f.open - v.P0)}">${pctTxt(Math.log(f.open / v.P0) * lev)}</small>` : ''}</dd></div>
-      <div><dt>${v.k >= 0 ? '預測收盤<small class="muted">（開盤後方向沒把握，回測約 52～57%）</small>' : '預測收盤（方向預測）'}</dt><dd class="num ${v.k >= 0 ? '' : cls((mainClose ?? v.P0) - v.P0)}">${mainClose ? num(L(mainClose), 2) : '—'} <small>${mainClose ? pctTxt(Math.log(mainClose / v.P0) * lev) : ''}</small></dd></div>
+      <div><dt>${now == null ? '預測開盤' : '現在'}</dt><dd class="num">${num(L(now ?? f.open), 2)}${now == null ? ` <small class="${cls(f.open - v.P0)}">${pctTxt(L(f.open) / L(v.P0) - 1)}</small>` : ''}</dd></div>
+      <div><dt>${v.k >= 0 ? '預測收盤<small class="muted">（開盤後方向沒把握，回測約 52～57%）</small>' : '預測收盤（方向預測）'}</dt><dd class="num ${v.k >= 0 ? '' : cls((mainClose ?? v.P0) - v.P0)}">${mainClose ? num(L(mainClose), 2) : '—'} <small>${mainClose ? pctTxt(L(mainClose) / L(v.P0) - 1) : ''}</small></dd></div>
       <div><dt>收盤約 80% 區間</dt><dd class="num">${last ? `${num(L(last.lo), 2)}～${num(L(last.hi), 2)}` : '—'}</dd></div>
       <div><dt>預估今日最高／最低</dt><dd class="num"><span class="up">${num(L(f.dayHigh), 2)}</span>／<span class="down">${num(L(f.dayLow), 2)}</span></dd></div>
       ${actualClose != null ? `<div><dt>實際收盤／最高／最低</dt><dd class="num">${num(L(actualClose), 2)} <small>${num(L(Math.max(...v.ix.map((x) => x[1]))), 2)}／${num(L(Math.min(...v.ix.map((x) => x[2]))), 2)}</small></dd></div>` : ''}

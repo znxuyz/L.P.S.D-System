@@ -49,9 +49,12 @@ export async function fillDaily(el: HTMLElement, asset: DailyAsset, txd?: Array<
   const p90 = cal?.p90 ?? 1.28;
   // 主線：方向預測（一定押方向）；沒有相似走勢時才退回不會動
   const dp = an ? directionPath(an, 5, typicalMove(sigma, H)) : null;
+  // 漲跌停：00631L 每天 ±20%、台指期 ±10%（加權指數沒有）；t 天後最多 (1±幅度)^t
+  const lim = asset === 'L' ? 0.2 : asset === 'tx' ? 0.1 : 0;
+  const cap = (x: number, t: number) => (lim ? Math.min(last.close * (1 + lim) ** t, Math.max(last.close * (1 - lim) ** t, x)) : x);
   const path = Array.from({ length: H }, (_, k) => {
     const t = k + 1;
-    return { t, mid: dp ? last.close * Math.exp(dp[k]) : last.close, lo: last.close * Math.exp(p10 * sigma * Math.sqrt(t)), hi: last.close * Math.exp(p90 * sigma * Math.sqrt(t)) };
+    return { t, mid: cap(dp ? last.close * Math.exp(dp[k]) : last.close, t), lo: cap(last.close * Math.exp(p10 * sigma * Math.sqrt(t)), t), hi: cap(last.close * Math.exp(p90 * sigma * Math.sqrt(t)), t) };
   });
   const end = path[H - 1];
   const up = dp ? dp[H - 1] >= 0 : null;

@@ -96,7 +96,10 @@ async function show(sec: HTMLElement, rev: RevStocks | undefined): Promise<void>
   const last = candles[candles.length - 1];
   // 主線：方向預測（一定押方向）；區間仍以營收分數組的平均為中心
   const dp = an ? directionPath(an, 5, typicalMove(f.sigma, FH)) : null;
-  const path = f.path.map((p, i) => ({ ...p, mid: dp ? last.close * Math.exp(dp[i]) : p.mid }));
+  // 漲跌停：個股每天 ±10%（槓桿 ETF ±20%）；t 天後最多 (1±幅度)^t
+  const lim = /L$/.test(st.code) ? 0.2 : 0.1;
+  const cap = (x: number, t: number) => Math.min(last.close * (1 + lim) ** t, Math.max(last.close * (1 - lim) ** t, x));
+  const path = f.path.map((p, i) => ({ ...p, mid: cap(dp ? last.close * Math.exp(dp[i]) : p.mid, i + 1), lo: cap(p.lo, i + 1), hi: cap(p.hi, i + 1) }));
   const end = path[path.length - 1];
   const m1 = path[20];
   const up = end.mid >= last.close;

@@ -47,3 +47,13 @@ describe('knockout（相似日淘汰賽）', () => {
     expect(out.find((l) => l.date === 'd')!.out).toBeGreaterThan(0);
   });
 });
+
+import { limitBand } from '../ui/predictIntraday';
+describe('limitBand（漲跌停）', () => {
+  it('00631L 昨收 22.50 → 漲停 27.00、跌停 18.00', () => {
+    expect(limitBand(22.5, 0.2, 0.01)).toEqual([18, 27]);
+  });
+  it('漲停往下取到跳動單位、跌停往上取', () => {
+    expect(limitBand(21.24, 0.2, 0.01)).toEqual([17, 25.48]);
+  });
+});
