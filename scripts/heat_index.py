@@ -316,9 +316,34 @@ def finmind(dataset: str, data_id: str, start: str) -> pd.DataFrame | None:
         return None
 
 
+_FM: dict[tuple[str, str], pd.DataFrame | None] = {}
+
+
+def finmind_cached(dataset: str, data_id: str, start: str) -> pd.DataFrame | None:
+    k = (dataset, data_id)
+    if k not in _FM:
+        _FM[k] = finmind(dataset, data_id, start)
+    return None if _FM[k] is None else _FM[k].copy()
+
+
+def foreign_net_fm(start: str) -> pd.Series | None:
+    """外資台指期淨未平倉（大台＋小台÷4），FinMind 版；期交所舊月份抓不到時拿來補洞。"""
+    parts = []
+    for code, k in (("TX", 1.0), ("MTX", 0.25)):
+        df = finmind_cached("TaiwanFuturesInstitutionalInvestors", code, start)
+        if df is None or "institutional_investors" not in df:
+            return None
+        df = df[df["institutional_investors"].astype(str).str.contains("外資")]
+        net = pd.to_numeric(df["long_open_interest_balance_volume"]) - pd.to_numeric(df["short_open_interest_balance_volume"])
+        parts.append((net * k).groupby(df["date"]).sum())
+    out = parts[0].add(parts[1], fill_value=0)
+    out.index = pd.to_datetime(out.index)
+    return out
+
+
 def retail_mtx(start: str) -> pd.Series | None:
     """散戶小台淨部位比＝−（三大法人小台淨未平倉）÷ 全市場小台未平倉。"""
-    inst = finmind("TaiwanFuturesInstitutionalInvestors", "MTX", start)
+    inst = finmind_cached("TaiwanFuturesInstitutionalInvestors", "MTX", start)
     if inst is None:
         return None
     try:
@@ -351,6 +376,12 @@ def build_tw(d: Path, twii: pd.Series) -> tuple[pd.DataFrame, dict[str, str]]:
         df = df.reindex(days).ffill(limit=5)
         comp["twMargin"] = pct_rank(df["ratio"])
         comp["twMarginChg"] = pct_rank(df["finAmt"].pct_change(20))
+        miss = int(df["foreignNet"].isna().sum())
+        if miss > 20:
+            fm = foreign_net_fm(str(days[0].date()))
+            if fm is not None:
+                df["foreignNet"] = df["foreignNet"].fillna(fm.reindex(days))
+                log(f"  外資台指期：期交所缺 {miss} 天，用 FinMind 補到剩 {int(df['foreignNet'].isna().sum())} 天")
         if df["foreignNet"].notna().sum() > WINDOW:
             comp["twForeign"] = pct_rank(df["foreignNet"])
         src.update(twMargin="market-risk.json", twMarginChg="market-risk.json", twForeign="market-risk.json")
