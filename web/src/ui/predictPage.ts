@@ -521,7 +521,13 @@ function liveState(): { open: number | null; bars: ReturnType<typeof liveBars>['
   if (lastTradeDate && intra.next.after < lastTradeDate) return { ...none, ok: false, why: `預測資料停在 ${intra.next.after}（最新收盤是 ${lastTradeDate}），請重新整理` };
   // 開盤前也能看（開盤前的預測）；週末、收盤後沒有今天的資料時就是休市
   const r = liveBars(series, sessionOpenMs(new Date()));
-  if (!r.open && sessionAt(Date.now()) === 'closed') return { ...none, ok: false, why: '今天休市' };
+  if (!r.open && sessionAt(Date.now()) === 'closed') {
+    const tp = new Date(Date.now() + 8 * 3600_000);
+    const weekday = tp.getUTCDay() >= 1 && tp.getUTCDay() <= 5;
+    const afterClose = tp.getUTCHours() * 60 + tp.getUTCMinutes() >= 13 * 60 + 30;
+    // 平日收盤後：即時行情已停，今天的回放要等收盤資料更新（國定假日則是休市）
+    return { ...none, ok: false, why: weekday && afterClose ? '今天已收盤，回放約 15:00～19:00 收盤資料更新後出現' : '今天休市' };
+  }
   return { ...r, ok: true, why: '' };
 }
 
