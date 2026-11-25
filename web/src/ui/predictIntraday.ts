@@ -66,7 +66,7 @@ export interface IntradayData {
     rows: Array<{ asOf: string; date: string; P0: number; actual: number; blend: number; model: number; avg: number; rmse: Record<string, number>; hiErr: number; loErr: number }>;
   };
   next: { after: string; P0: number; L0: number | null; T0?: number | null; ctx: Record<keyof DailyCtx, number | null> };
-  recent: Array<{ date: string; P0: number; L0: number | null; T0?: number | null; ix: Bar[]; ctx: Record<keyof DailyCtx, number | null> }>;
+  recent: Array<{ date: string; P0: number; L0: number | null; Lday?: [number, number, number, number] | null; T0?: number | null; ix: Bar[]; ctx: Record<keyof DailyCtx, number | null> }>;
 }
 
 const ctxOf = (c: Record<keyof DailyCtx, number | null>): DailyCtx => ({
@@ -108,7 +108,13 @@ const convOf = (v: View, d: IntradayData) => {
     // 即時：用 00631L 實際成交價對齊「現在」那一點（整條線乘同一個比例），預測從真實價格出發
     const last = v.ix.length ? v.ix[v.ix.length - 1][3] : null;
     const raw = last ? toLeveraged(last, v.P0, v.L0, d.beta) : 0;
-    const k = v.live && v.Lnow && raw > 0 ? v.Lnow / raw : 1;
+    let k = v.live && v.Lnow && raw > 0 ? v.Lnow / raw : 1;
+    // 回放：開盤、收盤兩個實價的比例取幾何平均（整天同一個比例；開盤與收盤都很接近實價）
+    if (!v.live && v.Lday && v.ix.length) {
+      const ro = toLeveraged(v.ix[0][0], v.P0, v.L0, d.beta);
+      const rc = toLeveraged(v.ix[v.ix.length - 1][3], v.P0, v.L0, d.beta);
+      if (ro > 0 && rc > 0 && v.Lday[0] > 0 && v.Lday[3] > 0) k = Math.sqrt((v.Lday[0] / ro) * (v.Lday[3] / rc));
+    }
     // 昨收一定是 00631L 真正的昨收（不乘比例）
     return (x: number) => (x === v.P0 ? v.L0! : Math.min(hi, Math.max(lo, k * toLeveraged(x, v.P0, v.L0!, d.beta))));
   }
@@ -150,6 +156,8 @@ interface View {
   T0?: number | null;
   /** 即時：00631L 自己的最新成交價（有的話用它校正換算，00631L 常跟「加權指數 × 倍數」差好幾 %）。 */
   Lnow?: number | null;
+  /** 回放：00631L 當天真正的開高低收（用開盤、收盤的實價校正換算，實際收盤／高低直接顯示實價）。 */
+  Lday?: [number, number, number, number] | null;
   ctx: DailyCtx;
   /** 已經知道的 K 棒（回放是整天）。 */
   ix: Bar[];
@@ -602,7 +610,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
     const day = d.recent.find((r) => r.date === st.mode) ?? d.recent[d.recent.length - 1];
     st.mode = day.date;
     const rp = d.replay;
-    v = { live: false, P0: day.P0, L0: day.L0, ctx: ctxOf(day.ctx), ix: day.ix, open: day.ix[0][0], k: Math.max(-1, Math.min(BARS - 1, st.k)), m: rp?.m ?? d.model, dm: rp?.dm ?? d.day, choice: rp?.choice ?? d.choice, plan: d.rangeTrade?.replayPlan, ref: d.rangeTrade?.replayRef };
+    v = { live: false, P0: day.P0, L0: day.L0, Lday: day.Lday ?? null, ctx: ctxOf(day.ctx), ix: day.ix, open: day.ix[0][0], k: Math.max(-1, Math.min(BARS - 1, st.k)), m: rp?.m ?? d.model, dm: rp?.dm ?? d.day, choice: rp?.choice ?? d.choice, plan: d.rangeTrade?.replayPlan, ref: d.rangeTrade?.replayRef };
   }
   if (asset !== 'L') {
     const T0 = v.live ? d.next.T0 : d.recent.find((r) => r.date === st.mode)?.T0;
@@ -665,7 +673,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
       <div><dt>${v.k >= 0 ? '預測收盤<small class="muted">（開盤後方向沒把握，回測約 52～57%）</small>' : '預測收盤（方向預測）'}</dt><dd class="num ${v.k >= 0 ? '' : cls((mainClose ?? v.P0) - v.P0)}">${mainClose ? num(L(mainClose), 2) : '—'} <small>${mainClose ? pctTxt(L(mainClose) / L(v.P0) - 1) : ''}</small></dd></div>
       <div><dt>收盤約 80% 區間</dt><dd class="num">${last ? `${num(L(last.lo), 2)}～${num(L(last.hi), 2)}` : '—'}</dd></div>
       <div><dt>預估今日最高／最低</dt><dd class="num"><span class="up">${num(L(f.dayHigh), 2)}</span>／<span class="down">${num(L(f.dayLow), 2)}</span></dd></div>
-      ${actualClose != null ? `<div><dt>實際收盤／最高／最低</dt><dd class="num">${num(L(actualClose), 2)} <small>${num(L(Math.max(...v.ix.map((x) => x[1]))), 2)}／${num(L(Math.min(...v.ix.map((x) => x[2]))), 2)}</small></dd></div>` : ''}
+      ${actualClose != null ? (v.L0 && v.Lday ? `<div><dt>實際收盤／最高／最低<small class="muted">（00631L 實價）</small></dt><dd class="num">${num(v.Lday[3], 2)} <small>${num(v.Lday[1], 2)}／${num(v.Lday[2], 2)}</small></dd></div>` : `<div><dt>實際收盤／最高／最低</dt><dd class="num">${num(L(actualClose), 2)} <small>${num(L(Math.max(...v.ix.map((x) => x[1]))), 2)}／${num(L(Math.min(...v.ix.map((x) => x[2]))), 2)}</small></dd></div>`) : ''}
     </dl>
     ${chart(d, v, f, st, an, ko)}
     ${dayVerdict(lerr, err)}
