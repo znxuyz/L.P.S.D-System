@@ -488,13 +488,16 @@ let paperAlt: PaperData | null = null;
 /** 即時的加權指數（只有富果／證交所即時行情才有；收盤回放是模擬走勢，不能用）。 */
 export type LiveIndex = () => IndexPoint[] | null;
 let liveIndex: LiveIndex = () => null;
+/** 即時的 00631L 成交價（有的話用來校正換算）。 */
+let liveL: () => number | null = () => null;
 /** 最新收盤資料的日期（close.json）：檢查預測檔是不是最新的。 */
 let lastTradeDate: string | null = null;
 let heat: HeatIndex | null = null;
 let liveTimer: ReturnType<typeof setInterval> | undefined;
 
-export function renderPredictPage(root: HTMLElement, onStock: (code: string) => void, getLive?: LiveIndex): void {
+export function renderPredictPage(root: HTMLElement, onStock: (code: string) => void, getLive?: LiveIndex, getL?: () => number | null): void {
   if (getLive) liveIndex = getLive;
+  if (getL) liveL = getL;
   if (!loading) {
     loading = true;
     void Promise.all([loadPredict(), loadPredictIntraday(), loadAnalogs(), loadPaper(), loadPaperBacktest(), loadPaperBacktest('paper-backtest-novt.json'), loadCloseFile(), loadHeatIndex()]).then(([d, i, a, pp, pb, pa, cf, hx]) => {
@@ -517,7 +520,7 @@ export function renderPredictPage(root: HTMLElement, onStock: (code: string) => 
   }, 30_000);
 }
 
-function liveState(): { open: number | null; bars: ReturnType<typeof liveBars>['bars']; ok: boolean; why: string } {
+function liveState(): { open: number | null; bars: ReturnType<typeof liveBars>['bars']; ok: boolean; why: string; lNow?: number | null } {
   const none = { open: null, bars: [] };
   const series = liveIndex();
   if (!series) return { ...none, ok: false, why: '需要富果或證交所即時行情' };
@@ -533,7 +536,8 @@ function liveState(): { open: number | null; bars: ReturnType<typeof liveBars>['
     // 平日收盤後：即時行情已停，今天的回放要等收盤資料更新（國定假日則是休市）
     return { ...none, ok: false, why: weekday && afterClose ? '今天已收盤，回放約 15:00～19:00 收盤資料更新後出現' : '今天休市' };
   }
-  return { ...r, ok: true, why: '' };
+  const lp = liveL();
+  return { ...r, ok: true, why: '', lNow: lp && lp > 0 ? lp : null };
 }
 
 /** 只重畫 5 分 K 預測那一塊。 */
