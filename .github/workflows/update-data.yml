@@ -94,6 +94,9 @@ jobs:
             # 今天的加權指數與 5 分 K 先抓（盤中預測回放、事前存檔要用）；歷史回補放後面
             HISTORY_PARTS=index node scripts/history.ts .data
             INTRADAY_MAX=5 node scripts/intraday.ts .data
+            # 最近幾天的法人、融資融券也先抓（斷頭抄底看的融資維持率不能缺；11/24 就是被法人回補用完時間而沒抓到）
+            INST_MAX=5 node scripts/chips.ts .data
+            PART=margin MARGIN_MAX=5 node scripts/market-risk.ts .data
             node scripts/chips.ts .data
             # 上市融資維持率：每天一次請求，回補 2020 年以後
             PART=margin node scripts/market-risk.ts .data
