@@ -78,6 +78,12 @@ jobs:
           INTRADAY_MAX: '300'
         run: |
           set +e
+          # 回補一輪接一輪（workflow_dispatch）時會把收盤後的排程擠掉：平日 14:30 後今天還沒做過完整的每日更新，這一輪就做完整的
+          TD=$(TZ=Asia/Taipei date +%F); HM=$(TZ=Asia/Taipei date +%H%M); WD=$(TZ=Asia/Taipei date +%u)
+          if [ "$HOURLY" = true ] && [ "$WD" -le 5 ] && [ "$HM" -ge 1430 ] && [ "$(cat .data/.daily-done 2>/dev/null)" != "$TD" ]; then
+            echo "今天還沒做每日完整更新 → 這一輪改成完整更新"; export HOURLY=false
+          fi
+          if [ "$HOURLY" != true ] && [ "$WD" -le 5 ] && [ "$HM" -ge 1430 ]; then echo "$TD" > .data/.daily-done; fi
           START_S=$(date +%s)
           export DEADLINE=$(( START_S * 1000 + 40 * 60 * 1000 ))
           (
