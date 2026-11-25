@@ -66,7 +66,7 @@ export interface IntradayData {
     rows: Array<{ asOf: string; date: string; P0: number; actual: number; blend: number; model: number; avg: number; rmse: Record<string, number>; hiErr: number; loErr: number }>;
   };
   next: { after: string; P0: number; L0: number | null; T0?: number | null; ctx: Record<keyof DailyCtx, number | null> };
-  recent: Array<{ date: string; P0: number; L0: number | null; Lday?: [number, number, number, number] | null; T0?: number | null; ix: Bar[]; ctx: Record<keyof DailyCtx, number | null> }>;
+  recent: Array<{ date: string; P0: number; L0: number | null; Lday?: [number, number, number, number] | null; Lix?: Array<[number, number, number, number] | null> | null; T0?: number | null; ix: Bar[]; ctx: Record<keyof DailyCtx, number | null> }>;
 }
 
 const ctxOf = (c: Record<keyof DailyCtx, number | null>): DailyCtx => ({
@@ -102,19 +102,32 @@ export function limitBand(prev: number, pct: number, tick: number): [number, num
   return [r(Math.ceil((prev * (1 - pct)) / tick - 1e-9) * tick), r(Math.floor((prev * (1 + pct)) / tick + 1e-9) * tick)];
 }
 const etfTick = (p: number) => (p < 50 ? 0.01 : 0.05);
+/** 00631L 換算的校正比例：即時用最新實價對齊「現在」；回放用開盤、收盤實價比例的幾何平均。 */
+function lScale(v: View, d: IntradayData): number {
+  if (!v.L0 || !v.ix.length) return 1;
+  if (v.live) {
+    const raw = toLeveraged(v.ix[v.ix.length - 1][3], v.P0, v.L0, d.beta);
+    return v.Lnow && raw > 0 ? v.Lnow / raw : 1;
+  }
+  if (!v.Lday) return 1;
+  const ro = toLeveraged(v.ix[0][0], v.P0, v.L0, d.beta);
+  const rc = toLeveraged(v.ix[v.ix.length - 1][3], v.P0, v.L0, d.beta);
+  return ro > 0 && rc > 0 && v.Lday[0] > 0 && v.Lday[3] > 0 ? Math.sqrt((v.Lday[0] / ro) * (v.Lday[3] / rc)) : 1;
+}
+/** 回放畫「實際走勢」用的 K 棒：有 00631L 實價就把實價換回指數座標（畫出來就是實價），沒有就用加權指數。 */
+function shownBars(v: View, d: IntradayData): Bar[] {
+  if (!v.L0 || !v.Lix || v.live) return v.ix;
+  const k = lScale(v, d);
+  const inv = (p: number) => v.P0 * Math.exp(Math.log(p / (k * v.L0!)) / d.beta);
+  return v.ix.map((b, i) => {
+    const r = v.Lix![i];
+    return r ? ([inv(r[0]), inv(r[1]), inv(r[2]), inv(r[3])] as Bar) : b;
+  });
+}
 const convOf = (v: View, d: IntradayData) => {
   if (v.L0) {
     const [lo, hi] = limitBand(v.L0, 0.2, etfTick(v.L0));
-    // 即時：用 00631L 實際成交價對齊「現在」那一點（整條線乘同一個比例），預測從真實價格出發
-    const last = v.ix.length ? v.ix[v.ix.length - 1][3] : null;
-    const raw = last ? toLeveraged(last, v.P0, v.L0, d.beta) : 0;
-    let k = v.live && v.Lnow && raw > 0 ? v.Lnow / raw : 1;
-    // 回放：開盤、收盤兩個實價的比例取幾何平均（整天同一個比例；開盤與收盤都很接近實價）
-    if (!v.live && v.Lday && v.ix.length) {
-      const ro = toLeveraged(v.ix[0][0], v.P0, v.L0, d.beta);
-      const rc = toLeveraged(v.ix[v.ix.length - 1][3], v.P0, v.L0, d.beta);
-      if (ro > 0 && rc > 0 && v.Lday[0] > 0 && v.Lday[3] > 0) k = Math.sqrt((v.Lday[0] / ro) * (v.Lday[3] / rc));
-    }
+    const k = lScale(v, d);
     // 昨收一定是 00631L 真正的昨收（不乘比例）
     return (x: number) => (x === v.P0 ? v.L0! : Math.min(hi, Math.max(lo, k * toLeveraged(x, v.P0, v.L0!, d.beta))));
   }
@@ -158,6 +171,8 @@ interface View {
   Lnow?: number | null;
   /** 回放：00631L 當天真正的開高低收（用開盤、收盤的實價校正換算，實際收盤／高低直接顯示實價）。 */
   Lday?: [number, number, number, number] | null;
+  /** 回放：00631L 盤中實價 K 棒（Yahoo），有的話「實際走勢」畫實價。 */
+  Lix?: Array<[number, number, number, number] | null> | null;
   ctx: DailyCtx;
   /** 已經知道的 K 棒（回放是整天）。 */
   ix: Bar[];
@@ -263,8 +278,9 @@ function chart(d: IntradayData, v: View, f: DayForecast, st: IntradayState, an: 
   const H = 320;
   const pad = { l: 54, r: 12, t: 12, b: 24 };
   const L = convOf(v, d);
-  const known = v.ix.slice(0, f.from);
-  const future = st.showActual && !v.live ? v.ix.slice(f.from) : [];
+  const realBars = v.live ? v.ix : shownBars(v, d);
+  const known = realBars.slice(0, f.from);
+  const future = st.showActual && !v.live ? realBars.slice(f.from) : [];
   const series = lineSeries(v, f, an, choiceFor(v.choice, v.k));
   // 淘汰賽打開時不畫一般的相似日線（太亂）
   // 預測 K 棒就是方向預測主線畫成 K 棒：打開時不再畫主線（兩者重疊會把 K 棒蓋掉）
@@ -610,7 +626,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
     const day = d.recent.find((r) => r.date === st.mode) ?? d.recent[d.recent.length - 1];
     st.mode = day.date;
     const rp = d.replay;
-    v = { live: false, P0: day.P0, L0: day.L0, Lday: day.Lday ?? null, ctx: ctxOf(day.ctx), ix: day.ix, open: day.ix[0][0], k: Math.max(-1, Math.min(BARS - 1, st.k)), m: rp?.m ?? d.model, dm: rp?.dm ?? d.day, choice: rp?.choice ?? d.choice, plan: d.rangeTrade?.replayPlan, ref: d.rangeTrade?.replayRef };
+    v = { live: false, P0: day.P0, L0: day.L0, Lday: day.Lday ?? null, Lix: day.Lix ?? null, ctx: ctxOf(day.ctx), ix: day.ix, open: day.ix[0][0], k: Math.max(-1, Math.min(BARS - 1, st.k)), m: rp?.m ?? d.model, dm: rp?.dm ?? d.day, choice: rp?.choice ?? d.choice, plan: d.rangeTrade?.replayPlan, ref: d.rangeTrade?.replayRef };
   }
   if (asset !== 'L') {
     const T0 = v.live ? d.next.T0 : d.recent.find((r) => r.date === st.mode)?.T0;
