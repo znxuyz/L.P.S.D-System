@@ -107,7 +107,7 @@ jobs:
           ) > mops.log 2>&1 &
           ( HISTORY_PARTS=tdcc node scripts/history.ts .data ) > tdcc.log 2>&1 &
           # 美股（費城半導體、那斯達克、S&P 500、台積電 ADR、VIX）
-          ( node scripts/us-market.ts .data; node scripts/cboe-pc.ts .data ) > us.log 2>&1 &
+          ( node scripts/us-market.ts .data; node scripts/cboe-pc.ts .data; node scripts/l-bars.ts .data ) > us.log 2>&1 &
           # 個股 1 分 K（富果，金鑰在 GitHub Secret FUGLE_API_KEY）：富果資料不能公開，只存進私人儲存庫
           # （PRIVATE_DATA_TOKEN 有設才做；儲存庫名稱預設 <擁有者>/lpsd-private-data，可用 repository variable PRIVATE_DATA_REPO 改）
           (
