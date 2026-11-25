@@ -303,3 +303,19 @@
 .hr-shape { fill-opacity: 0.25; stroke-width: 2; }
 .hr-lab { fill: var(--ink-2); font-size: 11px; }
 .hr-val { font-weight: 800; font-size: 12px; }
+
+/* 今天怎麼做（預測頁最上方）：只放結論 */
+.pd-action { border-color: color-mix(in srgb, var(--accent, #67e8f9) 45%, transparent); }
+.pd-act-row { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
+.pd-act-row:first-of-type { border-top: 0; }
+.pd-act-tag { font-weight: 700; font-size: 14px; display: flex; flex-direction: column; gap: 2px; }
+.pd-act-tag small { font-weight: 400; font-size: 11px; opacity: 0.65; }
+.pd-act-main { margin: 0 0 4px; font-size: 18px; font-weight: 700; line-height: 1.5; }
+.pd-act-main small { font-size: 13px; font-weight: 400; }
+.pd-act-main.muted { opacity: 0.8; }
+.pd-act-when { margin: 0; font-size: 13px; line-height: 1.6; opacity: 0.9; }
+@media (max-width: 560px) {
+  .pd-act-row { grid-template-columns: 1fr; gap: 4px; }
+  .pd-act-tag { flex-direction: row; align-items: baseline; gap: 6px; }
+  .pd-act-main { font-size: 16px; }
+}

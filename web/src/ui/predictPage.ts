@@ -154,6 +154,63 @@ function tradesHtml(p: PaperData, book: Record<string, string>): string {
     ${rest.length ? `<details class="pd-more"><summary>更早的 ${num(rest.length)} 筆</summary><div class="pd-table-wrap"><table class="pd-table">${head}<tbody>${rest.map(row).join('')}</tbody></table></div></details>` : ''}`;
 }
 
+/**
+ * 最上方的「今天怎麼做」：只講結論——下一個交易日開盤要買什麼、賣什麼、持有多少，什麼條件出現就賣（或買）。
+ * 全部來自模擬帳戶的規則（逐段往前滾驗證過、每天事前存檔對答案），不是另外的建議。
+ */
+function actionHtml(p: PaperData | null, bt: PaperData | null, rev: RevStocks | undefined): string {
+  const tr = p?.trend ?? bt?.trend;
+  if (!p || !tr) return '';
+  const h = p.holdings;
+  const trVal = h ? h.trend.value + h.trend.cash : 0;
+  const cur = h && trVal > 0 ? h.trend.value / trVal : 0;
+  const tgt = tr.nextHold ? (tr.nextWeight ?? 1) : 0;
+  const px = h?.trend.price ?? null;
+  const ma = num(tr.ma, 0);
+  const gap = num(Math.abs(tr.dist) * 100, 1);
+  const pctW = (x: number) => `${num(x * 100, 0)}%`;
+  // 00631L
+  let lAct: string;
+  let lCls: string;
+  if (tgt === 0 && cur > 0) (lAct = '全部賣出 00631L'), (lCls = 'down');
+  else if (tgt > 0 && cur === 0) (lAct = `買進 00631L（這一半資金的 ${pctW(tgt)}）`), (lCls = 'up');
+  else if (tgt > 0 && Math.abs(tgt - cur) > 0.2) (lAct = `00631L 調整到 ${pctW(tgt)}（目前 ${pctW(cur)}）`), (lCls = tgt > cur ? 'up' : 'down');
+  else if (tgt > 0) (lAct = `續抱 00631L（約 ${pctW(cur)}）`), (lCls = 'up');
+  else (lAct = '不買，持有現金'), (lCls = 'muted');
+  const amt = tgt > 0 && trVal > 0 ? `約 ${num(trVal * tgt, 0)} 元${px ? `（${num(Math.floor((trVal * tgt) / px), 0)} 股 × ${num(px, 2)}）` : ''}` : '';
+  const lWhen =
+    tgt > 0
+      ? tr.dist >= 0
+        ? `<b>什麼時候賣</b>：加權指數收盤跌破 200 日均線 ${ma}（現在高 ${gap}%）→ 隔天開盤全部賣。`
+        : `<b>什麼時候賣</b>：斷頭抄底還剩 ${tr.bottomLeft ?? 0} 個交易日；到期時加權指數仍在 200 日均線 ${ma} 之下就隔天開盤賣（站回均線就續抱）。`
+      : `<b>什麼時候買</b>：加權指數收盤站回 200 日均線 ${ma}（現在低 ${gap}%），或大盤融資維持率跌破 140%（${tr.ratio != null ? `現在 ${num(tr.ratio, 1)}%` : '還沒公布'}，斷頭潮）→ 隔天開盤買。`;
+  // 營收選股
+  let rAct = '';
+  let rWhen = '';
+  if (rev) {
+    const buys = (rev.decisions ?? []).filter((x) => x.action === 'buy');
+    const names = (xs: Array<{ code: string; name: string }>, n = 8) => xs.slice(0, n).map((x) => `<b>${esc(x.code)}</b> ${esc(x.name)}`).join('、') + (xs.length > n ? ` 等 ${xs.length} 檔` : '');
+    if (rev.rebalanceTomorrow && rev.trendOk) {
+      const keep = new Set(rev.top.map((x) => x.code));
+      const sells = p.positions.filter((x) => !keep.has(x.code));
+      rAct = `<b class="up">換股：買進</b> ${names(buys.length ? buys : rev.top, 20)}${sells.length ? `；<b class="down">賣出</b> ${names(sells, 20)}` : ''}`;
+    } else if (rev.rebalanceTomorrow && !rev.trendOk) {
+      rAct = p.positions.length ? `<b class="down">全部賣出</b>（大盤在 200 日均線之下，換現金）` : '不買，持有現金（大盤在 200 日均線之下）';
+    } else if (p.positions.length) {
+      rAct = `續抱 ${names(p.positions, 20)}`;
+    } else rAct = '不買，持有現金';
+    rWhen = `<b>下次換股</b>：${esc(rev.nextRebalance)} 開盤${rev.trendOk ? '換成當時營收選股前 20 檔（掉出名單的賣）' : '；那天大盤若已站回 200 日均線，就買當時營收選股前 20 檔，否則繼續持有現金'}。`;
+  }
+  const btTxt = bt ? `回測（${esc(bt.start ?? '')} 起，扣成本）帳戶 <b class="${cls(bt.ret)}">${pctTxt(bt.ret, 0)}</b>、大盤 ${pctTxt(bt.benchmark, 0)}、最大回落 ${bt.maxDD != null ? pctTxt(bt.maxDD, 0) : '—'}` : '';
+  const liveTxt = p.days ? `；實盤（事前存檔，${esc(p.start ?? '')} 起 ${num(p.days)} 天）${pctTxt(p.ret, 1)}、大盤 ${pctTxt(p.benchmark, 1)}` : '';
+  return `<section class="pd-card glass pd-action" id="pd-action">
+    <header class="pd-head"><div><p class="eyebrow">今天怎麼做・依 ${esc(tr.asOf)} 收盤</p><h2>下一個交易日開盤</h2></div></header>
+    <div class="pd-act-row"><span class="pd-act-tag">00631L<small>資金一半</small></span><div><p class="pd-act-main ${lCls}">${lAct}${amt ? ` <small class="muted">${amt}</small>` : ''}</p><p class="pd-act-when">${lWhen}</p></div></div>
+    ${rev ? `<div class="pd-act-row"><span class="pd-act-tag">營收選股<small>資金一半</small></span><div><p class="pd-act-main">${rAct}</p><p class="pd-act-when">${rWhen}</p></div></div>` : ''}
+    <p class="muted pd-small">${btTxt}${liveTxt}。照模擬帳戶的規則（下方「模擬帳戶」有完整說明與每一筆交易）；盤中預測、當沖只是參考，不放錢。不構成投資建議。</p>
+  </section>`;
+}
+
 function paperHtml(p: PaperData | null, bt: PaperData | null, alt: PaperData | null = null): string {
   const pct = (v: number | null | undefined) => pctTxt(v ?? 0);
   const tr = p?.trend ?? bt?.trend;
@@ -641,6 +698,7 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
   const d = data;
   // 跳到區塊（黏在畫面上方）：最重要的放前面；舊的個股排名、當沖只是觀察用，放後面
   const jumps: Array<[string, string]> = [
+    ...(paper ? [['#pd-action', '今天怎麼做'] as [string, string]] : []),
     ...(heat?.series?.length ? [['#pd-heat', '融資熱度'] as [string, string]] : []),
     ...(paper ? [['#pd-paper', '模擬帳戶'] as [string, string]] : []),
     ...(d.revStocks ? [['#pd-rev', '營收選股'] as [string, string]] : []),
@@ -650,7 +708,7 @@ function draw(root: HTMLElement, onStock: (code: string) => void): void {
     ...(d.dayTrade ? [['#pd-day', '當沖・觀察'] as [string, string]] : []),
   ];
   const summary = `<nav class="pd-jump glass" aria-label="跳到預測頁的區塊">${jumps.map(([h, t]) => `<a href="${h}" class="pd-sum">${t}</a>`).join('')}</nav>`;
-  root.innerHTML = `<div class="pd-main">${heatHtml(heat)}${head}${summary}
+  root.innerHTML = `<div class="pd-main">${actionHtml(paper, paperBt, d.revStocks)}${heatHtml(heat)}${head}${summary}
     ${paperHtml(paper, paperBt, paperAlt)}
     ${d.revStocks ? revStocksHtml(d.revStocks) : ''}
     ${stockForecastShell()}
