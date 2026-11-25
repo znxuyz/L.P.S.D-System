@@ -658,6 +658,12 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
   const ser = lineSeries(v, f, an, choiceFor(v.choice, v.k));
   const mainSeries = ser.dir ?? ser.blend;
   const mainClose = mainSeries?.length ? mainSeries[mainSeries.length - 1][1] : last?.c;
+  // 預估最高／最低至少要包含主線本身會走到的價位（以前高低點與主線分開算，會出現「預測收盤比預估最低還低」）
+  if (mainSeries?.length) {
+    const ps = mainSeries.map((p) => p[1]);
+    f.dayHigh = Math.max(f.dayHigh, ...ps);
+    f.dayLow = Math.min(f.dayLow, ...ps);
+  }
   const actualClose = !v.live && v.ix.length === BARS ? v.ix[BARS - 1][3] : null;
   const opts = [
     `<option value="live" ${st.mode === 'live' ? 'selected' : ''} ${live.ok ? '' : 'disabled'}>今天（即時）${live.ok ? '' : `－${esc(live.why)}`}</option>`,
