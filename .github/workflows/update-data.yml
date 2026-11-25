@@ -91,6 +91,9 @@ jobs:
             # 股票名稱（含已下市）：每季抽一天抓一次，抓過就不再抓
             if [ "$HOURLY" != true ] || [ ! -f .data/names.json ]; then node scripts/names.ts .data; fi
             node scripts/candles.ts .data
+            # 今天的加權指數與 5 分 K 先抓（盤中預測回放、事前存檔要用）；歷史回補放後面
+            HISTORY_PARTS=index node scripts/history.ts .data
+            INTRADAY_MAX=5 node scripts/intraday.ts .data
             node scripts/chips.ts .data
             # 上市融資維持率：每天一次請求，回補 2020 年以後
             PART=margin node scripts/market-risk.ts .data
