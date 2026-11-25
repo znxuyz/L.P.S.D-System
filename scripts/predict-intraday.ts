@@ -385,6 +385,26 @@ const lRaw = read<Array<[string, number, number, number, number, number]>>(join(
 const lBars = lRaw.map(([date, open, high, low, close, volume]) => ({ date, open, high, low, close, volume }));
 const lAdj = adjustForSplits(lBars, detectSplits(lBars, exDays), '9999-12-31');
 const lClose = new Map(lAdj.map((b) => [b.date, b.close]));
+/** 00631L 盤中實價（Yahoo，lbars/<日期>.json）切成跟加權指數同樣的 K 棒；沒有那一根就是 null。 */
+function lRealBars(date: string): Array<[number, number, number, number] | null> | null {
+  let j: { tf: number; bars: Array<[string, number, number, number, number, number]> };
+  try {
+    j = JSON.parse(readFileSync(join(dir, 'lbars', `${date}.json`), 'utf8'));
+  } catch {
+    return null;
+  }
+  if (TF % j.tf !== 0) return null;
+  const n = 270 / TF;
+  const out: Array<[number, number, number, number] | null> = Array.from({ length: n }, () => null);
+  for (const [hm, o, h, l, c] of j.bars) {
+    const m = (Number(hm.slice(0, 2)) - 9) * 60 + Number(hm.slice(3, 5));
+    const k = Math.floor(m / TF);
+    if (k < 0 || k >= n) continue;
+    const b = out[k];
+    out[k] = b ? [b[0], Math.max(b[1], h), Math.min(b[2], l), c] : [o, h, l, c];
+  }
+  return out.some((b) => b) ? out : null;
+}
 /** 00631L 當天真正的開高低收（回放時用實價校正換算）。 */
 const lBar = new Map(lAdj.map((b) => [b.date, [b.open, b.high, b.low, b.close] as [number, number, number, number]]));
 /** 00631L 對加權指數的槓桿倍數：用第 end 天（不含）以前 250 個交易日的日報酬估（回測時不偷看之後的資料）。 */
@@ -824,7 +844,7 @@ writeFileSync(
         : 'none',
     backtest: { from: days[FIRST]?.date, to: days.at(-1)!.date, days: days.length - FIRST, byOrigin },
     next: { after: lastDate, P0: taiex[taiex.length - 1][4], L0: lClose.get(lastDate) ?? null, T0: txClose(lastDate), ctx: ctxOut(dailyCtx(taiex.length)!) },
-    recent: days.slice(-10).map((d) => ({ date: d.date, P0: d.P0, L0: prevL(d.date), Lday: lBar.get(d.date) ?? null, T0: prevT(d.date), ix: d.ix, ctx: ctxOut(d.ctx) })),
+    recent: days.slice(-10).map((d) => ({ date: d.date, P0: d.P0, L0: prevL(d.date), Lday: lBar.get(d.date) ?? null, Lix: lRealBars(d.date), T0: prevT(d.date), ix: d.ix, ctx: ctxOut(d.ctx) })),
     // 各種預測線的樣本外成績（每根收盤誤差 RMSE、收盤方向命中率、最接近實際的比例）
     lines: summarizeLines(lineAcc),
     // 分期間：hold＝調整模型時從沒看過的期間（公正）、dev＝開發期間（看過，可能偏樂觀）
