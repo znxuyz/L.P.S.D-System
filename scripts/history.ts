@@ -441,7 +441,8 @@ async function taiexHistory(dir: string): Promise<void> {
   for (let d = new Date(`${START.slice(0, 7)}-01T00:00:00Z`); d <= now; d.setUTCMonth(d.getUTCMonth() + 1)) months.push(iso(d).slice(0, 7));
   const have = new Set([...rows.keys()].map((d) => d.slice(0, 7)));
   // 沒抓過的月份，加上這個月與上個月（可能還沒收完）
-  const todo = months.filter((m, i) => !have.has(m) || i >= months.length - 2);
+  // 最新的先抓（這個月、上個月），再往回補：回補量大時才不會輪不到今天
+  const todo = months.filter((m, i) => !have.has(m) || i >= months.length - 2).reverse();
   for (const m of todo) {
     if (timeUp()) break;
     try {
