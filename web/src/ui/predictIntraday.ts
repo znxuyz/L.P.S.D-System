@@ -105,7 +105,12 @@ const etfTick = (p: number) => (p < 50 ? 0.01 : 0.05);
 const convOf = (v: View, d: IntradayData) => {
   if (v.L0) {
     const [lo, hi] = limitBand(v.L0, 0.2, etfTick(v.L0));
-    return (x: number) => Math.min(hi, Math.max(lo, toLeveraged(x, v.P0, v.L0!, d.beta)));
+    // 即時：用 00631L 實際成交價對齊「現在」那一點（整條線乘同一個比例），預測從真實價格出發
+    const last = v.ix.length ? v.ix[v.ix.length - 1][3] : null;
+    const raw = last ? toLeveraged(last, v.P0, v.L0, d.beta) : 0;
+    const k = v.live && v.Lnow && raw > 0 ? v.Lnow / raw : 1;
+    // 昨收一定是 00631L 真正的昨收（不乘比例）
+    return (x: number) => (x === v.P0 ? v.L0! : Math.min(hi, Math.max(lo, k * toLeveraged(x, v.P0, v.L0!, d.beta))));
   }
   if (v.T0) {
     const [lo, hi] = limitBand(v.T0, 0.1, 1);
@@ -143,6 +148,8 @@ interface View {
   L0: number | null;
   /** 看台指期時：前一天臺指期收盤（價位＝指數 × T0 ÷ P0）。 */
   T0?: number | null;
+  /** 即時：00631L 自己的最新成交價（有的話用它校正換算，00631L 常跟「加權指數 × 倍數」差好幾 %）。 */
+  Lnow?: number | null;
   ctx: DailyCtx;
   /** 已經知道的 K 棒（回放是整天）。 */
   ix: Bar[];
@@ -572,7 +579,7 @@ export interface IntradayState {
   showLevels: boolean;
 }
 
-export function intradayHtml(d: IntradayData | null | undefined, st: IntradayState, live: { open: number | null; bars: Bar[]; ok: boolean; why: string }, lib: AnalogDay[] | null): string {
+export function intradayHtml(d: IntradayData | null | undefined, st: IntradayState, live: { open: number | null; bars: Bar[]; ok: boolean; why: string; lNow?: number | null }, lib: AnalogDay[] | null): string {
   const tfBtns = `<div class="pd-tf pd-intra-tf" role="group" aria-label="K 線週期">${([5, 3, 1] as const).map((t) => `<button type="button" data-intra-tf="${t}" class="${!st.daily && st.tf === t ? 'is-on' : ''}">${t} 分 K</button>`).join('')}<button type="button" data-intra-daily="1" class="${st.daily ? 'is-on' : ''}">日 K</button></div>`;
   const asset: IntraAsset = st.asset ?? 'L';
   const NAME = ASSET_NAME[asset];
@@ -590,7 +597,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
   let v: View;
   if (st.mode === 'live' && live.ok) {
     const k = Math.min(BARS - 1, live.bars.length);
-    v = { live: true, P0: d.next.P0, L0: d.next.L0, ctx: ctxOf(d.next.ctx), ix: live.bars, open: live.open, k: live.open == null ? -1 : k, m: d.model, dm: d.day, choice: d.choice, plan: d.rangeTrade?.plan, ref: d.rangeTrade?.refPlan };
+    v = { live: true, P0: d.next.P0, L0: d.next.L0, Lnow: live.lNow ?? null, ctx: ctxOf(d.next.ctx), ix: live.bars, open: live.open, k: live.open == null ? -1 : k, m: d.model, dm: d.day, choice: d.choice, plan: d.rangeTrade?.plan, ref: d.rangeTrade?.refPlan };
   } else {
     const day = d.recent.find((r) => r.date === st.mode) ?? d.recent[d.recent.length - 1];
     st.mode = day.date;
@@ -654,7 +661,7 @@ export function intradayHtml(d: IntradayData | null | undefined, st: IntradaySta
     </div>
     <dl class="pd-stats pd-intra-stats">
       <div><dt>預測時間</dt><dd class="num">${kLabel(v.k)}</dd></div>
-      <div><dt>${now == null ? '預測開盤' : '現在'}</dt><dd class="num">${num(L(now ?? f.open), 2)}${now == null ? ` <small class="${cls(f.open - v.P0)}">${pctTxt(L(f.open) / L(v.P0) - 1)}</small>` : ''}</dd></div>
+      <div><dt>${now == null ? '預測開盤' : '現在'}</dt><dd class="num">${num(L(now ?? f.open), 2)}${now == null ? ` <small class="${cls(f.open - v.P0)}">${pctTxt(L(f.open) / L(v.P0) - 1)}</small>` : v.live && v.Lnow ? ' <small class="muted">00631L 實價；預測線從這裡出發</small>' : ''}</dd></div>
       <div><dt>${v.k >= 0 ? '預測收盤<small class="muted">（開盤後方向沒把握，回測約 52～57%）</small>' : '預測收盤（方向預測）'}</dt><dd class="num ${v.k >= 0 ? '' : cls((mainClose ?? v.P0) - v.P0)}">${mainClose ? num(L(mainClose), 2) : '—'} <small>${mainClose ? pctTxt(L(mainClose) / L(v.P0) - 1) : ''}</small></dd></div>
       <div><dt>收盤約 80% 區間</dt><dd class="num">${last ? `${num(L(last.lo), 2)}～${num(L(last.hi), 2)}` : '—'}</dd></div>
       <div><dt>預估今日最高／最低</dt><dd class="num"><span class="up">${num(L(f.dayHigh), 2)}</span>／<span class="down">${num(L(f.dayLow), 2)}</span></dd></div>

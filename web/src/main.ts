@@ -197,11 +197,28 @@ class App {
     if (snap) this.onSnapshot(snap);
   }
 
+  /** 即時行情的個股最新價（快照裡有就用；沒有就每 30 秒查一次）。預測頁用 00631L 校正換算。 */
+  private lastQuotes: Record<string, { price: number }> = {};
+  private liveQuoteOf(code: string): number | null {
+    if (!this.live) return null;
+    const q = this.lastQuotes[code];
+    if (q?.price) return q.price;
+    const cached = this.extQuotes.get(code);
+    if (this.provider.extraQuote && (!cached || Date.now() - cached.at > 30_000)) {
+      this.extQuotes.set(code, { quote: cached?.quote ?? null, at: Date.now() });
+      void this.provider.extraQuote(code, 'tse').then((quote) => {
+        if (quote) this.extQuotes.set(code, { quote, at: Date.now() });
+      });
+    }
+    return cached?.quote?.price ?? null;
+  }
+
   /** 即時行情的加權指數走勢（預測頁的 5 分 K 預測用）。 */
   private lastIndex: IndexPoint[] | null = null;
 
   private onSnapshot(snap: MarketSnapshot): void {
     this.lastIndex = snap.index.series;
+    this.lastQuotes = snap.quotes as Record<string, { price: number }>;
     if (laplaceBusy()) {
       this.pendingSnap = snap;
       return;
@@ -357,7 +374,7 @@ class App {
       /* 存不了就算了 */
     }
     if (page === 'learn') renderLearnPage($('#page-learn'));
-    if (page === 'predict') renderPredictPage($('#page-predict'), (code) => this.analyze(code), () => (this.live ? (this.lastIndex ?? null) : null));
+    if (page === 'predict') renderPredictPage($('#page-predict'), (code) => this.analyze(code), () => (this.live ? (this.lastIndex ?? null) : null), () => this.liveQuoteOf('00631L'));
     if (page === 'sim') this.sim.show();
     else {
       this.beforeSim = page;
