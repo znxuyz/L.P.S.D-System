@@ -1,0 +1,34 @@
+name: Notify test
+
+# 手動測試推播：抓網站上目前的資料（模擬帳戶、預測、熱度）推一次「今天怎麼做」，不受時段與「今天推過了」限制。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 抓網站上的資料
+        run: |
+          mkdir -p .site
+          for f in paper.json paper-backtest.json predict.json heat-index.json; do
+            curl -sfL "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/$f" -o ".site/$f" || echo "抓不到 $f"
+          done
+          ls -la .site
+      - name: 推播
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          LINE_CHANNEL_TOKEN: ${{ secrets.LINE_CHANNEL_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: node scripts/notify.ts .site
