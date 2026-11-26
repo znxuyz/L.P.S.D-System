@@ -103,6 +103,7 @@ jobs:
           path: web/dist
       # 每日推播「今天怎麼做」：每個交易日只推一次（依模擬帳戶的資料日期），台北 21:30（融資維持率公布後）到隔天 08:45 之間
       - name: 推播時間與日期
+        continue-on-error: true
         id: nt
         run: |
           asof=$(node -e "try{const p=require('./.data/paper.json');console.log((p.trend&&p.trend.asOf)||p.asOf||'')}catch{console.log('')}")
@@ -110,6 +111,7 @@ jobs:
           ok=false; if [ -n "$asof" ] && { [ "$hm" -ge 2130 ] || [ "$hm" -lt 845 ]; }; then ok=true; fi
           echo "asof=$asof" >> "$GITHUB_OUTPUT"; echo "ok=$ok" >> "$GITHUB_OUTPUT"; echo "資料日期 $asof，台北 $hm，推播時段 $ok"
       - name: 這個交易日推過了嗎
+        continue-on-error: true
         if: steps.nt.outputs.ok == 'true'
         id: ntc
         uses: actions/cache/restore@v4
@@ -117,6 +119,7 @@ jobs:
           path: .notify-sent
           key: notify-${{ steps.nt.outputs.asof }}
       - name: 推播
+        continue-on-error: true
         if: steps.nt.outputs.ok == 'true' && steps.ntc.outputs.cache-hit != 'true'
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
@@ -125,8 +128,9 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           LINE_CHANNEL_TOKEN: ${{ secrets.LINE_CHANNEL_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
-        run: node scripts/notify.ts .data; if [ $? -eq 0 ]; then echo sent > .notify-sent; fi; true
+        run: if node scripts/notify.ts .data; then echo sent > .notify-sent; fi
       - name: 記錄已推播
+        continue-on-error: true
         if: steps.nt.outputs.ok == 'true' && steps.ntc.outputs.cache-hit != 'true' && hashFiles('.notify-sent') != ''
         uses: actions/cache/save@v4
         with:
