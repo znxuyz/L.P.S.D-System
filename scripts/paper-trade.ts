@@ -127,6 +127,7 @@ const equityRows: Array<[string, number, number, number, number, number]> = [];
  * 整段 +166% vs +165% 打平 → 沒通過保留期檢驗，不採用；部署時另外輸出 paper-backtest-2t.json 繼續對照。
  */
 const TRANCHES = Math.max(1, Number(process.env.REV_TRANCHES ?? 1));
+const REV_MODE = process.env.REV_MODE ?? 'rev';
 type Pos = { code: string; shares: number; cost: number; paid: number };
 const tranches: Array<{ cash: number; pos: Pos[]; since: number | null }> = Array.from({ length: TRANCHES }, () => ({ cash: (CAPITAL * W.stocks) / TRANCHES, pos: [], since: null }));
 let rebCount = 0;
@@ -213,7 +214,10 @@ if (startIdx > 0) {
     // ---- 營收選股：換股日開盤，照前一天收盤後存檔的名單換股（大盤跌破 200 日均線 → 全部現金）
     const rs = dArch?.revStocks;
     if (rs && isRebalanceDate(D, prev)) {
-      const target = rs.trendOk ? rs.top.filter((c) => kOf(c).get(D)?.[0]).slice(0, REV_N) : [];
+      // REV_MODE（實驗用）：rev＝營收選股 20 檔（正式）；etf＝整個部位買 0050；mix＝0050 一半＋營收前 10 檔
+      const picks = rs.top.filter((c) => kOf(c).get(D)?.[0]);
+      const etf = kOf('0050').get(D)?.[0] ? ['0050'] : [];
+      const target = !rs.trendOk ? [] : REV_MODE === 'etf' ? etf : REV_MODE === 'mix' ? [...etf, ...picks.slice(0, 10)] : picks.slice(0, REV_N);
       const keep = new Set(target);
       const turn = rebCount++ % TRANCHES;
       tranches.forEach((t, ti) => {
@@ -223,7 +227,7 @@ if (startIdx > 0) {
         for (const p of t.pos) {
           if (keep.has(p.code)) continue;
           const px = kOf(p.code).get(D)?.[0] ?? [...kOf(p.code).entries()].filter(([d]) => d < D).at(-1)?.[1][3] ?? p.cost;
-          const value = sellValue(px, p.shares, STOCK_TAX);
+          const value = sellValue(px, p.shares, p.code.startsWith('00') ? ETF_TAX : STOCK_TAX);
           t.cash += value;
           trades.push({ date: D, book: 'stocks', code: p.code, name: names[p.code] ?? '', side: 'sell', price: r2(px), pnl: r2(value - p.paid), note: (rs.trendOk ? '掉出營收選股名單，開盤賣' : '大盤在 200 日均線之下，換現金') + tag });
         }
@@ -232,10 +236,13 @@ if (startIdx > 0) {
         const fresh = target.filter((c) => !have.has(c));
         const pos = [...kept];
         if (fresh.length) {
-          const each = t.cash / fresh.length;
+          const cash0 = t.cash;
+          const each = cash0 / fresh.length;
+          // mix：0050 拿這一批現金的一半，其他平分另一半
+          const budgetOf = (code: string) => (REV_MODE === 'mix' && fresh.includes('0050') && fresh.length > 1 ? (code === '0050' ? cash0 / 2 : cash0 / 2 / (fresh.length - 1)) : each);
           for (const code of fresh) {
             const px = kOf(code).get(D)![0];
-            const shares = maxShares(px, each);
+            const shares = maxShares(px, Math.min(t.cash, budgetOf(code)));
             if (!shares) continue;
             const paid = buyCost(px, shares);
             t.cash -= paid;
