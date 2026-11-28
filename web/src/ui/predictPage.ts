@@ -207,7 +207,7 @@ function actionHtml(p: PaperData | null, bt: PaperData | null, rev: RevStocks | 
     <header class="pd-head"><div><p class="eyebrow">今天怎麼做・依 ${esc(tr.asOf)} 收盤</p><h2>下一個交易日開盤</h2></div></header>
     <div class="pd-act-row"><span class="pd-act-tag">00631L<small>資金一半</small></span><div><p class="pd-act-main ${lCls}">${lAct}${amt ? ` <small class="muted">${amt}</small>` : ''}</p><p class="pd-act-when">${lWhen}</p></div></div>
     ${rev ? `<div class="pd-act-row"><span class="pd-act-tag">營收選股<small>資金一半</small></span><div><p class="pd-act-main">${rAct}</p><p class="pd-act-when">${rWhen}</p></div></div>` : ''}
-    <p class="muted pd-small">${btTxt}${liveTxt}。照模擬帳戶的規則（下方「模擬帳戶」有完整說明與每一筆交易）；盤中預測、當沖只是參考，不放錢。不構成投資建議。</p>
+    <p class="muted pd-small">${btTxt}${liveTxt}。照模擬帳戶的規則（下方「模擬帳戶」有完整說明與每一筆交易）；盤中預測、當沖只是參考，不放錢。<b>要誠實說</b>：趨勢部位在從沒用過的 2010～2019 閉眼測試<b>沒有通過</b>（年化 +1.0%，同期加權指數 +4.1%；盤整行情會反覆進出），2020 年後的好成績主要來自大趨勢行情。不構成投資建議。</p>
   </section>`;
 }
 
